@@ -1,0 +1,85 @@
+name: tests
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+env:
+  FORCE_COLOR: 1
+
+jobs:
+  ruff:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - axio
+          - axio-tools-docker
+          - axio-tools-local
+          - axio-tools-mcp
+          - axio-transport-codex
+          - axio-transport-nebius
+          - axio-transport-openai
+          - axio-tui
+          - axio-tui-guards
+          - axio-tui-rag
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen
+      - run: uv run ruff check
+        working-directory: ${{ matrix.package }}
+      - run: uv run ruff format --check
+        working-directory: ${{ matrix.package }}
+
+  mypy:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - axio
+          - axio-tools-docker
+          - axio-tools-local
+          - axio-tools-mcp
+          - axio-transport-codex
+          - axio-transport-nebius
+          - axio-transport-openai
+          - axio-tui
+          - axio-tui-guards
+          - axio-tui-rag
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen
+      - run: uv run mypy .
+        working-directory: ${{ matrix.package }}
+
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+        package:
+          - { name: axio,                   cov: axio }
+          - { name: axio-tools-docker,      cov: axio_tools_docker }
+          - { name: axio-tools-local,       cov: axio_tools_local }
+          - { name: axio-tools-mcp,         cov: axio_tools_mcp }
+          - { name: axio-transport-codex,   cov: axio_transport_codex }
+          - { name: axio-transport-nebius,  cov: axio_transport_nebius }
+          - { name: axio-transport-openai,  cov: axio_transport_openai }
+          - { name: axio-tui,               cov: axio_tui }
+          - { name: axio-tui-guards,        cov: axio_tui_guards }
+          - { name: axio-tui-rag,           cov: axio_tui_rag }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --frozen
+      - run: uv run pytest -vv --cov=${{ matrix.package.cov }} --cov-report=term-missing
+        working-directory: ${{ matrix.package.name }}

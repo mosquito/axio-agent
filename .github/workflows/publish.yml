@@ -1,0 +1,50 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - '*/v*'
+
+env:
+  FORCE_COLOR: 1
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Extract package and version from tag
+        run: |
+          PKG="${GITHUB_REF_NAME%/v*}"
+          VER="${GITHUB_REF_NAME#*/v}"
+          echo "PKG=$PKG" >> $GITHUB_ENV
+          echo "VER=$VER" >> $GITHUB_ENV
+
+      - name: Set version from tag
+        working-directory: ${{ env.PKG }}
+        run: uv version "${{ env.VER }}"
+
+      - name: Build package
+        working-directory: ${{ env.PKG }}
+        run: uv build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: ${{ env.PKG }}/dist/
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: build
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
