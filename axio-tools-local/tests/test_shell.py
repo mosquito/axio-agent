@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-
-import pytest
+from typing import Any
 
 from axio_tools_local.shell import Shell
 
 
-async def sh(command: str, **kwargs: object) -> str:
+async def sh(command: str, **kwargs: Any) -> str:
     return await Shell(command=command, **kwargs)()
 
 

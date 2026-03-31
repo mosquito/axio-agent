@@ -8,6 +8,7 @@ All line numbers are 1-indexed, both inclusive:
 from __future__ import annotations
 
 import os
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -16,7 +17,7 @@ from axio_tools_local.patch_file import PatchFile
 
 
 @pytest.fixture()
-def tmp_cwd(tmp_path: Path) -> Path:
+def tmp_cwd(tmp_path: Path) -> Generator[Path, None, None]:
     old = os.getcwd()
     os.chdir(tmp_path)
     yield tmp_path

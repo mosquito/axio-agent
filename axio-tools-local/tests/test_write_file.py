@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 import stat
+from collections.abc import Generator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -12,14 +14,14 @@ from axio_tools_local.write_file import WriteFile
 
 
 @pytest.fixture()
-def tmp_cwd(tmp_path: Path) -> Path:
+def tmp_cwd(tmp_path: Path) -> Generator[Path, None, None]:
     old = os.getcwd()
     os.chdir(tmp_path)
     yield tmp_path
     os.chdir(old)
 
 
-async def write(filename: str, content: str, **kwargs: object) -> str:
+async def write(filename: str, content: str, **kwargs: Any) -> str:
     return await WriteFile(file_path=filename, content=content, **kwargs)()
 
 

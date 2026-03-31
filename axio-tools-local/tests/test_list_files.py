@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -11,7 +12,7 @@ from axio_tools_local.list_files import ListFiles
 
 
 @pytest.fixture()
-def tmp_cwd(tmp_path: Path) -> Path:
+def tmp_cwd(tmp_path: Path) -> Generator[Path, None, None]:
     old = os.getcwd()
     os.chdir(tmp_path)
     yield tmp_path

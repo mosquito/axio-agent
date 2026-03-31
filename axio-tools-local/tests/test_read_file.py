@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Generator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -11,14 +13,14 @@ from axio_tools_local.read_file import ReadFile
 
 
 @pytest.fixture()
-def tmp_cwd(tmp_path: Path) -> Path:
+def tmp_cwd(tmp_path: Path) -> Generator[Path, None, None]:
     old = os.getcwd()
     os.chdir(tmp_path)
     yield tmp_path
     os.chdir(old)
 
 
-async def read(tmp_cwd: Path, filename: str, **kwargs: object) -> str:
+async def read(tmp_cwd: Path, filename: str, **kwargs: Any) -> str:
     return await ReadFile(filename=filename, **kwargs)()
 
 

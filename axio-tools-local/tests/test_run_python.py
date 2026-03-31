@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from axio_tools_local.run_python import RunPython
 
 
-async def run(code: str, **kwargs: object) -> str:
+async def run(code: str, **kwargs: Any) -> str:
     return await RunPython(code=code, **kwargs)()
 
 
