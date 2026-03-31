@@ -2,25 +2,16 @@ PACKAGES := axio axio-tools-docker axio-tools-local axio-tools-mcp \
             axio-transport-codex axio-transport-nebius axio-transport-openai \
             axio-tui axio-tui-guards axio-tui-rag
 
-.PHONY: lint ruff mypy pytest $(PACKAGES)
+.PHONY: all lint pytest $(PACKAGES)
 
-lint: ruff mypy
+all: $(PACKAGES)
 
-ruff:
-	@for pkg in $(PACKAGES); do \
-		echo "==> ruff $$pkg"; \
-		uv run --directory $$pkg ruff check && \
-		uv run --directory $$pkg ruff format --check || exit 1; \
-	done
+$(PACKAGES):
+	@echo "==> $@"
+	@uv run --directory $@ ruff check
+	@uv run --directory $@ ruff format --check
+	@uv run --directory $@ mypy .
+	@uv run --directory $@ pytest -q
 
-mypy:
-	@for pkg in $(PACKAGES); do \
-		echo "==> mypy $$pkg"; \
-		uv run --directory $$pkg mypy . || exit 1; \
-	done
-
-pytest:
-	@for pkg in $(PACKAGES); do \
-		echo "==> pytest $$pkg"; \
-		uv run --directory $$pkg pytest -vv || exit 1; \
-	done
+lint pytest:
+	@$(MAKE) -j$(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu) $(PACKAGES)
