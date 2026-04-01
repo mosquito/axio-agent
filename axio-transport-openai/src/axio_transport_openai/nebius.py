@@ -82,5 +82,3 @@ class NebiusTransport(OpenAITransport):
             input_cost=float(pricing.get("prompt", 0)) * 1_000_000,
             output_cost=float(pricing.get("completion", 0)) * 1_000_000,
         )
-
-

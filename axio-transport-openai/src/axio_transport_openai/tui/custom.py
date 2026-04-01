@@ -271,9 +271,7 @@ class CustomHubScreen(ModalScreen["dict[str, str] | None"]):
         self._changed = False
 
     @classmethod
-    def load_config(
-        cls, session: aiohttp.ClientSession | None = None
-    ) -> list[OpenAICompatibleTransport]:
+    def load_config(cls, session: aiohttp.ClientSession | None = None) -> list[OpenAICompatibleTransport]:
         """Read provider list from CONFIG_PATH; returns [] on any error."""
         if not cls.CONFIG_PATH.exists():
             return []

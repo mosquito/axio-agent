@@ -10,7 +10,6 @@ except ImportError as _e:
     import warnings
 
     warnings.warn(
-        f"axio-transport-codex TUI screens are unavailable: {_e}. "
-        "Install textual: pip install axio[tui]",
+        f"axio-transport-codex TUI screens are unavailable: {_e}. Install textual: pip install axio[tui]",
         stacklevel=1,
     )

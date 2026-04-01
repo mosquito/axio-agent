@@ -614,5 +614,3 @@ class OpenAITransport(CompletionTransport, EmbeddingTransport):
             models=models,
             session=session,
         )
-
-
