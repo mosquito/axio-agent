@@ -46,6 +46,7 @@ jobs:
     environment: pypi
     permissions:
       id-token: write
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -66,3 +67,8 @@ jobs:
           path: dist/
 
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Upload wheels to GitHub Release
+        run: gh release upload "$GITHUB_REF_NAME" dist/*
+        env:
+          GH_TOKEN: ${{ github.token }}
