@@ -386,7 +386,7 @@ async def test_text_streaming(
 def test_default_max_tokens() -> None:
     t = NebiusTransport()
     payload = t.build_payload([], [], "You are helpful.")
-    assert payload["max_tokens"] == t.model.max_output_tokens
+    assert payload["max_completion_tokens"] == t.model.max_output_tokens
     assert payload["model"] == "deepseek-ai/DeepSeek-V3-0324"
 
 
@@ -397,7 +397,7 @@ def test_max_tokens_when_spec_provided() -> None:
         models=ModelRegistry([spec]),
     )
     payload = t.build_payload([], [], "")
-    assert payload["max_tokens"] == 8_192
+    assert payload["max_completion_tokens"] == 8_192
 
 
 # ---------------------------------------------------------------------------

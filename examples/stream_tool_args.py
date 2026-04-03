@@ -2,7 +2,7 @@
 with partial JSON decoding — field values appear as they stream in.
 
 Run:
-    uv run --extra examples python examples/stream_tool_args.py
+    uv run --extra examples python examples/stream_tool_args.py "your prompt here"
 
 Requires OPENAI_API_KEY in env.
 """
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
 import sys
 
 import aiohttp
@@ -30,7 +31,7 @@ from axio.events import (
 from axio.tool import Tool, ToolHandler
 from axio_transport_openai import OPENAI_MODELS, OpenAITransport
 
-# ── Tools with chunky arguments to make streaming visible ────────────
+# ── Tools ────────────────────────────────────────────────────────────
 
 
 class EditFile(ToolHandler):
@@ -41,6 +42,11 @@ class EditFile(ToolHandler):
     new_string: str
 
     async def __call__(self) -> str:
+        p = Path(self.file_path)
+        text = p.read_text()
+        if self.old_string not in text:
+            raise ValueError(f"old_string not found in {self.file_path}")
+        p.write_text(text.replace(self.old_string, self.new_string, 1))
         return f"Replaced content in {self.file_path}"
 
 
@@ -51,12 +57,25 @@ class WriteFile(ToolHandler):
     content: str
 
     async def __call__(self) -> str:
+        p = Path(self.file_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(self.content)
         return f"Wrote {len(self.content)} chars to {self.file_path}"
+
+
+class ReadFile(ToolHandler):
+    """Read content of a file."""
+
+    file_path: str
+
+    async def __call__(self) -> str:
+        return Path(self.file_path).read_text()
 
 
 TOOLS = [
     Tool(name="edit_file", description="Replace old_string with new_string in a file.", handler=EditFile),
     Tool(name="write_file", description="Write content to a file.", handler=WriteFile),
+    Tool(name="read_file", description="Read content of a file.", handler=ReadFile),
 ]
 
 # ── ANSI helpers ─────────────────────────────────────────────────────
@@ -68,7 +87,6 @@ GREEN = "\033[32m"
 YELLOW = "\033[33m"
 RED = "\033[31m"
 RESET = "\033[0m"
-CLEAR_LINE = "\033[2K\r"
 
 # ── Partial JSON tracker ────────────────────────────────────────────
 
@@ -101,14 +119,12 @@ class ToolArgTracker:
                 sys.stdout.write(f"\n  {YELLOW}{key}{RESET}: {DIM}")
                 if "\n" in new_text:
                     self.seen_newline.add(key)
-                    # Reprint from newline: "label: \nfirst_line\n..."
                     sys.stdout.write("\n" + value_str)
                 else:
                     sys.stdout.write(value_str)
             elif new_text:
                 if key not in self.seen_newline and "\n" in new_text:
                     self.seen_newline.add(key)
-                    # First newline arrived — reprint entire value from new line
                     sys.stdout.write(f"\r\033[2K  {YELLOW}{key}{RESET}:{DIM}\n{value_str}")
                 else:
                     sys.stdout.write(new_text)
@@ -121,18 +137,14 @@ class ToolArgTracker:
 
 # ── Main ─────────────────────────────────────────────────────────────
 
-DEFAULT_PROMPT = (
-    "Write a small Python hello-world web server to hello.py using write_file, "
-    "then use edit_file to change the greeting from 'Hello' to 'Howdy'."
-)
-
 
 async def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="Stream tool call arguments with partial JSON decoding")
-    parser.add_argument("prompt", nargs="?", default=DEFAULT_PROMPT, help="prompt to send to the model")
+    parser.add_argument("prompt", help="prompt to send to the model")
     parser.add_argument("--model", default="gpt-5.4", help="model name (default: gpt-5.4)")
+    parser.add_argument("--temperature", type=float, default=None, help="sampling temperature")
     args = parser.parse_args()
 
     api_key = os.environ.get("OPENAI_API_KEY", "")
@@ -140,14 +152,24 @@ async def main() -> None:
         print("Set OPENAI_API_KEY", file=sys.stderr)
         sys.exit(1)
 
-    model_name = args.model
-
     async with aiohttp.ClientSession() as session:
         transport = OpenAITransport(
             api_key=api_key,
-            model=OPENAI_MODELS[model_name],
+            model=OPENAI_MODELS[args.model],
             session=session,
         )
+
+        # Inject temperature into payload if requested
+        if args.temperature is not None:
+            _orig_build = transport.build_payload
+
+            def build_payload_with_temp(messages, tools, system):
+                payload = _orig_build(messages, tools, system)
+                payload["temperature"] = args.temperature
+                return payload
+
+            transport.build_payload = build_payload_with_temp  # type: ignore[method-assign]
+
         agent = Agent(
             system="You are a coding assistant. Use the provided tools.",
             tools=TOOLS,
