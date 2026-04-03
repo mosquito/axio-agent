@@ -1,16 +1,18 @@
 """Minimal CLI demonstrating incremental streaming of tool call arguments
 with partial JSON decoding — field values appear as they stream in.
 
+Auto-detects transport from available API keys (OPENAI_API_KEY, NEBIUS_API_KEY,
+OPENROUTER_API_KEY), or use --transport to pick explicitly.
+
 Run:
     uv run --extra examples python examples/stream_tool_args.py "your prompt here"
-
-Requires OPENAI_API_KEY in env.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+from importlib.metadata import entry_points
 from pathlib import Path
 import sys
 
@@ -29,7 +31,6 @@ from axio.events import (
     ToolUseStart,
 )
 from axio.tool import Tool, ToolHandler
-from axio_transport_openai import OPENAI_MODELS, OpenAITransport
 
 # ── Tools ────────────────────────────────────────────────────────────
 
@@ -135,6 +136,51 @@ class ToolArgTracker:
         sys.stdout.flush()
 
 
+# ── Transport auto-detection ─────────────────────────────────────────
+
+
+def _discover_transports() -> dict[str, type]:
+    """Load transport classes from axio.transport entry points."""
+    result = {}
+    for ep in entry_points(group="axio.transport"):
+        try:
+            result[ep.name] = ep.load()
+        except Exception:
+            pass
+    return result
+
+
+def _select_transport(name: str | None) -> tuple[type, str]:
+    """Return (transport_class, api_key) based on --transport or env auto-detection."""
+    available = _discover_transports()
+    if name:
+        if name not in available:
+            print(f"Unknown transport {name!r}. Available: {', '.join(sorted(available))}", file=sys.stderr)
+            sys.exit(1)
+        cls = available[name]
+        meta = getattr(cls, "META", None)
+        env_var = meta.api_key_env if meta else ""
+        api_key = os.environ.get(env_var, "") if env_var else ""
+        if not api_key:
+            print(f"Set {env_var} for transport {name!r}", file=sys.stderr)
+            sys.exit(1)
+        return cls, api_key
+
+    for tname, cls in available.items():
+        meta = getattr(cls, "META", None)
+        if meta and meta.api_key_env:
+            api_key = os.environ.get(meta.api_key_env, "")
+            if api_key:
+                return cls, api_key
+
+    print("No API key found. Set one of:", file=sys.stderr)
+    for tname, cls in available.items():
+        meta = getattr(cls, "META", None)
+        if meta and meta.api_key_env:
+            print(f"  {meta.api_key_env}  ({meta.label})", file=sys.stderr)
+    sys.exit(1)
+
+
 # ── Main ─────────────────────────────────────────────────────────────
 
 
@@ -143,21 +189,18 @@ async def main() -> None:
 
     parser = argparse.ArgumentParser(description="Stream tool call arguments with partial JSON decoding")
     parser.add_argument("prompt", help="prompt to send to the model")
-    parser.add_argument("--model", default="gpt-5.4", help="model name (default: gpt-5.4)")
+    parser.add_argument("--transport", default=None, help="transport name (auto-detected from API keys if omitted)")
+    parser.add_argument("--model", default=None, help="model name (uses transport default if omitted)")
     parser.add_argument("--temperature", type=float, default=None, help="sampling temperature")
     args = parser.parse_args()
 
-    api_key = os.environ.get("OPENAI_API_KEY", "")
-    if not api_key:
-        print("Set OPENAI_API_KEY", file=sys.stderr)
-        sys.exit(1)
+    transport_cls, api_key = _select_transport(args.transport)
 
     async with aiohttp.ClientSession() as session:
-        transport = OpenAITransport(
-            api_key=api_key,
-            model=OPENAI_MODELS[args.model],
-            session=session,
-        )
+        transport = transport_cls(api_key=api_key, session=session)
+
+        if args.model:
+            transport.model = transport.models[args.model]
 
         # Inject temperature into payload if requested
         if args.temperature is not None:
