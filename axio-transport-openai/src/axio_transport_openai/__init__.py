@@ -348,7 +348,7 @@ class OpenAITransport(CompletionTransport, EmbeddingTransport):
             "messages": _convert_messages(messages, system),
             "stream": True,
             "stream_options": {"include_usage": True},
-            "max_tokens": self.model.max_output_tokens,
+            "max_completion_tokens": self.model.max_output_tokens,
         }
 
         if tools:

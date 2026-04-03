@@ -10,6 +10,7 @@ dependencies = ["axio", "aiohttp>=3.11"]
 
 [project.optional-dependencies]
 tui = ["textual>=2.1.0"]
+examples = ["partial-json-parser>=0.2"]
 
 [project.entry-points."axio.transport"]
 openai = "axio_transport_openai:OpenAITransport"

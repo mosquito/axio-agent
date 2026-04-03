@@ -440,7 +440,7 @@ def test_build_payload_system_prompt() -> None:
     assert msgs[0] == {"role": "system", "content": "You are helpful."}
     assert payload["stream"] is True
     assert payload["stream_options"] == {"include_usage": True}
-    assert payload["max_tokens"] == 32_768
+    assert payload["max_completion_tokens"] == 32_768
 
 
 def test_build_payload_user_text() -> None:
@@ -508,7 +508,7 @@ def test_build_payload_tool_schema() -> None:
 def test_build_payload_uses_model_spec_max_tokens() -> None:
     t = OpenAITransport(model=ModelSpec(id="custom-model", max_output_tokens=4096))
     payload = t.build_payload([], [], "")
-    assert payload["max_tokens"] == 4096
+    assert payload["max_completion_tokens"] == 4096
 
 
 def test_build_payload_image_block() -> None:
