@@ -143,32 +143,24 @@ similar to how Claude Code shows Edit tool diffs live.
 ```
 
 The agent accumulates fragments internally and parses the complete JSON at
-`IterationEnd`, but consumers can decode partial JSON on the fly using a
-library like [partial-json-parser](https://pypi.org/project/partial-json-parser/):
+`IterationEnd`, but consumers can display values incrementally as they stream
+in. Since tool arguments are flat JSON objects with mostly string values, a
+lightweight character-level state machine can stream field values directly
+without re-parsing:
 
 ```python
-from partial_json_parser import loads as partial_json_loads
-
-tool_buffers: dict[str, str] = {}  # tool_use_id -> accumulated JSON
-
 async for event in agent.run_stream(prompt, ctx):
     match event:
         case ToolUseStart(tool_use_id=tid, name=name):
-            tool_buffers[tid] = ""
+            trackers[tid] = ToolArgTracker(name)
             print(f"▶ {name}")
 
         case ToolInputDelta(tool_use_id=tid, partial_json=pj):
-            tool_buffers[tid] += pj
-            # Decode whatever is parseable so far
-            try:
-                parsed = partial_json_loads(tool_buffers[tid])
-                print(f"  {parsed}", end="\r")
-            except Exception:
-                pass
+            trackers[tid].feed(pj)  # O(1) per character
 
         case ToolResult(tool_use_id=tid, content=content):
             print(f"\n  → {content}")
-            del tool_buffers[tid]
+            del trackers[tid]
 ```
 
 See the full working example in

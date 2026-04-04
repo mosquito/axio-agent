@@ -13,12 +13,9 @@ from __future__ import annotations
 import asyncio
 import os
 from importlib.metadata import entry_points
-from pathlib import Path
 import sys
 
 import aiohttp
-from partial_json_parser import loads as partial_json_loads
-
 from axio.agent import Agent
 from axio.context import MemoryContextStore
 from axio.events import (
@@ -30,53 +27,15 @@ from axio.events import (
     ToolResult,
     ToolUseStart,
 )
-from axio.tool import Tool, ToolHandler
-
-# ── Tools ────────────────────────────────────────────────────────────
-
-
-class EditFile(ToolHandler):
-    """Replace old_string with new_string in a file."""
-
-    file_path: str
-    old_string: str
-    new_string: str
-
-    async def __call__(self) -> str:
-        p = Path(self.file_path)
-        text = p.read_text()
-        if self.old_string not in text:
-            raise ValueError(f"old_string not found in {self.file_path}")
-        p.write_text(text.replace(self.old_string, self.new_string, 1))
-        return f"Replaced content in {self.file_path}"
-
-
-class WriteFile(ToolHandler):
-    """Write content to a file."""
-
-    file_path: str
-    content: str
-
-    async def __call__(self) -> str:
-        p = Path(self.file_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(self.content)
-        return f"Wrote {len(self.content)} chars to {self.file_path}"
-
-
-class ReadFile(ToolHandler):
-    """Read content of a file."""
-
-    file_path: str
-
-    async def __call__(self) -> str:
-        return Path(self.file_path).read_text()
-
+from axio.tool import Tool
+from axio_tools_local.patch_file import PatchFile
+from axio_tools_local.read_file import ReadFile
+from axio_tools_local.write_file import WriteFile
 
 TOOLS = [
-    Tool(name="edit_file", description="Replace old_string with new_string in a file.", handler=EditFile),
-    Tool(name="write_file", description="Write content to a file.", handler=WriteFile),
-    Tool(name="read_file", description="Read content of a file.", handler=ReadFile),
+    Tool(name="read_file", description=ReadFile.__doc__ or "", handler=ReadFile),
+    Tool(name="write_file", description=WriteFile.__doc__ or "", handler=WriteFile),
+    Tool(name="patch_file", description=PatchFile.__doc__ or "", handler=PatchFile),
 ]
 
 # ── ANSI helpers ─────────────────────────────────────────────────────
@@ -89,51 +48,276 @@ YELLOW = "\033[33m"
 RED = "\033[31m"
 RESET = "\033[0m"
 
-# ── Partial JSON tracker ────────────────────────────────────────────
+# ── Streaming JSON state machine ───────────────────────────────────
 
 
 class ToolArgTracker:
-    """Tracks partial JSON for one tool call, diffs decoded fields on each chunk."""
+    """Streams top-level tool argument values via a JSON state machine with stack.
+
+    O(1) per character.  Top-level string values are decoded (escape sequences
+    resolved, quotes stripped).  All other top-level values are emitted as raw JSON.
+    """
+
+    _ESC = {"n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f"}
 
     def __init__(self, name: str) -> None:
         self.name = name
-        self.raw = ""
-        self.prev_parsed: dict[str, str] = {}
-        self.prev_value_lens: dict[str, int] = {}
-        self.seen_newline: set[str] = set()
+        self._st = "INIT"
+        self._stack: list[str] = []  # "o" (object) / "a" (array)
+        self._key_buf: list[str] = []
+        self._current_key = ""
+        self._mode = ""  # "" | "raw" | "str"
+        self._u_buf: list[str] = []
+        self._high = 0  # pending high surrogate for \uXXXX pairs
+        self._val_buf: list[str] = []  # buffer for multiline detection
+        self._ml = False  # multiline resolved?
 
-    def feed(self, partial_json: str) -> None:
-        self.raw += partial_json
-        try:
-            parsed = partial_json_loads(self.raw)
-        except Exception:
-            return
-        if not isinstance(parsed, dict):
-            return
-
-        for key, value in parsed.items():
-            value_str = str(value)
-            prev_len = self.prev_value_lens.get(key, 0)
-            new_text = value_str[prev_len:]
-
-            if key not in self.prev_parsed:
-                sys.stdout.write(f"\n  {YELLOW}{key}{RESET}: {DIM}")
-                if "\n" in new_text:
-                    self.seen_newline.add(key)
-                    sys.stdout.write("\n" + value_str)
-                else:
-                    sys.stdout.write(value_str)
-            elif new_text:
-                if key not in self.seen_newline and "\n" in new_text:
-                    self.seen_newline.add(key)
-                    sys.stdout.write(f"\r\033[2K  {YELLOW}{key}{RESET}:{DIM}\n{value_str}")
-                else:
-                    sys.stdout.write(new_text)
-
-            self.prev_parsed[key] = value_str
-            self.prev_value_lens[key] = len(value_str)
-
+    def feed(self, chunk: str) -> None:
+        for ch in chunk:
+            self._step(ch)
         sys.stdout.flush()
+
+    # -- output helpers ------------------------------------------------
+
+    def _emit(self, ch: str) -> None:
+        if self._mode == "str":
+            self._str_out(ch)
+        elif self._mode:
+            sys.stdout.write(ch)
+
+    def _str_out(self, text: str) -> None:
+        """Output decoded text for a top-level string, detecting multiline."""
+        if not self._ml:
+            self._val_buf.append(text)
+            if '\n' in text:
+                self._ml = True
+                sys.stdout.write(
+                    f"\r\033[2K  {YELLOW}{self._current_key}{RESET}:{DIM}\n"
+                )
+                sys.stdout.write("".join(self._val_buf))
+                self._val_buf.clear()
+        else:
+            sys.stdout.write(text)
+
+    def _str_flush(self) -> None:
+        """Flush buffered content for an inline string value."""
+        if self._val_buf:
+            sys.stdout.write("".join(self._val_buf))
+            self._val_buf.clear()
+
+    def _start_val(self, is_str: bool) -> None:
+        if len(self._stack) == 1:
+            self._mode = "str" if is_str else "raw"
+            if is_str:
+                self._val_buf.clear()
+                self._ml = False
+
+    def _end_val(self) -> None:
+        if len(self._stack) == 1:
+            self._mode = ""
+
+    def _pop(self) -> None:
+        self._stack.pop()
+        self._end_val()
+        self._st = "AFTER" if self._stack else "DONE"
+
+    def _flush_high(self) -> None:
+        if self._mode == "str":
+            self._str_out(chr(self._high))
+        elif self._mode == "raw":
+            sys.stdout.write(f"\\u{self._high:04x}")
+        self._high = 0
+
+    def _emit_uchar(self, code: int) -> None:
+        if self._mode == "str":
+            self._str_out(chr(code))
+        elif self._mode == "raw":
+            sys.stdout.write("\\u" + "".join(self._u_buf))
+
+    # -- value / delimiter dispatch ------------------------------------
+
+    def _val_start(self, ch: str) -> None:
+        if ch == '"':
+            self._start_val(True)
+            if self._mode == "raw":
+                sys.stdout.write('"')
+            self._st = "STR"
+        elif ch == '{':
+            self._start_val(False)
+            self._emit('{')
+            self._stack.append("o")
+            self._st = "OBJ"
+        elif ch == '[':
+            self._start_val(False)
+            self._emit('[')
+            self._stack.append("a")
+            self._st = "ARR"
+        elif ch in '-0123456789':
+            self._start_val(False)
+            self._emit(ch)
+            self._st = "NUM"
+        elif ch in 'tfn':
+            self._start_val(False)
+            self._emit(ch)
+            self._st = "LIT"
+
+    def _after(self, ch: str) -> None:
+        if ch == ',':
+            self._emit(',')
+            top = self._stack[-1] if self._stack else None
+            self._st = "OBJ" if top == "o" else "VAL"
+        elif ch == '}':
+            self._emit('}')
+            self._pop()
+        elif ch == ']':
+            self._emit(']')
+            self._pop()
+        else:
+            self._emit(ch)
+            self._st = "AFTER"
+
+    # -- main state machine --------------------------------------------
+
+    def _step(self, ch: str) -> None:
+        st = self._st
+
+        if st == "INIT":
+            if ch == '{':
+                self._stack.append("o")
+                self._st = "OBJ"
+
+        elif st == "OBJ":
+            if ch == '"':
+                self._emit('"')
+                self._key_buf.clear()
+                self._st = "KEY"
+            elif ch == '}':
+                self._emit('}')
+                self._pop()
+            else:
+                self._emit(ch)
+
+        elif st == "KEY":
+            if ch == '\\':
+                self._emit('\\')
+                self._st = "KESC"
+            elif ch == '"':
+                if len(self._stack) == 1:
+                    self._current_key = "".join(self._key_buf)
+                self._emit('"')
+                self._st = "COL"
+            else:
+                self._key_buf.append(ch)
+                self._emit(ch)
+
+        elif st == "KESC":
+            self._key_buf.append(ch)
+            self._emit(ch)
+            self._st = "KEY"
+
+        elif st == "COL":
+            if ch == ':':
+                if len(self._stack) == 1:
+                    sys.stdout.write(
+                        f"\n  {YELLOW}{self._current_key}{RESET}: {DIM}"
+                    )
+                else:
+                    self._emit(':')
+                self._st = "VAL"
+            else:
+                self._emit(ch)
+
+        elif st == "VAL":
+            if ch in ' \t\r\n':
+                self._emit(ch)
+            else:
+                self._val_start(ch)
+
+        elif st == "ARR":
+            if ch in ' \t\r\n':
+                self._emit(ch)
+            elif ch == ']':
+                self._emit(']')
+                self._pop()
+            else:
+                self._val_start(ch)
+
+        elif st == "STR":
+            if ch == '\\':
+                self._st = "SESC"
+            elif ch == '"':
+                if self._high:
+                    self._flush_high()
+                if self._mode == "str":
+                    self._str_flush()
+                elif self._mode == "raw":
+                    sys.stdout.write('"')
+                self._end_val()
+                self._st = "AFTER"
+            else:
+                if self._high:
+                    self._flush_high()
+                self._emit(ch)
+
+        elif st == "SESC":
+            if self._high and ch != 'u':
+                self._flush_high()
+            if ch == 'u':
+                self._u_buf.clear()
+                self._st = "UESC"
+            elif self._mode == "str":
+                self._str_out(self._ESC.get(ch, ch))
+                self._st = "STR"
+            elif self._mode == "raw":
+                sys.stdout.write('\\')
+                sys.stdout.write(ch)
+                self._st = "STR"
+            else:
+                self._st = "STR"
+
+        elif st == "UESC":
+            self._u_buf.append(ch)
+            if len(self._u_buf) == 4:
+                code = int("".join(self._u_buf), 16)
+                if self._high:
+                    if 0xDC00 <= code <= 0xDFFF:
+                        full = (
+                            0x10000
+                            + (self._high - 0xD800) * 0x400
+                            + (code - 0xDC00)
+                        )
+                        if self._mode == "str":
+                            self._str_out(chr(full))
+                        elif self._mode == "raw":
+                            sys.stdout.write(
+                                f"\\u{self._high:04x}\\u{code:04x}"
+                            )
+                    else:
+                        self._flush_high()
+                        self._emit_uchar(code)
+                    self._high = 0
+                elif 0xD800 <= code <= 0xDBFF:
+                    self._high = code
+                else:
+                    self._emit_uchar(code)
+                self._st = "STR"
+
+        elif st == "NUM":
+            if ch in '0123456789.eE+-':
+                self._emit(ch)
+            else:
+                self._end_val()
+                self._after(ch)
+
+        elif st == "LIT":
+            if ch.isalpha():
+                self._emit(ch)
+            else:
+                self._end_val()
+                self._after(ch)
+
+        elif st == "AFTER":
+            self._after(ch)
 
 
 # ── Transport auto-detection ─────────────────────────────────────────
@@ -246,7 +430,7 @@ async def main() -> None:
 
                 case ToolResult(tool_use_id=tid, name=name, is_error=is_error, content=content):
                     color = RED if is_error else GREEN
-                    sys.stdout.write(f"{RESET}\n  {color}→ {content}{RESET}\n")
+                    sys.stdout.write(f"{RESET}\n{color}{content}{RESET}\n")
                     sys.stdout.flush()
                     trackers.pop(tid, None)
 
