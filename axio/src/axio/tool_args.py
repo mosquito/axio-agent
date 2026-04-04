@@ -114,35 +114,35 @@ class ToolArgStream:
             if self._mode == "raw":
                 self._text_buf.append('"')
             self._st = "STR"
-        elif ch == '{':
+        elif ch == "{":
             self._start_val(False)
-            self._out('{')
+            self._out("{")
             self._stack.append("o")
             self._st = "OBJ"
-        elif ch == '[':
+        elif ch == "[":
             self._start_val(False)
-            self._out('[')
+            self._out("[")
             self._stack.append("a")
             self._st = "ARR"
-        elif ch in '-0123456789':
+        elif ch in "-0123456789":
             self._start_val(False)
             self._out(ch)
             self._st = "NUM"
-        elif ch in 'tfn':
+        elif ch in "tfn":
             self._start_val(False)
             self._out(ch)
             self._st = "LIT"
 
     def _after(self, ch: str) -> None:
-        if ch == ',':
-            self._out(',')
+        if ch == ",":
+            self._out(",")
             top = self._stack[-1] if self._stack else None
             self._st = "OBJ" if top == "o" else "VAL"
-        elif ch == '}':
-            self._out('}')
+        elif ch == "}":
+            self._out("}")
             self._pop()
-        elif ch == ']':
-            self._out(']')
+        elif ch == "]":
+            self._out("]")
             self._pop()
         else:
             self._out(ch)
@@ -154,7 +154,7 @@ class ToolArgStream:
         st = self._st
 
         if st == "INIT":
-            if ch == '{':
+            if ch == "{":
                 self._stack.append("o")
                 self._st = "OBJ"
 
@@ -163,15 +163,15 @@ class ToolArgStream:
                 self._out('"')
                 self._key_buf.clear()
                 self._st = "KEY"
-            elif ch == '}':
-                self._out('}')
+            elif ch == "}":
+                self._out("}")
                 self._pop()
             else:
                 self._out(ch)
 
         elif st == "KEY":
-            if ch == '\\':
-                self._out('\\')
+            if ch == "\\":
+                self._out("\\")
                 self._st = "KESC"
             elif ch == '"':
                 if len(self._stack) == 1:
@@ -188,7 +188,7 @@ class ToolArgStream:
             self._st = "KEY"
 
         elif st == "COL":
-            if ch == ':':
+            if ch == ":":
                 if len(self._stack) == 1:
                     self._flush_text()
                     self._events.append(
@@ -198,28 +198,28 @@ class ToolArgStream:
                         )
                     )
                 else:
-                    self._out(':')
+                    self._out(":")
                 self._st = "VAL"
             else:
                 self._out(ch)
 
         elif st == "VAL":
-            if ch in ' \t\r\n':
+            if ch in " \t\r\n":
                 self._out(ch)
             else:
                 self._val_start(ch)
 
         elif st == "ARR":
-            if ch in ' \t\r\n':
+            if ch in " \t\r\n":
                 self._out(ch)
-            elif ch == ']':
-                self._out(']')
+            elif ch == "]":
+                self._out("]")
                 self._pop()
             else:
                 self._val_start(ch)
 
         elif st == "STR":
-            if ch == '\\':
+            if ch == "\\":
                 self._st = "SESC"
             elif ch == '"':
                 if self._high:
@@ -234,16 +234,16 @@ class ToolArgStream:
                 self._out(ch)
 
         elif st == "SESC":
-            if self._high and ch != 'u':
+            if self._high and ch != "u":
                 self._flush_high()
-            if ch == 'u':
+            if ch == "u":
                 self._u_buf.clear()
                 self._st = "UESC"
             elif self._mode == "str":
                 self._text_buf.append(self._ESC.get(ch, ch))
                 self._st = "STR"
             elif self._mode == "raw":
-                self._text_buf.append('\\')
+                self._text_buf.append("\\")
                 self._text_buf.append(ch)
                 self._st = "STR"
             else:
@@ -255,17 +255,11 @@ class ToolArgStream:
                 code = int("".join(self._u_buf), 16)
                 if self._high:
                     if 0xDC00 <= code <= 0xDFFF:
-                        full = (
-                            0x10000
-                            + (self._high - 0xD800) * 0x400
-                            + (code - 0xDC00)
-                        )
+                        full = 0x10000 + (self._high - 0xD800) * 0x400 + (code - 0xDC00)
                         if self._mode == "str":
                             self._text_buf.append(chr(full))
                         elif self._mode == "raw":
-                            self._text_buf.append(
-                                f"\\u{self._high:04x}\\u{code:04x}"
-                            )
+                            self._text_buf.append(f"\\u{self._high:04x}\\u{code:04x}")
                     else:
                         self._flush_high()
                         self._emit_uchar(code)
@@ -277,7 +271,7 @@ class ToolArgStream:
                 self._st = "STR"
 
         elif st == "NUM":
-            if ch in '0123456789.eE+-':
+            if ch in "0123456789.eE+-":
                 self._out(ch)
             else:
                 self._end_val()

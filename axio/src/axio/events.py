@@ -81,7 +81,15 @@ class SessionEndEvent:
 
 
 type StreamEvent = (
-    ReasoningDelta | TextDelta | ToolUseStart | ToolInputDelta
-    | ToolFieldStart | ToolFieldDelta | ToolFieldEnd
-    | ToolResult | IterationEnd | Error | SessionEndEvent
+    ReasoningDelta
+    | TextDelta
+    | ToolUseStart
+    | ToolInputDelta
+    | ToolFieldStart
+    | ToolFieldDelta
+    | ToolFieldEnd
+    | ToolResult
+    | IterationEnd
+    | Error
+    | SessionEndEvent
 )
