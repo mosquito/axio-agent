@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+import os
+from io import TextIOWrapper
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -138,3 +141,59 @@ async def test_list_tools_not_connected(stdio_config: MCPServerConfig) -> None:
     session = MCPSession(stdio_config)
     with pytest.raises(RuntimeError, match="Not connected"):
         await session.list_tools()
+
+
+async def test_stdio_client_receives_errlog(stdio_config: MCPServerConfig) -> None:
+    """stdio_client must be called with a writable errlog pipe, not sys.stderr."""
+    mock_session = _mock_client_session()
+
+    with (
+        patch("axio_tools_mcp.session.stdio_client") as mock_stdio,
+        patch("axio_tools_mcp.session.ClientSession", return_value=mock_session),
+    ):
+        ctx = MagicMock()
+        ctx.__aenter__ = AsyncMock(return_value=(MagicMock(), MagicMock()))
+        ctx.__aexit__ = AsyncMock(return_value=None)
+        mock_stdio.return_value = ctx
+
+        session = MCPSession(stdio_config)
+        await session.connect()
+
+        _, kwargs = mock_stdio.call_args
+        errlog = kwargs.get("errlog")
+        assert errlog is not None, "errlog should be passed to stdio_client"
+        assert isinstance(errlog, TextIOWrapper), "errlog should be a file object (pipe write-end)"
+        assert not errlog.closed
+
+        await session.close()
+        assert errlog.closed
+
+
+async def test_stderr_lines_logged(stdio_config: MCPServerConfig, caplog: pytest.LogCaptureFixture) -> None:
+    """Lines written to the MCP process stderr appear as logger.warning records."""
+    read_fd, write_fd = os.pipe()
+
+    with (
+        patch("axio_tools_mcp.session.os.pipe", return_value=(read_fd, write_fd)),
+        patch("axio_tools_mcp.session.stdio_client") as mock_stdio,
+        patch("axio_tools_mcp.session.ClientSession", return_value=_mock_client_session()),
+        caplog.at_level(logging.WARNING, logger="axio_tools_mcp.session"),
+    ):
+        ctx = MagicMock()
+        ctx.__aenter__ = AsyncMock(return_value=(MagicMock(), MagicMock()))
+        ctx.__aexit__ = AsyncMock(return_value=None)
+        mock_stdio.return_value = ctx
+
+        session = MCPSession(stdio_config)
+        await session.connect()
+
+        # Write data via the raw fd (still valid since errlog hasn't been closed yet)
+        os.write(write_fd, b"something went wrong\nanother line\n")
+
+        # close() flushes and closes errlog → pipe EOF → _read_stderr task exits
+        await session.close()
+
+    messages = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("something went wrong" in m for m in messages)
+    assert any("another line" in m for m in messages)
+    assert all("[mcp:test]" in m for m in messages)

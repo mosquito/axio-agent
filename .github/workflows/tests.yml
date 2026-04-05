@@ -20,6 +20,7 @@ jobs:
           - axio-tools-docker
           - axio-tools-local
           - axio-tools-mcp
+          - axio-transport-anthropic
           - axio-transport-codex
           - axio-transport-openai
           - axio-tui
@@ -44,6 +45,7 @@ jobs:
           - axio-tools-docker
           - axio-tools-local
           - axio-tools-mcp
+          - axio-transport-anthropic
           - axio-transport-codex
           - axio-transport-openai
           - axio-tui
@@ -67,6 +69,7 @@ jobs:
           - { name: axio-tools-docker,      cov: axio_tools_docker }
           - { name: axio-tools-local,       cov: axio_tools_local }
           - { name: axio-tools-mcp,         cov: axio_tools_mcp }
+          - { name: axio-transport-anthropic, cov: axio_transport_anthropic }
           - { name: axio-transport-codex,   cov: axio_transport_codex }
           - { name: axio-transport-openai,  cov: axio_transport_openai }
           - { name: axio-tui,               cov: axio_tui }

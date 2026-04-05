@@ -1,6 +1,6 @@
 # Packages
 
-The Axio monorepo contains 10 packages, each with a focused responsibility.
+The Axio monorepo contains 11 packages, each with a focused responsibility.
 All packages live under `packages/` and are managed as a uv workspace.
 
 ## Overview
@@ -8,6 +8,7 @@ All packages live under `packages/` and are managed as a uv workspace.
 | Package | Purpose | Entry Point Groups |
 |---------|---------|-------------------|
 | `axio` | Core framework | — |
+| `axio-transport-anthropic` | Anthropic Claude transport | `axio.transport`, `axio.transport.settings` |
 | `axio-transport-openai` | OpenAI-compatible transport | `axio.transport`, `axio.transport.settings` |
 | `axio-transport-nebius` | Nebius AI Studio transport | `axio.transport`, `axio.transport.settings` |
 | `axio-transport-codex` | ChatGPT (Codex) OAuth transport | `axio.transport`, `axio.transport.settings` |
@@ -29,6 +30,18 @@ testing helpers. Has no entry points — other packages depend on it.
 Dependencies: `pydantic>=2`
 
 ## Transports
+
+### axio-transport-anthropic
+
+Anthropic Claude transport using `aiohttp` and SSE parsing. Supports all
+Claude models with prompt caching (`cache_control`) and automatic retry on
+rate-limit (429) and overload (529) responses.
+
+Entry points:
+- `axio.transport` → `AnthropicTransport`
+- `axio.transport.settings` → `AnthropicSettingsScreen`
+
+Dependencies: `axio`, `aiohttp>=3.11`
 
 ### axio-transport-openai
 

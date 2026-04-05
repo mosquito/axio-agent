@@ -12,7 +12,7 @@ class TransportMeta:
     """Metadata a transport plugin declares about itself."""
 
     label: str
-    api_key_env: str
+    api_key_env: str | None
     role_defaults: dict[str, str]
 
 

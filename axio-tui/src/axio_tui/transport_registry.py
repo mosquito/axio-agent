@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any
 
 import aiohttp
@@ -49,6 +50,7 @@ class TransportRegistry:
         cls_map = discover_transports()
         self._screens = discover_transport_settings()
 
+        pending: list[tuple[str, Any]] = []
         for name, cls in cls_map.items():
             meta: TransportMeta | None = getattr(cls, "META", None)
             if meta is None:
@@ -78,12 +80,18 @@ class TransportRegistry:
                 if k != "api_key" and v:
                     kwargs[k] = v
 
-            transport = cls(**kwargs)
+            pending.append((name, cls(**kwargs)))
+
+        async def _fetch_one(name: str, transport: Any) -> None:
+            if hasattr(transport, "on_auth_refresh"):
+                transport.on_auth_refresh = partial(self._persist_auth, name)
             try:
                 await transport.fetch_models()
             except Exception:
                 logger.warning("Transport %r: fetch_models failed", name, exc_info=True)
             self._transports[name] = transport
+
+        await asyncio.gather(*[_fetch_one(n, t) for n, t in pending])
 
         # Bulk-load providers from hub screens that expose load_config()
         # (e.g. CustomHubScreen for openai-custom.* providers)
@@ -134,6 +142,8 @@ class TransportRegistry:
                     if k != "api_key" and v:
                         kwargs[k] = v
                 transport = cls(**kwargs)
+                if hasattr(transport, "on_auth_refresh"):
+                    transport.on_auth_refresh = partial(self._persist_auth, name)
                 try:
                     await transport.fetch_models()
                 except Exception:
@@ -184,7 +194,18 @@ class TransportRegistry:
         for k, v in self._saved.get(name, {}).items():
             if k not in kwargs and v:
                 kwargs[k] = v
-        return cls(**kwargs)
+        transport = cls(**kwargs)
+        if hasattr(transport, "on_auth_refresh"):
+            transport.on_auth_refresh = partial(self._persist_auth, name)
+        return transport
+
+    async def _persist_auth(self, name: str, tokens: dict[str, str]) -> None:
+        if self._config is None:
+            return
+        prefix = f"transport.{name}."
+        for key, value in tokens.items():
+            if value:
+                await self._config.set(f"{prefix}{key}", value)
 
     def register_dynamic(self, name: str, instance: Any) -> None:
         """Register a dynamically-created transport instance (e.g. custom providers)."""
@@ -234,6 +255,23 @@ class TransportRegistry:
     def encode(self, name: str, model_id: str) -> str:
         """Encode a transport name and model ID for config persistence."""
         return f"{name}:{model_id}"
+
+    def model_counts(self) -> dict[str, int]:
+        """Return number of models per available transport."""
+        return {name: len(t.models) for name, t in self._transports.items()}
+
+    async def reload_models(self, name: str | None = None) -> None:
+        """Re-fetch model catalogues for one transport (or all available if name is None)."""
+        names = [name] if (name and name in self._transports) else list(self._transports)
+        await asyncio.gather(*[self._reload_one(n) for n in names])
+
+    async def _reload_one(self, name: str) -> None:
+        transport = self._transports[name]
+        transport.models.clear()
+        try:
+            await transport.fetch_models()
+        except Exception:
+            logger.warning("Transport %r: fetch_models failed on reload", name, exc_info=True)
 
     def settings_screens(self) -> dict[str, type]:
         """Return discovered settings screen classes keyed by transport name."""

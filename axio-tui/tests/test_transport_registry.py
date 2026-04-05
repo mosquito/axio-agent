@@ -7,7 +7,7 @@ from collections.abc import Generator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 from unittest.mock import AsyncMock, patch
 
 import aiohttp
@@ -66,6 +66,29 @@ class _NoMetaTransport:
     api_key: str = ""
     model: ModelSpec = _SPEC_CHAT
     models: ModelRegistry = field(default_factory=ModelRegistry)
+    session: aiohttp.ClientSession | None = None
+
+    async def fetch_models(self) -> None:
+        pass
+
+
+@dataclass(slots=True)
+class _AuthTransport:
+    """Fake transport that supports on_auth_refresh (like CodexTransport)."""
+
+    META: ClassVar[TransportMeta] = TransportMeta(
+        label="Auth",
+        api_key_env="AUTH_API_KEY",
+        role_defaults={"chat": "test-chat"},
+    )
+
+    api_key: str = ""
+    refresh_token: str = ""
+    expires_at: str = ""
+    on_auth_refresh: Any = field(default=None, repr=False, compare=False)
+    base_url: str = "https://auth.api/v1"
+    model: ModelSpec = _SPEC_CHAT
+    models: ModelRegistry = field(default_factory=lambda: ModelRegistry([_SPEC_CHAT]))
     session: aiohttp.ClientSession | None = None
 
     async def fetch_models(self) -> None:
@@ -370,3 +393,63 @@ class TestSavedSettings:
         transport = reg.get_transport("fake")
         assert transport.base_url == "https://fake.api/v1"
         assert transport.api_key == "key"
+
+
+class TestAuthRefresh:
+    async def test_init_wires_on_auth_refresh(self) -> None:
+        session = AsyncMock(spec=aiohttp.ClientSession)
+        reg = TransportRegistry()
+        with _patch_discover({"auth": _AuthTransport}):
+            await reg.init(session)
+        transport = reg.get_transport("auth")
+        assert transport.on_auth_refresh is not None
+
+    async def test_make_transport_wires_on_auth_refresh(self) -> None:
+        session = AsyncMock(spec=aiohttp.ClientSession)
+        reg = TransportRegistry()
+        with _patch_discover({"auth": _AuthTransport}):
+            await reg.init(session)
+        transport = reg.make_transport("auth", _SPEC_CHAT)
+        assert transport.on_auth_refresh is not None
+
+    async def test_save_settings_wires_on_auth_refresh(self, tmp_path: Path) -> None:
+        session = AsyncMock(spec=aiohttp.ClientSession)
+        config = ProjectConfig(tmp_path / "test.db", project="test")
+        reg = TransportRegistry()
+        with _patch_discover({"auth": _AuthTransport}):
+            await reg.init(session, global_config=config)
+            await reg.save_settings("auth", {"api_key": "new-key"})
+        transport = reg.get_transport("auth")
+        assert transport.on_auth_refresh is not None
+        await config.close()
+
+    async def test_persist_auth_writes_to_db(self, tmp_path: Path) -> None:
+        session = AsyncMock(spec=aiohttp.ClientSession)
+        config = ProjectConfig(tmp_path / "test.db", project="test")
+        reg = TransportRegistry()
+        with _patch_discover({"auth": _AuthTransport}):
+            await reg.init(session, global_config=config)
+
+        transport = reg.get_transport("auth")
+        await transport.on_auth_refresh(
+            {
+                "api_key": "refreshed-token",
+                "refresh_token": "new-refresh",
+                "expires_at": "9999999999",
+                "account_id": "acct-1",
+            }
+        )
+
+        assert await config.get("transport.auth.api_key") == "refreshed-token"
+        assert await config.get("transport.auth.refresh_token") == "new-refresh"
+        assert await config.get("transport.auth.expires_at") == "9999999999"
+        assert await config.get("transport.auth.account_id") == "acct-1"
+        await config.close()
+
+    async def test_transport_without_on_auth_refresh_unaffected(self) -> None:
+        session = AsyncMock(spec=aiohttp.ClientSession)
+        reg = TransportRegistry()
+        with _patch_discover({"fake": _FakeTransport}):
+            await reg.init(session)
+        transport = reg.get_transport("fake")
+        assert not hasattr(transport, "on_auth_refresh")

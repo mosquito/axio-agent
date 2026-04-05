@@ -12,6 +12,9 @@ dependencies = ["axio", "axio-tui", "aiosqlite>=0.20", "lancedb>=0.20"]
 index_files = "axio_tui_rag:IndexFiles"
 semantic_search = "axio_tui_rag:SemanticSearch"
 
+[project.entry-points."axio.selector"]
+embedding = "axio_tui_rag.selector:EmbeddingToolSelector"
+
 
 [project.urls]
 Homepage = "https://github.com/axio-agent/axio-tui-rag"

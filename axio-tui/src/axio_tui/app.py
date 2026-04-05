@@ -18,14 +18,19 @@ from axio.events import (
     ReasoningDelta,
     SessionEndEvent,
     TextDelta,
+    ToolFieldDelta,
+    ToolFieldEnd,
+    ToolFieldStart,
+    ToolInputDelta,
     ToolResult,
     ToolUseStart,
 )
 from axio.messages import Message
 from axio.models import Capability, ModelSpec
 from axio.permission import PermissionGuard
-from axio.selector import EmbeddingToolSelector, ToolFilteringTransport
+from axio.selector import ToolSelector
 from axio.tool import Tool
+from axio.tool_args import ToolArgStream
 from pygments.token import Token  # type: ignore[import-untyped]
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
@@ -39,13 +44,20 @@ from textual.widget import Widget
 from textual.widgets import Footer, Header, Input, Markdown, OptionList, RichLog, Static
 from textual.widgets._markdown import MarkdownFence
 
-from axio_tui.plugin import ToolsPlugin, discover_guards, discover_tools, discover_tools_plugins
+from axio_tui.plugin import (
+    ToolsPlugin,
+    discover_guards,
+    discover_selectors,
+    discover_tools,
+    discover_tools_by_package,
+    discover_tools_plugins,
+)
 from axio_tui.transport_registry import RoleBinding, TransportRegistry
 
 from .prompt import SYSTEM_PROMPT
 from .screens import ModelSelectScreen, PluginHubScreen, QuitDialog, SessionSelectScreen, ToolDetailScreen
 from .sqlite_context import GLOBAL_PROJECT, ProjectConfig, SQLiteContextStore
-from .tools import SUBAGENT_SYSTEM_PROMPT, Confirm, StatusLine, SubAgent, VisionAnalyze
+from .tools import SUBAGENT_SYSTEM_PROMPT, Confirm, StatusLine, SubAgent, VisionAnalyze, _short
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +121,7 @@ class _ToolCallInfo:
     status: bool | None = None  # None=pending, True=ok, False=error
     input: dict[str, Any] = field(default_factory=dict)
     content: str = ""
+    live_args: dict[str, str] = field(default_factory=dict)  # live streaming args
 
 
 class _ToolStatusWidget(Static):
@@ -130,6 +143,27 @@ class _ToolStatusWidget(Static):
         self._tools[tool_use_id] = _ToolCallInfo(name=name)
         self._refresh_content()
 
+    def update_arg(self, tool_use_id: str, event: ToolFieldStart | ToolFieldDelta | ToolFieldEnd) -> None:
+        """Update a field being streamed from ToolArgStream events."""
+        from axio.events import ToolFieldDelta, ToolFieldEnd, ToolFieldStart
+
+        if tool_use_id not in self._tools:
+            return
+        info = self._tools[tool_use_id]
+
+        if isinstance(event, ToolFieldStart):
+            # Start a new field
+            info.live_args[event.key] = ""
+        elif isinstance(event, ToolFieldDelta):
+            # Append to existing field
+            current = info.live_args.get(event.key, "")
+            info.live_args[event.key] = current + event.text
+        elif isinstance(event, ToolFieldEnd):
+            # Finalize field - convert to final value
+            pass  # Already updated via delta
+
+        self._refresh_content()
+
     def complete(
         self, tool_use_id: str, *, is_error: bool, content: str = "", tool_input: dict[str, Any] | None = None
     ) -> None:
@@ -144,7 +178,10 @@ class _ToolStatusWidget(Static):
         parts: list[str] = []
         for tid, info in self._tools.items():
             if info.status is None:
-                parts.append(f"[yellow]{info.name} ⏳[/]")
+                # Show live args while pending
+                args_parts = [f"{k}={_short(v, 30)}" for k, v in info.live_args.items()]
+                args_str = f" [dim]({', '.join(args_parts)})[/]" if args_parts else ""
+                parts.append(f"[yellow]{info.name} ⏳{args_str}[/]")
             elif info.status:
                 parts.append(f"[@click=show_detail('{tid}')][green]{info.name} ✓[/][/]")
             else:
@@ -328,6 +365,7 @@ class AgentApp(App[None]):
         self._config = ProjectConfig(DB_PATH)
         self._global_config = ProjectConfig(DB_PATH, project=GLOBAL_PROJECT)
         self._is_running = False
+        self.ready: asyncio.Event = asyncio.Event()
         self._worker: Any = None
         self._pending_input: asyncio.Queue[tuple[str, Static]] = asyncio.Queue()
         self._guard_lock = asyncio.Lock()
@@ -339,16 +377,21 @@ class AgentApp(App[None]):
         self._model_name = ""
         self._all_tools: list[Tool] = []
         self._disabled_plugins: set[str] = set()
+        self._disabled_transports: set[str] = set()
         self._disabled_guards: set[str] = set()
         self._guard_tool_map: dict[str, set[str]] = {}
         self._guard_instances: dict[str, PermissionGuard] = {}
         self._guard_classes: dict[str, type[PermissionGuard]] = {}
         self._active_tools: list[Tool] = []
         self._chat_transport: Any = None
-        self._tool_selector: EmbeddingToolSelector | None = None
         self._embed_cache: Any = None
+        self._selector_classes: dict[str, type] = {}
+        self._selector_instances: dict[str, Any] = {}
+        self._selector_labels: dict[str, str] = {}
+        self._active_selector: str | None = None
         self._log_handler: _RichLogHandler | None = None
         self._tool_status: _ToolStatusWidget | None = None
+        self._tool_arg_streams: dict[str, ToolArgStream] = {}  # keyed by tool_use_id
         self._agent_emoji = ""
         self._tools_plugins: dict[str, ToolsPlugin] = {}
         self._nav_index: int | None = None
@@ -375,117 +418,154 @@ class AgentApp(App[None]):
         SubAgent._factory = self._make_subagent
 
         self._session = aiohttp.ClientSession()
-        await self._transports.init(self._session, config=self._config, global_config=self._global_config)
 
-        if not self._transports.available:
-            await self._write_meta("[red]No transports available — set an API key env variable[/]")
-            return
+        # Show UI immediately; heavy init runs in background
+        inp = self.query_one("#input", Input)
+        inp.placeholder = "Initializing..."
+        inp.focus()
+        self.run_worker(self._init_worker(), exclusive=True)
 
-        # Resolve model for each role: persisted config -> transport defaults -> skip
-        for role in ModelRole:
-            config_value = await self._config.get(f"model.{role}")
-            binding: RoleBinding | None = None
-            if config_value:
-                binding = self._transports.resolve(config_value)
-            if binding is None:
-                binding = self._transports.resolve_default(role.value)
-            if binding is not None:
-                self._role_bindings[role] = binding
+    async def _init_worker(self) -> None:
+        try:
+            await self._write_meta("[dim]Loading transports...[/]")
 
-        # Set up chat transport
-        if ModelRole.CHAT in self._role_bindings:
-            chat_binding = self._role_bindings[ModelRole.CHAT]
-            chat_transport = self._transports.make_transport(chat_binding.transport, chat_binding.model)
-            self._chat_model = chat_binding.model
-        else:
-            # Fallback: first available transport with its default model
-            first = self._transports.available[0]
-            t = self._transports.get_transport(first)
-            chat_transport = self._transports.make_transport(first, t.model)
-            self._chat_model = t.model
+            # Discover selector entry points and load active selector from config
+            self._selector_classes = discover_selectors()
+            self._selector_labels = {n: getattr(cls, "label", n) for n, cls in self._selector_classes.items()}
+            raw_sel = await self._config.get("selector.active")
+            self._active_selector = raw_sel or None
 
-        self._model_name = self._chat_model.id
-        self.sub_title = self._model_name
+            # Discover MCP/tool plugins synchronously (no I/O), then init concurrently with transports
+            self._tools_plugins = discover_tools_plugins()
 
-        if ModelRole.VISION in self._role_bindings:
-            vb = self._role_bindings[ModelRole.VISION]
-            VisionAnalyze._transport = self._transports.make_transport(vb.transport, vb.model)
+            async def _init_plugins() -> None:
+                for plugin in self._tools_plugins.values():
+                    try:
+                        await plugin.init(config=self._config, global_config=self._global_config)
+                    except Exception:
+                        logger.warning("Tools plugin init failed", exc_info=True)
 
-        self._chat_transport = chat_transport
-        if ModelRole.EMBEDDING in self._role_bindings:
-            eb = self._role_bindings[ModelRole.EMBEDDING]
-            raw_transport = self._transports.make_transport(eb.transport, eb.model)
-            try:
-                from axio_tui_rag.embedding_cache import CachedEmbeddingTransport
+            assert self._session is not None
+            await asyncio.gather(
+                self._transports.init(self._session, config=self._config, global_config=self._global_config),
+                _init_plugins(),
+            )
 
-                embed_cache = CachedEmbeddingTransport(raw_transport, DB_PATH, eb.model.id)
-                self._embed_cache = embed_cache
-                self._tool_selector = EmbeddingToolSelector(
-                    transport=embed_cache,
-                    top_k=6,
-                    pinned=frozenset({"status_line"}),
-                )
-                chat_transport = ToolFilteringTransport(chat_transport, self._tool_selector)
-            except ImportError:
-                pass
+            if not self._transports.available:
+                await self._write_meta("[red]No transports available — set an API key env variable[/]")
+                return
 
-        # Discover tools and guards via entry points
-        tools: list[Tool] = discover_tools()
-        self._guard_classes = discover_guards()
+            # Resolve model for each role: persisted config -> transport defaults -> skip
+            for role in ModelRole:
+                config_value = await self._config.get(f"model.{role}")
+                binding: RoleBinding | None = None
+                if config_value:
+                    binding = self._transports.resolve(config_value)
+                if binding is None:
+                    binding = self._transports.resolve_default(role.value)
+                if binding is not None:
+                    self._role_bindings[role] = binding
 
-        # Load disabled plugins from config
-        raw = await self._config.get("plugins.disabled")
-        if raw:
-            self._disabled_plugins = {n.strip() for n in raw.split(",") if n.strip()}
-
-        # Load disabled guards from config
-        raw = await self._config.get("guards.disabled")
-        if raw:
-            self._disabled_guards = {n.strip() for n in raw.split(",") if n.strip()}
-
-        # Load guard-tool assignments from config (seed defaults for path guard)
-        _DEFAULT_PATH_TOOLS = frozenset(
-            {"shell", "run_python", "write_file", "read_file", "list_files", "patch_file", "vision", "index_files"}
-        )
-        for guard_name in self._guard_classes:
-            raw = await self._config.get(f"guards.{guard_name}.tools")
-            if raw is not None:
-                self._guard_tool_map[guard_name] = {n.strip() for n in raw.split(",") if n.strip()}
-            elif guard_name == "path":
-                self._guard_tool_map[guard_name] = set(_DEFAULT_PATH_TOOLS)
+            # Set up chat transport
+            if ModelRole.CHAT in self._role_bindings:
+                chat_binding = self._role_bindings[ModelRole.CHAT]
+                chat_transport = self._transports.make_transport(chat_binding.transport, chat_binding.model)
+                self._chat_model = chat_binding.model
             else:
-                self._guard_tool_map[guard_name] = set()
+                # Fallback: first available transport with its default model
+                first = self._transports.available[0]
+                t = self._transports.get_transport(first)
+                chat_transport = self._transports.make_transport(first, t.model)
+                self._chat_model = t.model
 
-        # Instantiate enabled guards
-        for guard_name, cls in self._guard_classes.items():
-            if guard_name in self._disabled_guards:
-                continue
-            instance = self._instantiate_guard(guard_name, cls)
-            if instance is not None:
-                self._guard_instances[guard_name] = instance
+            self._model_name = self._chat_model.id
+            self.sub_title = self._model_name
 
-        # Load tools from plugins (e.g. MCP servers)
-        self._tools_plugins = discover_tools_plugins()
-        for plugin in self._tools_plugins.values():
-            try:
-                await plugin.init(config=self._config, global_config=self._global_config)
+            if ModelRole.VISION in self._role_bindings:
+                vb = self._role_bindings[ModelRole.VISION]
+                VisionAnalyze._transport = self._transports.make_transport(vb.transport, vb.model)
+
+            self._chat_transport = chat_transport
+            if ModelRole.EMBEDDING in self._role_bindings:
+                eb = self._role_bindings[ModelRole.EMBEDDING]
+                raw_transport = self._transports.make_transport(eb.transport, eb.model)
+                try:
+                    from axio_tui_rag.embedding_cache import CachedEmbeddingTransport
+
+                    embed_cache = CachedEmbeddingTransport(raw_transport, DB_PATH, eb.model.id)
+                    self._embed_cache = embed_cache
+                    if "embedding" in self._selector_classes:
+                        cls = self._selector_classes["embedding"]
+                        self._selector_instances["embedding"] = cls(
+                            transport=embed_cache, top_k=6, pinned=frozenset({"status_line"})
+                        )
+                except ImportError:
+                    pass
+
+            # Discover tools and guards via entry points
+            tools: list[Tool] = discover_tools()
+            self._guard_classes = discover_guards()
+
+            # Load disabled plugins from config
+            raw = await self._config.get("plugins.disabled")
+            if raw:
+                self._disabled_plugins = {n.strip() for n in raw.split(",") if n.strip()}
+
+            # Load disabled transports from config
+            raw = await self._config.get("transports.disabled")
+            if raw:
+                self._disabled_transports = {n.strip() for n in raw.split(",") if n.strip()}
+
+            # Load disabled guards from config
+            raw = await self._config.get("guards.disabled")
+            if raw:
+                self._disabled_guards = {n.strip() for n in raw.split(",") if n.strip()}
+
+            # Load guard-tool assignments from config (seed defaults for path guard)
+            _DEFAULT_PATH_TOOLS = frozenset(
+                {"shell", "run_python", "write_file", "read_file", "list_files", "patch_file", "vision", "index_files"}
+            )
+            for guard_name in self._guard_classes:
+                raw = await self._config.get(f"guards.{guard_name}.tools")
+                if raw is not None:
+                    self._guard_tool_map[guard_name] = {n.strip() for n in raw.split(",") if n.strip()}
+                elif guard_name == "path":
+                    self._guard_tool_map[guard_name] = set(_DEFAULT_PATH_TOOLS)
+                else:
+                    self._guard_tool_map[guard_name] = set()
+
+            # Instantiate enabled guards
+            for guard_name, cls in self._guard_classes.items():
+                if guard_name in self._disabled_guards:
+                    continue
+                instance = self._instantiate_guard(guard_name, cls)
+                if instance is not None:
+                    self._guard_instances[guard_name] = instance
+
+            # Collect tools from plugins (already initialised concurrently above)
+            for plugin in self._tools_plugins.values():
                 tools.extend(plugin.all_tools)
-            except Exception:
-                logger.warning("Tools plugin init failed", exc_info=True)
 
-        self._all_tools = tools
-        self._rebuild_agent_tools()
+            self._all_tools = tools
+            self._rebuild_agent_tools()
 
-        self._agent = Agent(
-            system=SYSTEM_PROMPT,
-            tools=self._active_tools,
-            transport=chat_transport,
-        )
+            self._agent = Agent(
+                system=SYSTEM_PROMPT,
+                tools=self._active_tools,
+                transport=chat_transport,
+            )
 
-        await self._update_status()
-        self.set_interval(0.1, self._flush_text)
-        self.query_one("#input", Input).focus()
-        await self._show_welcome()
+            await self._update_status()
+            self.set_interval(0.1, self._flush_text)
+            await self._show_welcome()
+        except Exception:
+            logger.error("Initialization failed", exc_info=True)
+            await self._write_meta("[red]Initialization failed — see logs[/]")
+        finally:
+            self.ready.set()
+            inp = self.query_one("#input", Input)
+            inp.placeholder = "Enter a coding task..."
+            inp.focus()
 
     async def _show_welcome(self) -> None:
         lines: list[str] = [
@@ -675,6 +755,13 @@ class AgentApp(App[None]):
                 scroll.scroll_end(animate=False)
         return self._tool_status
 
+    async def _handle_tool_field_event(
+        self, event: ToolFieldStart | ToolFieldDelta | ToolFieldEnd, tool_use_id: str
+    ) -> None:
+        """Handle streaming tool field events to show live args in UI."""
+        w = await self._ensure_tool_status()
+        w.update_arg(tool_use_id, event)
+
     async def _path_guard_prompt_fn(self, msg: str) -> str:
         async with self._guard_lock:
             try:
@@ -760,6 +847,7 @@ class AgentApp(App[None]):
                 models = self._transports.all_models(Capability.reasoning)
             case _:
                 models = self._transports.all_models(Capability.tool_use)
+        models = [(n, m) for n, m in models if n not in self._disabled_transports]
         self.push_screen(
             ModelSelectScreen(models),
             lambda result: self._on_model_selected(role, result),
@@ -777,10 +865,7 @@ class AgentApp(App[None]):
             case ModelRole.CHAT:
                 self._chat_transport = self._transports.make_transport(transport_name, spec)
                 if self._agent is not None:
-                    transport = self._chat_transport
-                    if self._tool_selector is not None:
-                        transport = ToolFilteringTransport(transport, self._tool_selector)
-                    self._agent.transport = transport
+                    self._agent.transport = self._chat_transport
                 self._chat_model = spec
                 self._model_name = spec.id
                 self.sub_title = spec.id
@@ -795,21 +880,25 @@ class AgentApp(App[None]):
                         from axio_tui_rag.embedding_cache import CachedEmbeddingTransport
 
                         self._embed_cache = CachedEmbeddingTransport(raw_transport, DB_PATH, spec.id)
-                        self._tool_selector = EmbeddingToolSelector(
-                            transport=self._embed_cache,
-                            top_k=6,
-                            pinned=frozenset({"status_line"}),
-                        )
-                        if self._chat_transport is not None:
-                            self._agent.transport = ToolFilteringTransport(
-                                self._chat_transport,
-                                self._tool_selector,
+                        if "embedding" in self._selector_classes:
+                            cls = self._selector_classes["embedding"]
+                            self._selector_instances["embedding"] = cls(
+                                transport=self._embed_cache, top_k=6, pinned=frozenset({"status_line"})
                             )
+                        self._agent.selector = self._get_active_selector()
                     except ImportError:
                         pass
-            case ModelRole.GUARD | ModelRole.COMPACT | ModelRole.SUBAGENT | ModelRole.REASONING:
+            case ModelRole.GUARD:
+                # Re-instantiate LLMGuard with the new transport so it uses the chosen model.
+                if "llm" in self._guard_classes and "llm" not in self._disabled_guards:
+                    instance = self._instantiate_guard("llm", self._guard_classes["llm"])
+                    if instance is not None:
+                        self._guard_instances["llm"] = instance
+                        self._rebuild_agent_tools()
+            case ModelRole.COMPACT | ModelRole.SUBAGENT | ModelRole.REASONING:
                 pass  # stored in self._role_bindings, used on demand
         await self._update_status()
+        self.push_screen(ModelRoleSelectScreen(self._role_bindings), self._on_role_selected)
 
     async def _new_session(self) -> None:
         await self._chat_context.close()
@@ -1026,14 +1115,16 @@ class AgentApp(App[None]):
             self._chat_model = cb.model
             self._model_name = cb.model.id
             self.sub_title = self._model_name
-            transport = self._chat_transport
-            if self._tool_selector is not None:
-                transport = ToolFilteringTransport(transport, self._tool_selector)
             if self._agent is None:
                 self._rebuild_agent_tools()
-                self._agent = Agent(system=SYSTEM_PROMPT, tools=self._active_tools, transport=transport)
+                self._agent = Agent(
+                    system=SYSTEM_PROMPT,
+                    tools=self._active_tools,
+                    transport=self._chat_transport,
+                    selector=self._get_active_selector(),
+                )
             else:
-                self._agent.transport = transport
+                self._agent.transport = self._chat_transport
 
         if ModelRole.VISION in self._role_bindings and self._role_bindings[ModelRole.VISION].transport == name:
             vb = self._role_bindings[ModelRole.VISION]
@@ -1051,10 +1142,7 @@ class AgentApp(App[None]):
                 case ModelRole.CHAT:
                     self._chat_transport = self._transports.make_transport(name, binding.model)
                     if self._agent is not None:
-                        transport = self._chat_transport
-                        if self._tool_selector is not None:
-                            transport = ToolFilteringTransport(transport, self._tool_selector)
-                        self._agent.transport = transport
+                        self._agent.transport = self._chat_transport
                 case ModelRole.VISION:
                     VisionAnalyze._transport = self._transports.make_transport(name, binding.model)
                 case ModelRole.EMBEDDING:
@@ -1065,16 +1153,12 @@ class AgentApp(App[None]):
                             from axio_tui_rag.embedding_cache import CachedEmbeddingTransport
 
                             self._embed_cache = CachedEmbeddingTransport(raw_transport, DB_PATH, binding.model.id)
-                            self._tool_selector = EmbeddingToolSelector(
-                                transport=self._embed_cache,
-                                top_k=6,
-                                pinned=frozenset({"status_line"}),
-                            )
-                            if self._chat_transport is not None:
-                                self._agent.transport = ToolFilteringTransport(
-                                    self._chat_transport,
-                                    self._tool_selector,
+                            if "embedding" in self._selector_classes:
+                                cls = self._selector_classes["embedding"]
+                                self._selector_instances["embedding"] = cls(
+                                    transport=self._embed_cache, top_k=6, pinned=frozenset({"status_line"})
                                 )
+                            self._agent.selector = self._get_active_selector()
                         except ImportError:
                             pass
         await self._write_meta(f"[dim]{meta.label} settings updated[/]")
@@ -1086,18 +1170,49 @@ class AgentApp(App[None]):
             result[name] = doc.strip().split("\n")[0] if doc else name
         return result
 
+    def _get_active_selector(self) -> ToolSelector | None:
+        if self._active_selector is not None:
+            return self._selector_instances.get(self._active_selector)
+        return None
+
     def _show_plugin_hub(self) -> None:
+        tool_groups = discover_tools_by_package()
+        for ep_name, plugin in self._tools_plugins.items():
+            tool_groups[ep_name] = list(plugin.all_tools)
         self.push_screen(
             PluginHubScreen(
-                tools=self._all_tools,
+                tool_groups=tool_groups,
+                transport_available=list(self._transports.available),
+                transport_discovered=list(self._transports.discovered),
+                transport_model_counts=self._transports.model_counts(),
                 disabled_plugins=self._disabled_plugins,
+                disabled_transports=self._disabled_transports,
                 guard_names=self._guard_descriptions(),
                 disabled_guards=self._disabled_guards,
                 guard_tool_map=self._guard_tool_map,
                 on_plugins_changed=self._on_plugins_changed,
+                on_transports_changed=self._on_transports_changed,
                 on_guards_changed=self._on_guards_changed,
+                reload_transport_models=self._reload_transport_models,
+                selector_classes=self._selector_classes,
+                active_selector=self._active_selector,
+                on_selector_changed=self._on_selector_changed,
             ),
         )
+
+    async def _on_selector_changed(self, active: str | None) -> None:
+        self._active_selector = active
+        await self._config.set("selector.active", active or "")
+        if self._agent is not None:
+            self._agent.selector = self._get_active_selector()
+
+    async def _reload_transport_models(self) -> dict[str, int]:
+        self.ready.clear()
+        try:
+            await self._transports.reload_models()
+        finally:
+            self.ready.set()
+        return self._transports.model_counts()
 
     def _show_tools_plugin(self, plugin: ToolsPlugin) -> None:
         screen = plugin.settings_screen()
@@ -1110,6 +1225,13 @@ class AgentApp(App[None]):
             tools.extend(plugin.all_tools)
         self._all_tools = tools
         self._rebuild_agent_tools()
+
+    async def _on_transports_changed(self, disabled: set[str]) -> None:
+        self._disabled_transports = disabled
+        if disabled:
+            await self._config.set("transports.disabled", ",".join(sorted(disabled)))
+        else:
+            await self._config.delete("transports.disabled")
 
     async def _on_plugins_changed(self, disabled: set[str]) -> None:
         if self._agent is None:
@@ -1154,6 +1276,10 @@ class AgentApp(App[None]):
         self._nav_select(None)
         value = message.value.strip()
         if not value:
+            return
+        if not self.ready.is_set():
+            message.input.value = ""
+            await self._write_meta("[dim]Still initializing, please wait...[/]")
             return
         message.input.value = ""
 
@@ -1214,6 +1340,13 @@ class AgentApp(App[None]):
                                 await self._update_status()
                                 w = await self._ensure_tool_status()
                                 w.track(tid, name)
+                                # Start a new arg stream for this tool
+                                self._tool_arg_streams[tid] = ToolArgStream(tid)
+                            case ToolInputDelta(tool_use_id=tid, partial_json=json_chunk):
+                                arg_stream = self._tool_arg_streams.get(tid)
+                                if arg_stream is not None:
+                                    for field_event in arg_stream.feed(json_chunk):
+                                        await self._handle_tool_field_event(field_event, tid)
                             case ToolResult(
                                 tool_use_id=tid,
                                 name=name,

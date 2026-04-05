@@ -20,8 +20,8 @@ uv tool install "axio-tui[openai,local]"
 uv tool install "axio-tui[nebius,guards]"
 ```
 
-Available extras: `openai`, `nebius`, `codex`, `local`, `mcp`, `rag`,
-`guards`, `all`.
+Available extras: `anthropic`, `openai`, `nebius`, `codex`, `local`, `mcp`,
+`rag`, `guards`, `all`.
 
 :::{dropdown} Alternative: pip install
 ```bash
@@ -42,6 +42,9 @@ uv sync
 Export the API key for your chosen transport:
 
 ```bash
+# Anthropic
+export ANTHROPIC_API_KEY="sk-ant-..."
+
 # OpenAI
 export OPENAI_API_KEY="sk-..."
 

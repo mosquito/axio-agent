@@ -39,6 +39,7 @@ TRANSPORT_GROUP = "axio.transport"
 TRANSPORT_SETTINGS_GROUP = "axio.transport.settings"
 GUARDS_GROUP = "axio.guards"
 TOOLS_SETTINGS_GROUP = "axio.tools.settings"
+SELECTOR_GROUP = "axio.selector"
 
 
 def _handler_description(handler: type[ToolHandler]) -> str:
@@ -71,6 +72,30 @@ def discover_tools() -> list[Tool]:
             )
         )
     return tools
+
+
+def discover_tools_by_package() -> dict[str, list[Tool]]:
+    """Return tools from 'axio.tools' entry points grouped by distribution package name."""
+    groups: dict[str, list[Tool]] = {}
+    for ep in entry_points(group=TOOLS_GROUP):
+        try:
+            handler = ep.load()
+        except Exception:
+            logger.warning("Failed to load tool entry point %r", ep.name, exc_info=True)
+            continue
+        if not (isinstance(handler, type) and issubclass(handler, ToolHandler)):
+            continue
+        pkg = ep.dist.name if ep.dist else "unknown"
+        concurrency: int | None = getattr(handler, "_tool_concurrency", None)
+        groups.setdefault(pkg, []).append(
+            Tool(
+                name=ep.name,
+                description=_handler_description(handler),
+                handler=handler,
+                concurrency=concurrency,
+            )
+        )
+    return groups
 
 
 def discover_transports() -> dict[str, type]:
@@ -111,6 +136,17 @@ def discover_tools_plugins() -> dict[str, ToolsPlugin]:
             logger.debug("Tools plugin %r unavailable", ep.name)
             continue
     return plugins
+
+
+def discover_selectors() -> dict[str, type]:
+    """Return {ep_name: cls} from 'axio.selector' entry points."""
+    result: dict[str, type] = {}
+    for ep in entry_points(group=SELECTOR_GROUP):
+        try:
+            result[ep.name] = ep.load()
+        except Exception:
+            logger.warning("Failed to load selector EP %r", ep.name, exc_info=True)
+    return result
 
 
 def discover_guards() -> dict[str, type[PermissionGuard]]:

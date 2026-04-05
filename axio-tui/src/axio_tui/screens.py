@@ -50,7 +50,7 @@ class ModelSelectScreen(ModalScreen[tuple[str, ModelSpec] | None]):
     @staticmethod
     def _format(entry: tuple[str, ModelSpec]) -> str:
         name, spec = entry
-        return f"[{name}] {spec.id}  (ctx:{spec.context_window:,} out:{spec.max_output_tokens:,})"
+        return f"\\[{name}] {spec.id}  (ctx:{spec.context_window:,} out:{spec.max_output_tokens:,})"
 
     def compose(self) -> ComposeResult:
         with Container(id="model-select"):
@@ -159,83 +159,237 @@ class SessionSelectScreen(ModalScreen[SessionInfo | None]):
         self.dismiss(None)
 
 
-class PluginSelectScreen(ModalScreen[set[str] | None]):
-    """Enable / disable discovered plugins."""
+class TransportSelectScreen(ModalScreen[set[str] | None]):
+    """axio.transport — enable/disable transports and reload model catalogues."""
 
-    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("r", "reload", "Reload models"),
+    ]
     CSS = """
-    PluginSelectScreen { align: center middle; }
-    #plugin-select { width: 80; height: 80%; border: heavy $accent; background: $panel; padding: 1 2; }
-    #plugin-filter { margin-bottom: 1; }
-    #plugin-list { height: 1fr; }
+    TransportSelectScreen { align: center middle; }
+    #transport-select { width: 80; height: 80%; border: heavy $accent; background: $panel; padding: 1 2; }
+    #transport-list { height: 1fr; }
+    #transport-status { height: 1; }
     """
 
-    def __init__(self, tools: list[Tool], disabled: set[str]) -> None:
+    def __init__(
+        self,
+        available: list[str],  # initialized transports (have API key)
+        discovered: list[str],  # all discovered (incl. not configured)
+        model_counts: dict[str, int],
+        disabled: set[str],
+        reload_cb: Any,  # async () -> dict[str, int]
+    ) -> None:
         super().__init__()
-        self._all_tools = tools
+        self._available = set(available)
+        self._discovered = discovered
+        self._model_counts = dict(model_counts)
         self._disabled = set(disabled)
-        self._filtered: list[Tool] = list(tools)
+        self._reload_cb = reload_cb
 
-    def _format(self, tool: Tool) -> str:
-        mark = "[ ]" if tool.name in self._disabled else "[*]"
-        return f"{mark} {tool.name:<20} — {tool.description}"
+    def _format(self, name: str) -> str:
+        if name not in self._available:
+            return f"[ ] {name:<36} (not configured)"
+        count = self._model_counts.get(name, 0)
+        if name in self._disabled:
+            return f"[-] {name:<36} {count} models  (disabled)"
+        return f"[*] {name:<36} {count} models"
 
     def compose(self) -> ComposeResult:
-        with Container(id="plugin-select"):
-            yield Static("[bold]Manage Plugins[/]")
-            yield Input(placeholder="Filter plugins...", id="plugin-filter")
-            yield OptionList(*[self._format(t) for t in self._filtered], id="plugin-list")
+        with Container(id="transport-select"):
+            yield Static("[bold]axio.transport[/]  [dim]r = reload model catalogues[/]")
+            yield OptionList(*[self._format(n) for n in self._discovered], id="transport-list")
+            yield Static("", id="transport-status")
 
     def on_mount(self) -> None:
-        self.query_one("#plugin-filter", Input).focus()
+        self.query_one("#transport-list", OptionList).focus()
 
     def _refresh_list(self) -> None:
-        ol = self.query_one("#plugin-list", OptionList)
+        ol = self.query_one("#transport-list", OptionList)
         ol.clear_options()
-        for t in self._filtered:
-            ol.add_option(self._format(t))
-
-    def on_input_changed(self, message: Input.Changed) -> None:
-        query = message.value.lower()
-        self._filtered = [t for t in self._all_tools if query in t.name.lower()]
-        self._refresh_list()
-
-    def on_input_submitted(self, message: Input.Submitted) -> None:
-        if self._filtered:
-            self._toggle(self._filtered[0])
-            self._refresh_list()
-
-    def on_key(self, event) -> None:  # type: ignore[no-untyped-def]
-        focused = self.focused
-        ol = self.query_one("#plugin-list", OptionList)
-        flt = self.query_one("#plugin-filter", Input)
-        if event.key == "down" and focused is flt:
-            if self._filtered:
-                ol.focus()
-                ol.highlighted = 0
-            event.prevent_default()
-        elif event.key == "up" and focused is ol and ol.highlighted == 0:
-            flt.focus()
-            event.prevent_default()
+        for name in self._discovered:
+            ol.add_option(self._format(name))
 
     def on_option_list_option_selected(self, message: OptionList.OptionSelected) -> None:
         idx = message.option_index
-        if 0 <= idx < len(self._filtered):
-            self._toggle(self._filtered[idx])
-            self._refresh_list()
+        if 0 <= idx < len(self._discovered):
+            name = self._discovered[idx]
+            if name in self._available:
+                if name in self._disabled:
+                    self._disabled.discard(name)
+                else:
+                    self._disabled.add(name)
+                self._refresh_list()
 
-    def _toggle(self, tool: Tool) -> None:
-        if tool.name in self._disabled:
-            self._disabled.discard(tool.name)
-        else:
-            self._disabled.add(tool.name)
+    def action_reload(self) -> None:
+        self.query_one("#transport-status", Static).update("[dim]Reloading...[/]")
+        self.run_worker(self._do_reload(), exclusive=True)
+
+    async def _do_reload(self) -> None:
+        updated: dict[str, int] = await self._reload_cb()
+        self._model_counts = updated
+        self.query_one("#transport-status", Static).update("[dim]Reloaded.[/]")
+        self._refresh_list()
 
     def action_cancel(self) -> None:
         self.dismiss(self._disabled)
 
 
+class ToolSelectScreen(ModalScreen[set[str] | None]):
+    """axio.tools — toggle tools grouped by package / plugin."""
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+    CSS = """
+    ToolSelectScreen { align: center middle; }
+    #tool-select { width: 80; height: 80%; border: heavy $accent; background: $panel; padding: 1 2; }
+    #tool-filter { margin-bottom: 1; }
+    #tool-list { height: 1fr; }
+    """
+
+    def __init__(self, groups: dict[str, list[Tool]], disabled: set[str]) -> None:
+        super().__init__()
+        self._groups = groups
+        self._all_tools: list[Tool] = [t for ts in groups.values() for t in ts]
+        self._disabled = set(disabled)
+        self._filter_query = ""
+        self._items: list[str | Tool] = []
+        self._rebuild_items()
+
+    def _rebuild_items(self) -> None:
+        q = self._filter_query
+        if q:
+            self._items = [t for t in self._all_tools if q in t.name.lower() or q in t.description.lower()]
+            return
+        items: list[str | Tool] = []
+        for pkg, tools in self._groups.items():
+            items.append(pkg)
+            items.extend(tools)
+        self._items = items
+
+    def _group_header(self, pkg: str) -> str:
+        tools = self._groups[pkg]
+        n_on = sum(1 for t in tools if t.name not in self._disabled)
+        total = len(tools)
+        mark = "[*]" if n_on == total else ("[ ]" if n_on == 0 else "[-]")
+        return f"{mark} ── {pkg} ({n_on}/{total}) ──"
+
+    def _tool_line(self, tool: Tool, *, indent: bool = False) -> str:
+        mark = "[ ]" if tool.name in self._disabled else "[*]"
+        prefix = "  " if indent else ""
+        return f"{prefix}{mark} {tool.name:<22} {tool.description}"
+
+    def _format(self, item: str | Tool) -> str:
+        if isinstance(item, str):
+            return self._group_header(item)
+        return self._tool_line(item, indent=not self._filter_query)
+
+    def compose(self) -> ComposeResult:
+        with Container(id="tool-select"):
+            yield Static("[bold]axio.tools[/]")
+            yield Input(placeholder="Filter...", id="tool-filter")
+            yield OptionList(*[self._format(i) for i in self._items], id="tool-list")
+
+    def on_mount(self) -> None:
+        self.query_one("#tool-filter", Input).focus()
+
+    def _refresh_list(self) -> None:
+        ol = self.query_one("#tool-list", OptionList)
+        ol.clear_options()
+        for item in self._items:
+            ol.add_option(self._format(item))
+
+    def on_input_changed(self, message: Input.Changed) -> None:
+        self._filter_query = message.value.lower()
+        self._rebuild_items()
+        self._refresh_list()
+
+    def on_key(self, event) -> None:  # type: ignore[no-untyped-def]
+        ol = self.query_one("#tool-list", OptionList)
+        flt = self.query_one("#tool-filter", Input)
+        if event.key == "down" and self.focused is flt:
+            if self._items:
+                ol.focus()
+                ol.highlighted = 0
+            event.prevent_default()
+        elif event.key == "up" and self.focused is ol and ol.highlighted == 0:
+            flt.focus()
+            event.prevent_default()
+
+    def on_option_list_option_selected(self, message: OptionList.OptionSelected) -> None:
+        idx = message.option_index
+        if 0 <= idx < len(self._items):
+            self._select(self._items[idx])
+            self._rebuild_items()
+            self._refresh_list()
+
+    def _select(self, item: str | Tool) -> None:
+        if isinstance(item, str):
+            tools = self._groups[item]
+            all_on = all(t.name not in self._disabled for t in tools)
+            for t in tools:
+                if all_on:
+                    self._disabled.add(t.name)
+                else:
+                    self._disabled.discard(t.name)
+        else:
+            if item.name in self._disabled:
+                self._disabled.discard(item.name)
+            else:
+                self._disabled.add(item.name)
+
+    def action_cancel(self) -> None:
+        self.dismiss(self._disabled)
+
+
+class SelectorSelectScreen(ModalScreen[str | None]):
+    """Radio-button modal for choosing an active ToolSelector (or none)."""
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+    CSS = """
+    SelectorSelectScreen { align: center middle; }
+    #selector-select { width: 70; height: auto; border: heavy $accent; background: $panel; padding: 1 2; }
+    #selector-list { height: auto; }
+    """
+
+    def __init__(self, selectors: dict[str, type], active: str | None) -> None:
+        super().__init__()
+        self._selectors = selectors
+        self._active = active
+        self._order = list(selectors.keys())
+
+    def _format_none(self) -> str:
+        mark = "(*)" if self._active is None else "( )"
+        return f"{mark} no filtering"
+
+    def _format(self, name: str, cls: type) -> str:
+        mark = "(*)" if name == self._active else "( )"
+        label = getattr(cls, "label", name)
+        desc = getattr(cls, "description", "")
+        return f"{mark} {label}  {desc}"
+
+    def compose(self) -> ComposeResult:
+        entries = [self._format_none()] + [self._format(n, self._selectors[n]) for n in self._order]
+        with Container(id="selector-select"):
+            yield Static("[bold]axio.selector[/]  Tool filter")
+            yield OptionList(*entries, id="selector-list")
+
+    def on_mount(self) -> None:
+        self.query_one("#selector-list", OptionList).focus()
+
+    def on_option_list_option_selected(self, message: OptionList.OptionSelected) -> None:
+        idx = message.option_index
+        if idx == 0:
+            self.dismiss(None)
+        elif 1 <= idx <= len(self._order):
+            self.dismiss(self._order[idx - 1])
+
+    def action_cancel(self) -> None:
+        self.dismiss(self._active)
+
+
 class PluginHubScreen(ModalScreen[None]):
-    """Top-level plugin management hub with Tools and Guards subcategories."""
+    """Entry-point hub: axio.tools / axio.transport / axio.guards."""
 
     BINDINGS = [Binding("escape", "cancel", "Cancel")]
     CSS = """
@@ -246,32 +400,62 @@ class PluginHubScreen(ModalScreen[None]):
 
     def __init__(
         self,
-        tools: list[Tool],
+        tool_groups: dict[str, list[Tool]],
+        transport_available: list[str],
+        transport_discovered: list[str],
+        transport_model_counts: dict[str, int],
         disabled_plugins: set[str],
+        disabled_transports: set[str],
         guard_names: dict[str, str],
         disabled_guards: set[str],
         guard_tool_map: dict[str, set[str]],
         on_plugins_changed: object,
+        on_transports_changed: object,
         on_guards_changed: object,
+        reload_transport_models: object,  # async () -> dict[str, int]
+        selector_classes: dict[str, type] = {},  # {ep_name: cls}
+        active_selector: str | None = None,
+        on_selector_changed: object = None,
     ) -> None:
         super().__init__()
-        self._tools = tools
+        self._tool_groups = tool_groups
+        self._all_tools: list[Tool] = [t for ts in tool_groups.values() for t in ts]
+        self._transport_available = transport_available
+        self._transport_discovered = transport_discovered
+        self._transport_model_counts = transport_model_counts
         self._disabled_plugins = set(disabled_plugins)
+        self._disabled_transports = set(disabled_transports)
         self._guard_names = guard_names
         self._disabled_guards = set(disabled_guards)
         self._guard_tool_map = {k: set(v) for k, v in guard_tool_map.items()}
         self._on_plugins_changed = on_plugins_changed
+        self._on_transports_changed = on_transports_changed
         self._on_guards_changed = on_guards_changed
+        self._reload_transport_models = reload_transport_models
+        self._selector_classes = selector_classes
+        self._active_selector = active_selector
+        self._on_selector_changed = on_selector_changed
 
     def _format_entries(self) -> list[str]:
-        enabled_tools = sum(1 for t in self._tools if t.name not in self._disabled_plugins)
-        total_tools = len(self._tools)
-        enabled_guards = sum(1 for g in self._guard_names if g not in self._disabled_guards)
-        total_guards = len(self._guard_names)
-        return [
-            f"Tools           {enabled_tools}/{total_tools} enabled",
-            f"Guards          {enabled_guards}/{total_guards} enabled",
+        n_on = sum(1 for t in self._all_tools if t.name not in self._disabled_plugins)
+        n_total = len(self._all_tools)
+        t_on = sum(1 for n in self._transport_available if n not in self._disabled_transports)
+        t_total = len(self._transport_available)
+        g_on = sum(1 for g in self._guard_names if g not in self._disabled_guards)
+        g_total = len(self._guard_names)
+        entries = [
+            f"axio.tools        {n_on}/{n_total} enabled",
+            f"axio.transport    {t_on}/{t_total} enabled",
+            f"axio.guards       {g_on}/{g_total} enabled",
         ]
+        if self._selector_classes:
+            if self._active_selector is not None:
+                cls = self._selector_classes.get(self._active_selector)
+                label = getattr(cls, "label", self._active_selector) if cls else self._active_selector
+            else:
+                label = "no filtering"
+            entries.append(f"axio.selector     [{label}]  \u25b6")
+        return entries
 
     def compose(self) -> ComposeResult:
         with Container(id="plugin-hub"):
@@ -288,33 +472,61 @@ class PluginHubScreen(ModalScreen[None]):
             ol.add_option(entry)
 
     def on_option_list_option_selected(self, message: OptionList.OptionSelected) -> None:
-        if message.option_index == 0:
+        idx = message.option_index
+        if idx == 0:
             self.app.push_screen(
-                PluginSelectScreen(self._tools, self._disabled_plugins),
+                ToolSelectScreen(self._tool_groups, self._disabled_plugins),
                 self._on_tool_screen_dismissed,
             )
-        elif message.option_index == 1:
-            all_tool_names = [t.name for t in self._tools]
+        elif idx == 1:
+            self.app.push_screen(
+                TransportSelectScreen(
+                    available=self._transport_available,
+                    discovered=self._transport_discovered,
+                    model_counts=self._transport_model_counts,
+                    disabled=self._disabled_transports,
+                    reload_cb=self._reload_transport_models,
+                ),
+                self._on_transport_screen_dismissed,
+            )
+        elif idx == 2:
             self.app.push_screen(
                 GuardSelectScreen(
                     self._guard_names,
                     self._disabled_guards,
                     self._guard_tool_map,
-                    all_tool_names,
+                    [t.name for t in self._all_tools],
                 ),
                 self._on_guard_screen_dismissed,
             )
+        elif idx == 3 and self._selector_classes:
+            self.app.push_screen(
+                SelectorSelectScreen(self._selector_classes, self._active_selector),
+                self._on_selector_screen_dismissed,
+            )
 
-    def _on_tool_screen_dismissed(self, disabled: set[str] | None) -> None:
+    async def _on_selector_screen_dismissed(self, active: str | None) -> None:
+        self._active_selector = active
+        if self._on_selector_changed is not None:
+            await self._on_selector_changed(active)  # type: ignore[operator]
+        self._refresh_list()
+
+    async def _on_tool_screen_dismissed(self, disabled: set[str] | None) -> None:
         if disabled is not None:
             self._disabled_plugins = disabled
-            self._on_plugins_changed(disabled)  # type: ignore[operator]
+            await self._on_plugins_changed(disabled)  # type: ignore[operator]
             self._refresh_list()
 
-    def _on_guard_screen_dismissed(self, result: tuple[set[str], dict[str, set[str]]] | None) -> None:
+    async def _on_transport_screen_dismissed(self, disabled: set[str] | None) -> None:
+        if disabled is not None:
+            self._disabled_transports = disabled
+            await self._on_transports_changed(disabled)  # type: ignore[operator]
+            self._refresh_list()
+
+    async def _on_guard_screen_dismissed(self, result: tuple[set[str], dict[str, set[str]]] | None) -> None:
         if result is not None:
             self._disabled_guards, self._guard_tool_map = result
-            self._on_guards_changed(result[0], result[1])  # type: ignore[operator]
+            await self._on_guards_changed(result[0], result[1])  # type: ignore[operator]
             self._refresh_list()
 
     def action_cancel(self) -> None:

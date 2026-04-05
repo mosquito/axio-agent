@@ -64,7 +64,7 @@ asyncio.run(main())
        ▼
   ┌─────────┐   stream()    ┌─────────────────────┐
   │  Agent  │ ────────────▶ │ CompletionTransport  │
-  │  loop   │ ◀──────────── │ (OpenAI, Nebius, …)  │
+  │  loop   │ ◀──────────── │ (Anthropic, OpenAI, …) │
   └─────────┘  StreamEvent  └─────────────────────┘
        │
        │ tool_use?
@@ -189,6 +189,7 @@ my_guard = "my_package:MyGuard"
 
 | Package | Purpose |
 |---|---|
+| [axio-transport-anthropic](https://github.com/axio-agent/axio-transport-anthropic) | Anthropic Claude transport |
 | [axio-transport-openai](https://github.com/axio-agent/axio-transport-openai) | OpenAI-compatible transport |
 | [axio-transport-nebius](https://github.com/axio-agent/axio-transport-nebius) | Nebius AI Studio transport |
 | [axio-transport-codex](https://github.com/axio-agent/axio-transport-codex) | ChatGPT OAuth transport |
