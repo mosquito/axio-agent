@@ -84,7 +84,7 @@ openai = "axio_transport_openai:OpenAITransport"
 
 ## Part of the axio ecosystem
 
-[axio](https://github.com/axio-agent/axio) · [axio-transport-nebius](https://github.com/axio-agent/axio-transport-nebius) · [axio-transport-codex](https://github.com/axio-agent/axio-transport-codex) · [axio-tui](https://github.com/axio-agent/axio-tui)
+[axio](https://github.com/axio-agent/axio) · [axio-transport-codex](https://github.com/axio-agent/axio-transport-codex) · [axio-tui](https://github.com/axio-agent/axio-tui)
 
 ## License
 

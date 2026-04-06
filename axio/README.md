@@ -190,8 +190,7 @@ my_guard = "my_package:MyGuard"
 | Package | Purpose |
 |---|---|
 | [axio-transport-anthropic](https://github.com/axio-agent/axio-transport-anthropic) | Anthropic Claude transport |
-| [axio-transport-openai](https://github.com/axio-agent/axio-transport-openai) | OpenAI-compatible transport |
-| [axio-transport-nebius](https://github.com/axio-agent/axio-transport-nebius) | Nebius AI Studio transport |
+| [axio-transport-openai](https://github.com/axio-agent/axio-transport-openai) | OpenAI-compatible transport (OpenAI, Nebius, OpenRouter, custom) |
 | [axio-transport-codex](https://github.com/axio-agent/axio-transport-codex) | ChatGPT OAuth transport |
 | [axio-tools-local](https://github.com/axio-agent/axio-tools-local) | Shell, file, Python tools |
 | [axio-tools-mcp](https://github.com/axio-agent/axio-tools-mcp) | MCP server bridge |

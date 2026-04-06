@@ -42,7 +42,6 @@ pip install "axio-tui[openai,local,mcp]"
 |---|---|
 | `anthropic` | axio-transport-anthropic |
 | `openai` | axio-transport-openai |
-| `nebius` | axio-transport-nebius |
 | `codex` | axio-transport-codex |
 | `local` | axio-tools-local |
 | `mcp` | axio-tools-mcp |

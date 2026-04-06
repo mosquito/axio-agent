@@ -54,7 +54,7 @@ codex = "axio_transport_codex:CodexTransport"
 
 ## Part of the axio ecosystem
 
-[axio](https://github.com/axio-agent/axio) · [axio-transport-openai](https://github.com/axio-agent/axio-transport-openai) · [axio-transport-nebius](https://github.com/axio-agent/axio-transport-nebius) · [axio-tui](https://github.com/axio-agent/axio-tui)
+[axio](https://github.com/axio-agent/axio) · [axio-transport-openai](https://github.com/axio-agent/axio-transport-openai) · [axio-tui](https://github.com/axio-agent/axio-tui)
 
 ## License
 

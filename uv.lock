@@ -439,18 +439,6 @@ dev = [
 ]
 
 [[package]]
-name = "axio-transport-nebius"
-version = "0.2.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "axio-transport-openai" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/38/ab/c66d1a8d734199dce78e6a1908726c99971fb35cc4a8f10b3e2e94f5ea86/axio_transport_nebius-0.2.3.tar.gz", hash = "sha256:f8d0c5420ea938fc2bfbb8eaa61de826581e912a731a982479f48845216738a3", size = 79806, upload-time = "2026-03-22T20:17:20.746Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9f/04/670512768dd5f2b48ce7ad98be7e957b81c368f1709b92caa560b2b39c1a/axio_transport_nebius-0.2.3-py3-none-any.whl", hash = "sha256:4a9c6f637143bd75b6741337de44965e6aeb1bee83cbd2f4b7ee6d1d9b00eed5", size = 5413, upload-time = "2026-03-22T20:17:18.906Z" },
-]
-
-[[package]]
 name = "axio-transport-openai"
 version = "0.2.3"
 source = { editable = "axio-transport-openai" }
@@ -514,7 +502,6 @@ all = [
     { name = "axio-tools-mcp" },
     { name = "axio-transport-anthropic" },
     { name = "axio-transport-codex" },
-    { name = "axio-transport-nebius" },
     { name = "axio-transport-openai" },
     { name = "axio-tui-guards" },
     { name = "axio-tui-rag" },
@@ -533,9 +520,6 @@ local = [
 ]
 mcp = [
     { name = "axio-tools-mcp" },
-]
-nebius = [
-    { name = "axio-transport-nebius" },
 ]
 openai = [
     { name = "axio-transport-openai" },
@@ -562,15 +546,14 @@ requires-dist = [
     { name = "axio-tools-mcp", marker = "extra == 'mcp'", editable = "axio-tools-mcp" },
     { name = "axio-transport-anthropic", marker = "extra == 'anthropic'", editable = "axio-transport-anthropic" },
     { name = "axio-transport-codex", marker = "extra == 'codex'", editable = "axio-transport-codex" },
-    { name = "axio-transport-nebius", marker = "extra == 'nebius'" },
     { name = "axio-transport-openai", marker = "extra == 'openai'", editable = "axio-transport-openai" },
-    { name = "axio-tui", extras = ["anthropic", "openai", "nebius", "codex", "local", "mcp", "rag", "guards"], marker = "extra == 'all'", editable = "axio-tui" },
+    { name = "axio-tui", extras = ["anthropic", "openai", "codex", "local", "mcp", "rag", "guards"], marker = "extra == 'all'", editable = "axio-tui" },
     { name = "axio-tui-guards", marker = "extra == 'guards'", editable = "axio-tui-guards" },
     { name = "axio-tui-rag", marker = "extra == 'rag'", editable = "axio-tui-rag" },
     { name = "textual", specifier = ">=2.1.0" },
     { name = "textual-serve", specifier = ">=1.1" },
 ]
-provides-extras = ["anthropic", "openai", "nebius", "codex", "local", "mcp", "rag", "guards", "all"]
+provides-extras = ["anthropic", "openai", "codex", "local", "mcp", "rag", "guards", "all"]
 
 [package.metadata.requires-dev]
 dev = [

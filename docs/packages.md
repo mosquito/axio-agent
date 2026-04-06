@@ -1,6 +1,6 @@
 # Packages
 
-The Axio monorepo contains 11 packages, each with a focused responsibility.
+The Axio monorepo contains 10 packages, each with a focused responsibility.
 All packages live under `packages/` and are managed as a uv workspace.
 
 ## Overview
@@ -9,8 +9,7 @@ All packages live under `packages/` and are managed as a uv workspace.
 |---------|---------|-------------------|
 | `axio` | Core framework | — |
 | `axio-transport-anthropic` | Anthropic Claude transport | `axio.transport`, `axio.transport.settings` |
-| `axio-transport-openai` | OpenAI-compatible transport | `axio.transport`, `axio.transport.settings` |
-| `axio-transport-nebius` | Nebius AI Studio transport | `axio.transport`, `axio.transport.settings` |
+| `axio-transport-openai` | OpenAI-compatible transport (OpenAI, Nebius, OpenRouter, custom) | `axio.transport`, `axio.transport.settings` |
 | `axio-transport-codex` | ChatGPT (Codex) OAuth transport | `axio.transport`, `axio.transport.settings` |
 | `axio-tools-local` | Filesystem & shell tools | `axio.tools` |
 | `axio-tools-mcp` | MCP tool loader | `axio.tools.settings` |
@@ -46,24 +45,18 @@ Dependencies: `axio`, `aiohttp>=3.11`
 ### axio-transport-openai
 
 OpenAI-compatible HTTP streaming transport using `aiohttp` and SSE parsing.
-Works with any OpenAI-compatible API (OpenAI, Azure, local servers).
+Includes four transports registered as entry points:
 
-Entry points:
-- `axio.transport` → `OpenAITransport`
-- `axio.transport.settings` → `OpenAISettingsScreen`
+| Entry point name | Class | Provider |
+|---|---|---|
+| `openai` | `OpenAITransport` | OpenAI API |
+| `nebius` | `NebiusTransport` | Nebius AI Studio |
+| `openrouter` | `OpenRouterTransport` | OpenRouter |
+| `openai-custom` | `OpenAICompatibleTransport` | Any OpenAI-compatible endpoint |
+
+Settings screens are registered under `axio.transport.settings` for each.
 
 Dependencies: `axio`, `aiohttp>=3.11`
-
-### axio-transport-nebius
-
-Nebius AI Studio transport. Extends `axio-transport-openai` with
-Nebius-specific configuration and model catalog.
-
-Entry points:
-- `axio.transport` → `NebiusTransport`
-- `axio.transport.settings` → `NebiusSettingsScreen`
-
-Dependencies: `axio-transport-openai`
 
 ### axio-transport-codex
 
