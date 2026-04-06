@@ -8,16 +8,16 @@ import json
 import logging
 import platform
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+from typing import Any
 
 import aiohttp
 from axio.blocks import ImageBlock, TextBlock, ToolResultBlock, ToolUseBlock
 from axio.events import IterationEnd, ReasoningDelta, StreamEvent, TextDelta, ToolInputDelta, ToolUseStart
 from axio.exceptions import StreamError
 from axio.messages import Message
-from axio.models import Capability, ModelRegistry, ModelSpec, TransportMeta
+from axio.models import Capability, ModelRegistry, ModelSpec
 from axio.tool import Tool
 from axio.transport import CompletionTransport
 from axio.types import StopReason, Usage
@@ -160,19 +160,7 @@ def _convert_messages(messages: list[Message], system: str) -> tuple[str, list[d
 
 @dataclass(slots=True)
 class CodexTransport(CompletionTransport):
-    META: ClassVar[TransportMeta] = TransportMeta(
-        label="ChatGPT (Codex)",
-        api_key_env="",
-        role_defaults={
-            "chat": "gpt-4.1",
-            "compact": "gpt-4.1-mini",
-            "subagent": "gpt-4.1-mini",
-            "guard": "gpt-4.1-nano",
-            "vision": "gpt-4.1",
-            "reasoning": "o4-mini",
-        },
-    )
-
+    name: str = "ChatGPT (Codex)"
     api_key: str = ""
     refresh_token: str = ""
     expires_at: str = ""
@@ -181,6 +169,9 @@ class CodexTransport(CompletionTransport):
     model: ModelSpec = field(default_factory=lambda: CODEX_MODELS["gpt-4.1"])
     models: ModelRegistry = field(default_factory=lambda: ModelRegistry(CODEX_MODELS.values()))
     session: aiohttp.ClientSession | None = field(default=None, repr=False, compare=False)
+    on_auth_refresh: Callable[[dict[str, str]], Awaitable[None]] | None = field(
+        default=None, repr=False, compare=False
+    )
     max_retries: int = 10
     retry_base_delay: float = 5.0
 
@@ -235,6 +226,19 @@ class CodexTransport(CompletionTransport):
             self.account_id = orgs[0].get("id", self.account_id)
 
         logger.info("Token refreshed, expires_at=%s", self.expires_at)
+
+        if self.on_auth_refresh is not None:
+            try:
+                await self.on_auth_refresh(
+                    {
+                        "api_key": self.api_key,
+                        "refresh_token": self.refresh_token,
+                        "expires_at": self.expires_at,
+                        "account_id": self.account_id,
+                    }
+                )
+            except Exception:
+                logger.warning("Failed to persist refreshed tokens", exc_info=True)
 
     def build_payload(self, messages: list[Message], tools: list[Tool], system: str) -> dict[str, Any]:
         instructions, input_items = _convert_messages(messages, system)

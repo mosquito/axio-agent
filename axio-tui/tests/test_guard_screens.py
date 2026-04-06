@@ -108,37 +108,49 @@ class TestGuardSelectScreen:
         assert original_map["path"] == {"shell"}, "Original map must not be mutated"
 
 
+def _make_hub(
+    tools: list[Tool],
+    disabled_plugins: set[str] = frozenset(),  # type: ignore[assignment]
+    disabled_guards: set[str] = frozenset(),  # type: ignore[assignment]
+    guard_tool_map: dict[str, set[str]] | None = None,
+    on_plugins_changed: object = None,
+    on_guards_changed: object = None,
+) -> PluginHubScreen:
+    return PluginHubScreen(
+        tool_groups={"pkg": tools},
+        transport_available=["anthropic"],
+        transport_discovered=["anthropic"],
+        transport_model_counts={"anthropic": 3},
+        disabled_plugins=set(disabled_plugins),
+        disabled_transports=set(),
+        guard_names=GUARD_NAMES,
+        disabled_guards=set(disabled_guards),
+        guard_tool_map=guard_tool_map or {},
+        on_plugins_changed=on_plugins_changed or (lambda d: None),
+        on_transports_changed=lambda d: None,
+        on_guards_changed=on_guards_changed or (lambda d, m: None),
+        reload_transport_models=lambda: {},
+    )
+
+
 class TestPluginHubScreen:
     def test_format_entries(self) -> None:
         tools = _make_tools("shell", "read_file", "write_file")
-        screen = PluginHubScreen(
-            tools=tools,
+        screen = _make_hub(
+            tools,
             disabled_plugins={"shell"},
-            guard_names=GUARD_NAMES,
             disabled_guards={"llm"},
             guard_tool_map={"path": {"shell"}, "llm": set()},
-            on_plugins_changed=lambda d: None,
-            on_guards_changed=lambda d, m: None,
         )
         entries = screen._format_entries()
-        assert "2/3 enabled" in entries[0]
-        assert "1/2 enabled" in entries[1]
+        assert "2/3 enabled" in entries[0]  # axio.tools
+        assert "1/2 enabled" in entries[2]  # axio.guards (index 2 — transport is index 1)
 
     def test_plugin_callback_updates_state(self) -> None:
         tools = _make_tools("shell", "read_file")
         captured_plugins: list[set[str]] = []
+        screen = _make_hub(tools, on_plugins_changed=lambda d: captured_plugins.append(d))
 
-        screen = PluginHubScreen(
-            tools=tools,
-            disabled_plugins=set(),
-            guard_names=GUARD_NAMES,
-            disabled_guards=set(),
-            guard_tool_map={"path": {"shell"}, "llm": set()},
-            on_plugins_changed=lambda d: captured_plugins.append(d),
-            on_guards_changed=lambda d, m: None,
-        )
-
-        # Directly update state (avoids DOM _refresh_list)
         screen._disabled_plugins = {"shell"}
         screen._on_plugins_changed({"shell"})  # type: ignore[operator]
         assert captured_plugins == [{"shell"}]
@@ -146,39 +158,20 @@ class TestPluginHubScreen:
     def test_guard_callback_updates_state(self) -> None:
         tools = _make_tools("shell", "read_file")
         captured_guards: list[tuple[set[str], dict[str, set[str]]]] = []
+        screen = _make_hub(tools, on_guards_changed=lambda d, m: captured_guards.append((d, m)))
 
-        screen = PluginHubScreen(
-            tools=tools,
-            disabled_plugins=set(),
-            guard_names=GUARD_NAMES,
-            disabled_guards=set(),
-            guard_tool_map={"path": {"shell"}, "llm": set()},
-            on_plugins_changed=lambda d: None,
-            on_guards_changed=lambda d, m: captured_guards.append((d, m)),
-        )
-
-        # Directly update state
         screen._disabled_guards = {"llm"}
         screen._guard_tool_map = {"path": {"shell", "read_file"}, "llm": set()}
         screen._on_guards_changed(screen._disabled_guards, screen._guard_tool_map)  # type: ignore[operator]
         assert len(captured_guards) == 1
         assert captured_guards[0][0] == {"llm"}
 
-    def test_none_callbacks_ignored(self) -> None:
+    async def test_none_callbacks_ignored(self) -> None:
         tools = _make_tools("shell")
-        screen = PluginHubScreen(
-            tools=tools,
-            disabled_plugins=set(),
-            guard_names=GUARD_NAMES,
-            disabled_guards=set(),
-            guard_tool_map={},
-            on_plugins_changed=lambda d: None,
-            on_guards_changed=lambda d, m: None,
-        )
-        # None results should be ignored (no state change)
-        screen._on_tool_screen_dismissed(None)
+        screen = _make_hub(tools)
+        await screen._on_tool_screen_dismissed(None)
         assert screen._disabled_plugins == set()
-        screen._on_guard_screen_dismissed(None)
+        await screen._on_guard_screen_dismissed(None)
         assert screen._disabled_guards == set()
 
 

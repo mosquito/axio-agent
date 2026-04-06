@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -22,6 +22,7 @@ from axio.events import (
     ToolUseStart,
 )
 from axio.messages import Message
+from axio.selector import ToolSelector
 from axio.stream import AgentStream
 from axio.tool import Tool
 from axio.transport import CompletionTransport
@@ -35,6 +36,7 @@ class Agent:
     system: str
     tools: list[Tool]
     transport: CompletionTransport
+    selector: ToolSelector | None = field(default=None)
     max_iterations: int = field(default=50)
 
     def run_stream(self, user_message: str, context: ContextStore) -> AgentStream:
@@ -120,6 +122,13 @@ class Agent:
             blocks.append(ToolUseBlock(id=tid, name=info["name"], input=inp))
         return blocks, malformed
 
+    async def _select_tools(self, history: list[Message], tools: list[Tool]) -> Iterable[Tool]:
+        if not tools:
+            return []
+        if not self.selector:
+            return tools
+        return await self.selector.select(history, tools)
+
     async def _run_loop(self, user_message: str, context: ContextStore) -> AsyncGenerator[StreamEvent, None]:
         total_usage = Usage(0, 0)
         session_end_emitted = False
@@ -129,8 +138,7 @@ class Agent:
             for iteration in range(1, self.max_iterations + 1):
                 history = await context.get_history()
                 logger.info("Iteration %d, history length=%d", iteration, len(history))
-                active_tools = self.tools
-
+                active_tools = list(await self._select_tools(history, self.tools))
                 content: list[TextBlock | ToolUseBlock] = []
                 pending: dict[str, dict[str, Any]] = {}
                 stop_reason = StopReason.end_turn

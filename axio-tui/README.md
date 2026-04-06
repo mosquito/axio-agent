@@ -13,7 +13,7 @@ A full-featured terminal chat interface with session management, a plugin system
 - **Plugin system** — transports, tools, and guards discovered automatically via entry points
 - **Session management** — persistent SQLite-backed conversations; fork, switch, and resume sessions
 - **Streaming UI** — text and tool calls rendered incrementally as they arrive
-- **Multi-transport** — switch between OpenAI, Nebius, Codex, or any registered backend at runtime
+- **Multi-transport** — switch between Anthropic, OpenAI, Nebius, Codex, or any registered backend at runtime
 - **Sub-agent support** — the `subagent` tool lets the agent spin up nested agent sessions
 - **Vision** — `vision` tool for image analysis (with compatible models)
 - **Serveable** — `textual-serve` support for browser-based access
@@ -40,6 +40,7 @@ pip install "axio-tui[openai,local,mcp]"
 
 | Extra | Installs |
 |---|---|
+| `anthropic` | axio-transport-anthropic |
 | `openai` | axio-transport-openai |
 | `nebius` | axio-transport-nebius |
 | `codex` | axio-transport-codex |
@@ -115,7 +116,7 @@ textual-serve axio_tui.__main__:app
 
 ## Part of the axio ecosystem
 
-[axio](https://github.com/axio-agent/axio) · [axio-tui-rag](https://github.com/axio-agent/axio-tui-rag) · [axio-tui-guards](https://github.com/axio-agent/axio-tui-guards) · [axio-tools-local](https://github.com/axio-agent/axio-tools-local) · [axio-tools-mcp](https://github.com/axio-agent/axio-tools-mcp) · [axio-tools-docker](https://github.com/axio-agent/axio-tools-docker)
+[axio](https://github.com/axio-agent/axio) · [axio-transport-anthropic](https://github.com/axio-agent/axio-transport-anthropic) · [axio-tui-rag](https://github.com/axio-agent/axio-tui-rag) · [axio-tui-guards](https://github.com/axio-agent/axio-tui-guards) · [axio-tools-local](https://github.com/axio-agent/axio-tools-local) · [axio-tools-mcp](https://github.com/axio-agent/axio-tools-mcp) · [axio-tools-docker](https://github.com/axio-agent/axio-tools-docker)
 
 ## License
 

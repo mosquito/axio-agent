@@ -1,25 +1,20 @@
-"""Tests for axon.selector — ToolSelector protocol, EmbeddingToolSelector, ToolFilteringTransport."""
+"""Tests for EmbeddingToolSelector (moved from axio/tests/test_selector.py)."""
 
 from __future__ import annotations
 
 import math
-from collections.abc import AsyncGenerator
 
 import pytest
-
 from axio.blocks import TextBlock, ToolResultBlock
-from axio.events import StreamEvent, TextDelta
 from axio.messages import Message
-from axio.selector import (
+from axio.selector import ToolSelector
+from axio.tool import Tool, ToolHandler
+
+from axio_tui_rag.selector import (
     EmbeddingToolSelector,
-    ToolFilteringTransport,
-    ToolSelector,
     _cosine_similarity,
     _extract_last_user_text,
 )
-from axio.testing import StubTransport, make_text_response
-from axio.tool import Tool, ToolHandler
-from axio.transport import CompletionTransport
 
 
 class DummyHandler(ToolHandler):
@@ -53,9 +48,13 @@ class StubEmbeddingTransport:
 
 
 def test_protocol_conformance() -> None:
-    transport = StubEmbeddingTransport()
-    selector = EmbeddingToolSelector(transport=transport)
+    selector = EmbeddingToolSelector(transport=StubEmbeddingTransport())
     assert isinstance(selector, ToolSelector)
+
+
+def test_classvars() -> None:
+    assert EmbeddingToolSelector.label == "Embedding Similarity"
+    assert "cosine" in EmbeddingToolSelector.description.lower()
 
 
 async def test_returns_all_when_few_tools() -> None:
@@ -174,64 +173,3 @@ def test_extract_last_user_text_empty() -> None:
 def test_extract_last_user_text_multiple_text_blocks() -> None:
     messages = [Message(role="user", content=[TextBlock(text="hello"), TextBlock(text="world")])]
     assert _extract_last_user_text(messages) == "hello world"
-
-
-# --- ToolFilteringTransport tests ---
-
-
-class StubSelector:
-    """ToolSelector that keeps only tools whose names are in the allowed set."""
-
-    def __init__(self, allowed: set[str]) -> None:
-        self._allowed = allowed
-
-    async def select(self, messages: list[Message], tools: list[Tool]) -> list[Tool]:
-        return [t for t in tools if t.name in self._allowed]
-
-
-def test_filtering_transport_protocol() -> None:
-    inner = StubTransport([make_text_response("ok")])
-    selector = StubSelector(allowed=set())
-    ft = ToolFilteringTransport(inner, selector)
-    assert isinstance(ft, CompletionTransport)
-
-
-async def test_filtering_transport_filters_tools() -> None:
-    captured_tools: list[list[Tool]] = []
-
-    class CapturingTransport:
-        async def _gen(self, events: list[StreamEvent]) -> AsyncGenerator[StreamEvent, None]:
-            for e in events:
-                yield e
-
-        def stream(self, messages: list[Message], tools: list[Tool], system: str) -> AsyncGenerator[StreamEvent, None]:
-            captured_tools.append(tools)
-            return self._gen(make_text_response("ok"))
-
-    tools = [_make_tool("a"), _make_tool("b"), _make_tool("c")]
-    selector = StubSelector(allowed={"a", "c"})
-    ft = ToolFilteringTransport(CapturingTransport(), selector)
-
-    messages = [Message(role="user", content=[TextBlock(text="hello")])]
-    events: list[StreamEvent] = []
-    async for e in ft.stream(messages, tools, "sys"):
-        events.append(e)
-
-    assert len(captured_tools) == 1
-    names = [t.name for t in captured_tools[0]]
-    assert names == ["a", "c"]
-
-
-async def test_filtering_transport_passes_events() -> None:
-    inner = StubTransport([make_text_response("hello")])
-    selector = StubSelector(allowed=set())  # allows nothing, but events still pass
-    ft = ToolFilteringTransport(inner, selector)
-
-    messages = [Message(role="user", content=[TextBlock(text="hi")])]
-    events: list[StreamEvent] = []
-    async for e in ft.stream(messages, [], "sys"):
-        events.append(e)
-
-    assert len(events) == 2
-    assert isinstance(events[0], TextDelta)
-    assert events[0].delta == "hello"

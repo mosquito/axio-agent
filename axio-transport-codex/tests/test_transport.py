@@ -563,6 +563,99 @@ async def test_ensure_token_skips_without_refresh_token() -> None:
     mock_refresh.assert_not_called()
 
 
+async def test_refresh_invokes_on_auth_refresh() -> None:
+    callback = AsyncMock()
+    t = CodexTransport(
+        api_key="old-token",
+        refresh_token="old-refresh",
+        expires_at="0",
+        on_auth_refresh=callback,
+    )
+
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.json.return_value = {
+        "access_token": "new-token",
+        "refresh_token": "new-refresh",
+        "expires_in": 3600,
+    }
+
+    mock_post_cm = AsyncMock()
+    mock_post_cm.__aenter__.return_value = mock_resp
+
+    from unittest.mock import MagicMock
+
+    mock_sess = MagicMock()
+    mock_sess.post.return_value = mock_post_cm
+
+    mock_session_cm = AsyncMock()
+    mock_session_cm.__aenter__.return_value = mock_sess
+
+    with patch("axio_transport_codex.transport.aiohttp.ClientSession", return_value=mock_session_cm):
+        await t._refresh()
+
+    callback.assert_called_once()
+    tokens = callback.call_args[0][0]
+    assert tokens["api_key"] == "new-token"
+    assert tokens["refresh_token"] == "new-refresh"
+    assert tokens["expires_at"] != "0"
+    assert "account_id" in tokens
+
+
+async def test_refresh_without_callback_does_not_crash() -> None:
+    t = CodexTransport(api_key="old-token", refresh_token="old-refresh", expires_at="0")
+
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.json.return_value = {"access_token": "new-token", "expires_in": 3600}
+
+    mock_post_cm = AsyncMock()
+    mock_post_cm.__aenter__.return_value = mock_resp
+
+    from unittest.mock import MagicMock
+
+    mock_sess = MagicMock()
+    mock_sess.post.return_value = mock_post_cm
+
+    mock_session_cm = AsyncMock()
+    mock_session_cm.__aenter__.return_value = mock_sess
+
+    with patch("axio_transport_codex.transport.aiohttp.ClientSession", return_value=mock_session_cm):
+        await t._refresh()  # should not raise
+
+    assert t.api_key == "new-token"
+
+
+async def test_refresh_callback_exception_is_swallowed() -> None:
+    callback = AsyncMock(side_effect=RuntimeError("db down"))
+    t = CodexTransport(
+        api_key="old-token",
+        refresh_token="old-refresh",
+        expires_at="0",
+        on_auth_refresh=callback,
+    )
+
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.json.return_value = {"access_token": "new-token", "expires_in": 3600}
+
+    mock_post_cm = AsyncMock()
+    mock_post_cm.__aenter__.return_value = mock_resp
+
+    from unittest.mock import MagicMock
+
+    mock_sess = MagicMock()
+    mock_sess.post.return_value = mock_post_cm
+
+    mock_session_cm = AsyncMock()
+    mock_session_cm.__aenter__.return_value = mock_sess
+
+    with patch("axio_transport_codex.transport.aiohttp.ClientSession", return_value=mock_session_cm):
+        await t._refresh()  # callback raises but _refresh should not propagate it
+
+    assert t.api_key == "new-token"
+
+
 # ---------------------------------------------------------------------------
 # Headers
 # ---------------------------------------------------------------------------

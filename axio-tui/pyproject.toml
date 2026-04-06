@@ -15,6 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+anthropic = ["axio-transport-anthropic"]
 openai = ["axio-transport-openai"]
 nebius = ["axio-transport-nebius"]
 codex = ["axio-transport-codex"]
@@ -23,7 +24,7 @@ mcp = ["axio-tools-mcp"]
 rag = ["axio-tui-rag"]
 guards = ["axio-tui-guards"]
 all = [
-    "axio-tui[openai,nebius,codex,local,mcp,rag,guards]",
+    "axio-tui[anthropic,openai,nebius,codex,local,mcp,rag,guards]",
 ]
 
 [project.entry-points."axio.tools"]
@@ -71,7 +72,7 @@ dev = [
 
 [[tool.mypy.overrides]]
 module = [
-    "axio_transport_nebius", "axio_transport_codex",
+    "axio_transport_anthropic", "axio_transport_nebius", "axio_transport_codex",
     "axio_tools_local", "axio_tools_local.*",
     "axio_tools_mcp", "axio_tools_mcp.*",
     "axio_tools_docker", "axio_tools_docker.*",

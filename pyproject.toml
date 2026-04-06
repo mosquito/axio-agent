@@ -4,6 +4,7 @@ members = [
     "axio-tools-docker",
     "axio-tools-local",
     "axio-tools-mcp",
+    "axio-transport-anthropic",
     "axio-transport-codex",
     "axio-transport-openai",
     "axio-tui",
@@ -13,15 +14,16 @@ members = [
 ]
 
 [tool.uv.sources]
-axio                  = { workspace = true }
-axio-tools-docker     = { workspace = true }
-axio-tools-local      = { workspace = true }
-axio-tools-mcp        = { workspace = true }
-axio-transport-codex  = { workspace = true }
-axio-transport-openai = { workspace = true }
-axio-tui              = { workspace = true }
-axio-tui-guards       = { workspace = true }
-axio-tui-rag          = { workspace = true }
+axio                       = { workspace = true }
+axio-tools-docker          = { workspace = true }
+axio-tools-local           = { workspace = true }
+axio-tools-mcp             = { workspace = true }
+axio-transport-anthropic   = { workspace = true }
+axio-transport-codex       = { workspace = true }
+axio-transport-openai      = { workspace = true }
+axio-tui                   = { workspace = true }
+axio-tui-guards            = { workspace = true }
+axio-tui-rag               = { workspace = true }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
