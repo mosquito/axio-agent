@@ -240,8 +240,14 @@ dev = [
 name = "axio-docs"
 version = "0.1.0"
 source = { virtual = "docs" }
+dependencies = [
+    { name = "axio" },
+]
 
 [package.dev-dependencies]
+dev = [
+    { name = "markdown-pytest" },
+]
 docs = [
     { name = "furo" },
     { name = "myst-parser" },
@@ -252,8 +258,10 @@ docs = [
 ]
 
 [package.metadata]
+requires-dist = [{ name = "axio", editable = "axio" }]
 
 [package.metadata.requires-dev]
+dev = [{ name = "markdown-pytest", specifier = ">=0.6.0" }]
 docs = [
     { name = "furo", specifier = ">=2024.8" },
     { name = "myst-parser", specifier = ">=4" },
@@ -1327,6 +1335,15 @@ wheels = [
 [package.optional-dependencies]
 linkify = [
     { name = "linkify-it-py" },
+]
+
+[[package]]
+name = "markdown-pytest"
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f6/c0/3ee1a4044b6b5c00f41571297969d3f97491545b1713f4e7e8eb3297e861/markdown_pytest-0.6.0.tar.gz", hash = "sha256:2698a37b42d28b53de3856eb9bb1371d9d5b2cc84b8ef9d96b39b4e6d55b4eb8", size = 45714, upload-time = "2026-03-02T20:53:46.859Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/cb/f4c7d6e5670dabd6fd756e9d0b0a3ed3efb90a0276a9b6f16af0eab51207/markdown_pytest-0.6.0-py3-none-any.whl", hash = "sha256:0ea323720ebf8b2bcddb771154884feb0a8a10fce832833a0044e55dc6a7aba7", size = 13650, upload-time = "2026-03-02T20:53:45.085Z" },
 ]
 
 [[package]]

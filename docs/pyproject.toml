@@ -4,8 +4,14 @@ version = "0.1.0"
 description = "Documentation for the Axio agent framework"
 requires-python = ">=3.12"
 license = {text = "MIT"}
+dependencies = [
+    "axio",
+]
 
 [dependency-groups]
+dev = [
+    "markdown-pytest>=0.6.0",
+]
 docs = [
     "sphinx>=8",
     "furo>=2024.8",
@@ -14,3 +20,6 @@ docs = [
     "sphinx-design>=0.6",
     "sphinxcontrib-mermaid>=1.0",
 ]
+
+[tool.uv.sources]
+axio = { workspace = true }

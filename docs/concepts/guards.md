@@ -6,7 +6,12 @@ modify tool calls.
 
 ## PermissionGuard ABC
 
+<!-- name: test_permission_guard_abc -->
 ```python
+from abc import ABC, abstractmethod
+from typing import Any
+
+
 class PermissionGuard(ABC):
     async def __call__(self, handler: Any) -> Any:
         return await self.check(handler)
@@ -25,22 +30,58 @@ A guard receives the validated `ToolHandler` instance and must either:
 When a `Tool` has multiple guards, they run **sequentially**. Each guard's
 output becomes the next guard's input:
 
+<!-- name: test_guard_chain -->
 ```python
-# Inside Tool.__call__
-for guard in self.guards:
-    instance = await guard(instance)
+import asyncio
+from axio.permission import AllowAllGuard
+from axio.tool import ToolHandler
+
+
+class EchoHandler(ToolHandler):
+    """Echo text."""
+    text: str
+    async def __call__(self) -> str:
+        return self.text
+
+
+async def main():
+    guards = (AllowAllGuard(),)
+    instance = EchoHandler(text="hello")
+    for guard in guards:
+        instance = await guard(instance)
+    assert instance.text == "hello"
+
+asyncio.run(main())
 ```
 
 This lets you compose guards freely. For example, a path-validation guard
 followed by an LLM-based risk-assessment guard:
 
+<!--
+name: test_tool_with_guards
 ```python
-Tool(
+from axio.tool import ToolHandler
+from axio.permission import AllowAllGuard
+class WriteFile(ToolHandler):
+    path: str
+    content: str
+    async def __call__(self) -> str: return "ok"
+PathGuard = AllowAllGuard
+LLMGuard = AllowAllGuard
+```
+-->
+<!-- name: test_tool_with_guards -->
+```python
+from axio.tool import Tool
+
+tool = Tool(
     name="write_file",
     description="Write a file",
     handler=WriteFile,
     guards=(PathGuard(), LLMGuard()),
 )
+assert tool.name == "write_file"
+assert len(tool.guards) == 2
 ```
 
 ## ConcurrentGuard
@@ -48,7 +89,14 @@ Tool(
 For guards that need concurrency control (e.g., rate-limiting or guards that
 call external services), subclass `ConcurrentGuard`:
 
+<!-- name: test_concurrent_guard -->
 ```python
+import asyncio
+from abc import ABC, abstractmethod
+from typing import Any
+from axio.permission import PermissionGuard
+
+
 class ConcurrentGuard(PermissionGuard, ABC):
     concurrency: int = 1
 

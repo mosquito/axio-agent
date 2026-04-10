@@ -6,6 +6,12 @@ handler with metadata and guards).
 
 ## ToolHandler
 
+<!--
+name: test_tool_handler_interface
+```python
+from pydantic import BaseModel
+```
+-->
 ```python
 class ToolHandler(BaseModel):
     """Subclass fields define JSON-schema for input parameters."""
@@ -18,7 +24,11 @@ A tool handler is a Pydantic `BaseModel`. Its fields become the tool's input
 schema automatically via `model_json_schema()`. The `__call__` method implements
 the actual execution.
 
+<!-- name: test_write_file_handler -->
 ```python
+from pathlib import Path
+from axio.tool import ToolHandler
+
 class WriteFile(ToolHandler):
     """Write content to a file at the given path."""
     path: str

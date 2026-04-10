@@ -21,9 +21,11 @@ uv sync --all-extras
 The smallest possible agent needs three things: a **transport** to talk to an LLM,
 a **context store** to hold conversation history, and an **Agent** to tie them together.
 
+<!-- name: test_minimal_agent -->
 ```python
 import asyncio
-from axio import Agent, MemoryContextStore
+from axio.agent import Agent
+from axio.context import MemoryContextStore
 from axio.testing import StubTransport, make_text_response
 
 async def main() -> None:
@@ -37,12 +39,12 @@ async def main() -> None:
         transport=transport,
     )
     reply = await agent.run("Hi there!", context)
-    print(reply)
+    return reply
 
-asyncio.run(main())
+assert asyncio.run(main()) == "Hello! I'm a stub agent."
 ```
 
-Replace `StubTransport` with a real transport like `OpenAITransport` to connect to
+Replace `StubTransport` with real transport like `OpenAITransport` to connect to
 a live LLM. The agent loop, tool dispatch, and streaming all work the same way
 regardless of which transport you use — that's the power of the protocol-driven
 design.
@@ -51,8 +53,20 @@ design.
 
 Tools are Pydantic models. Define fields for parameters and implement `__call__`:
 
+<!--
+name: test_adding_tools
+-->
+<!-- name: test_adding_tools -->
 ```python
-from axio import Tool, ToolHandler
+from axio.agent import Agent
+from axio.context import MemoryContextStore
+from axio.testing import StubTransport, make_text_response
+from axio.tool import Tool, ToolHandler
+
+# Use real transport in real code; StubTransport is just for example
+transport = StubTransport([make_text_response("ok")])
+context = MemoryContextStore()
+
 
 class Greet(ToolHandler):
     """Greet someone by name."""
@@ -60,6 +74,7 @@ class Greet(ToolHandler):
 
     async def __call__(self) -> str:
         return f"Hello, {self.name}!"
+
 
 agent = Agent(
     system="You are a helpful assistant.",

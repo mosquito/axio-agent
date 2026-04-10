@@ -46,7 +46,23 @@ will automatically discover and load your components.
 
 The `axio_tui.plugin` module provides discovery functions:
 
+<!--
+name: test_discover_tools
 ```python
+from typing import Protocol, runtime_checkable
+from axio.tool import Tool
+@runtime_checkable
+class ToolsPlugin(Protocol):
+    async def get_tools(self) -> list[Tool]: ...
+```
+-->
+<!-- name: test_discover_tools -->
+```python
+from axio.tool import Tool
+from axio.transport import CompletionTransport
+from axio.permission import PermissionGuard
+
+
 def discover_tools() -> dict[str, Tool]:
     """Load all tools from the axio.tools entry point group."""
 
@@ -68,7 +84,12 @@ group, loads the objects, and returns them keyed by entry point name.
 For packages that provide a **dynamic set of tools** (like MCP or Docker
 sandboxes), implement the `ToolsPlugin` protocol:
 
+<!-- name: test_tools_plugin_protocol -->
 ```python
+from typing import Protocol, runtime_checkable
+from axio.tool import Tool
+
+
 @runtime_checkable
 class ToolsPlugin(Protocol):
     async def get_tools(self) -> list[Tool]: ...
@@ -88,7 +109,13 @@ my_plugin = "my_package.plugin:MyPlugin"
 
 Each transport class declares its display name via a `name: str` field:
 
+<!-- name: test_transport_display_name -->
 ```python
+import os
+from dataclasses import dataclass, field
+from axio.transport import CompletionTransport
+
+
 @dataclass(slots=True)
 class MyTransport(CompletionTransport):
     name: str = "My Provider"

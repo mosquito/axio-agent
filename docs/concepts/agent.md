@@ -6,7 +6,15 @@ dispatches tool calls until the model signals it is done.
 
 ## The Agent dataclass
 
+<!--
+name: test_agent_dataclass
+-->
 ```python
+from dataclasses import dataclass
+from axio.tool import Tool
+from axio.transport import CompletionTransport
+
+
 @dataclass(slots=True)
 class Agent:
     system: str
@@ -75,7 +83,13 @@ flowchart TD
 When the model requests multiple tool calls in a single response, the agent
 runs them all concurrently:
 
+<!--
+name: test_dispatch_tools
+-->
 ```python
+import asyncio
+from axio.blocks import ToolUseBlock, ToolResultBlock
+
 async def dispatch_tools(
     self,
     blocks: list[ToolUseBlock],

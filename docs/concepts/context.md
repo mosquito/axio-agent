@@ -52,18 +52,26 @@ All content blocks are frozen dataclasses:
 
 Every block can be serialized to and from a dict:
 
+<!-- name: test_serialization -->
 ```python
-from axio.blocks import to_dict, from_dict
+from axio.blocks import TextBlock, to_dict, from_dict
 
-d = to_dict(TextBlock(text="hello"))   # {"type": "text", "text": "hello"}
-block = from_dict(d)                    # TextBlock(text="hello")
+d = to_dict(TextBlock(text="hello"))
+assert d == {"type": "text", "text": "hello"}
+block = from_dict(d)
+assert block == TextBlock(text="hello")
 ```
 
 ## Message
 
 A `Message` pairs a role with a list of content blocks:
 
+<!-- name: test_message_dataclass -->
 ```python
+from dataclasses import dataclass
+from typing import Literal
+from axio.blocks import ContentBlock
+
 @dataclass(slots=True)
 class Message:
     role: Literal["user", "assistant"]
@@ -79,7 +87,11 @@ separate user message with `ToolResultBlock` values.
 `ContextStore` is an abstract base class — implement it to store conversations
 anywhere.
 
+<!-- name: test_context_store_abc -->
 ```python
+from abc import ABC, abstractmethod
+from axio.messages import Message
+
 class ContextStore(ABC):
     @property
     @abstractmethod
@@ -124,12 +136,21 @@ Implement `ContextStore` to use any backend:
 
 `ContextStore` provides two class-method factories:
 
+<!-- name: test_context_factory_methods -->
 ```python
-# Create from existing messages
-ctx = await MemoryContextStore.from_history(messages)
+import asyncio
+from axio.context import MemoryContextStore
+from axio.messages import Message
+from axio.blocks import TextBlock
 
-# Clone another context store
-ctx2 = await MemoryContextStore.from_context(ctx)
+async def main():
+    messages = [Message(role="user", content=[TextBlock(text="hello")])]
+    # Create from existing messages
+    ctx = await MemoryContextStore.from_history(messages)
+    # Clone another context store
+    ctx2 = await MemoryContextStore.from_context(ctx)
+
+asyncio.run(main())
 ```
 
 ## Context compaction
@@ -138,7 +159,12 @@ Long conversations can exceed the model's context window. The
 `compact_context()` function summarizes older messages while keeping recent
 ones verbatim:
 
+<!-- name: test_compact_context -->
 ```python
+from axio.context import ContextStore
+from axio.transport import CompletionTransport
+from axio.messages import Message
+
 async def compact_context(
     context: ContextStore,
     transport: CompletionTransport,
@@ -147,6 +173,7 @@ async def compact_context(
     keep_recent: int = 6,
     system_prompt: str | None = None,
 ) -> list[Message] | None:
+    ...
 ```
 
 It uses a separate one-shot agent call to generate the summary. The function
