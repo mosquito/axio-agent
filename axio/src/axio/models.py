@@ -91,3 +91,15 @@ class ModelRegistry(MutableMapping[str, ModelSpec]):
 
     def ids(self) -> list[str]:
         return list(self._models)
+
+    def _get_model_by_index(self, index: int) -> ModelSpec:
+        vals = list(iter(self._models.values()))
+        if len(vals) >= 1:
+            return vals[index]
+        raise IndexError("ModelRegistry is empty")
+
+    def first(self) -> ModelSpec:
+        return self._get_model_by_index(0)
+
+    def last(self) -> ModelSpec:
+        return self._get_model_by_index(-1)

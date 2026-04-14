@@ -75,9 +75,11 @@ Overview of every package in the monorepo and their entry points.
 :::{grid-item}
 :columns: 12 12 10 10
 
+<!-- name: test_index_example -->
 ```python
 import aiohttp
-from axio import Tool, ToolHandler
+from axio.tool import Tool, ToolHandler
+
 
 class Fetch(ToolHandler):
     """Fetch the text content of a URL."""
@@ -89,6 +91,7 @@ class Fetch(ToolHandler):
                 return (await r.text())[:2000]
 
 fetch = Tool(name="fetch", description=Fetch.__doc__, handler=Fetch)
+assert fetch.name == "fetch"
 ```
 :::
 
@@ -114,10 +117,21 @@ fetch = Tool(name="fetch", description=Fetch.__doc__, handler=Fetch)
 :::{grid-item}
 :columns: 12 12 10 10
 
+<!--
+name: test_index_example
+```python
+import axio_transport_openai
+from axio.testing import StubTransport, make_text_response
+axio_transport_openai.OpenAITransport = lambda: StubTransport([make_text_response("The weather is sunny.")])
+```
+-->
+<!-- name: test_index_example -->
 ```python
 import asyncio
-from axio import Agent, MemoryContextStore
+from axio.agent import Agent
+from axio.context import MemoryContextStore
 from axio_transport_openai import OpenAITransport
+
 
 async def main() -> None:
     agent = Agent(
@@ -129,7 +143,7 @@ async def main() -> None:
         "What's the weather tomorrow? Use geoip for detect my location and wttr.in for weather.",
         MemoryContextStore(),
     )
-    print(reply)
+    assert reply
 
 asyncio.run(main())
 ```

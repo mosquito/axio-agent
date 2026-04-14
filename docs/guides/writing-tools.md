@@ -8,9 +8,10 @@ it as a plugin.
 A tool handler is a Pydantic `BaseModel` subclass. Fields become the tool's
 input parameters; the `__call__` method implements execution.
 
+<!-- name: test_word_count_tool -->
 ```python
 # my_tools/word_count.py
-from axio import ToolHandler
+from axio.tool import ToolHandler
 
 
 class WordCount(ToolHandler):
@@ -32,8 +33,9 @@ Key points:
 
 ## 2. Wrap it in a Tool
 
+<!-- name: test_word_count_tool -->
 ```python
-from axio import Tool
+from axio.tool import Tool
 
 word_count_tool = Tool(
     name="word_count",
@@ -47,6 +49,17 @@ fresh instance for each invocation via `model_validate()`.
 
 ## 3. Use it with an agent
 
+<!--
+name: test_word_count_tool
+```python
+from axio.agent import Agent
+from axio.context import MemoryContextStore
+from axio.testing import StubTransport, make_text_response
+my_transport = StubTransport([make_text_response("ok")])
+context = MemoryContextStore()
+```
+-->
+<!-- name: test_word_count_tool -->
 ```python
 agent = Agent(
     system="You are a helpful assistant.",
@@ -71,8 +84,21 @@ After installing or syncing, `discover_tools()` will find it automatically.
 
 Attach guards to control when the tool can run:
 
+<!--
+name: test_tool_with_guard
 ```python
-from axio import AllowAllGuard
+from axio.tool import Tool, ToolHandler
+
+class WordCount(ToolHandler):
+    """Count words."""
+    text: str
+    async def __call__(self) -> str:
+        return str(len(self.text.split()))
+```
+-->
+<!-- name: test_tool_with_guard -->
+```python
+from axio.permission import AllowAllGuard
 
 tool = Tool(
     name="word_count",
@@ -105,6 +131,14 @@ sends the error message back to the model as a `ToolResultBlock` with
 
 For expected failures, raise `HandlerError` directly with a clear message:
 
+<!--
+name: test_error_handling
+```python
+from pathlib import Path
+from axio.tool import ToolHandler
+```
+-->
+<!-- name: test_error_handling -->
 ```python
 from axio.exceptions import HandlerError
 

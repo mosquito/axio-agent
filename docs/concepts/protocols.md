@@ -33,7 +33,15 @@ classDiagram
 
 The transport protocol has a single method:
 
+<!-- name: test_completion_transport_protocol -->
 ```python
+from typing import runtime_checkable, Protocol
+from collections.abc import AsyncIterator
+from axio.messages import Message
+from axio.tool import Tool
+from axio.events import StreamEvent
+
+
 @runtime_checkable
 class CompletionTransport(Protocol):
     def stream(
@@ -57,7 +65,12 @@ See [Writing Transports](../guides/writing-transports.md) for a step-by-step gui
 The context store manages conversation history. It is an abstract base class
 with async methods:
 
+<!-- name: test_context_store_abc -->
 ```python
+from abc import ABC, abstractmethod
+from axio.messages import Message
+
+
 class ContextStore(ABC):
     @property
     @abstractmethod
@@ -89,7 +102,12 @@ See [Context & Messages](context.md) for details on the message model.
 Guards gate tool execution. They sit between parameter validation and handler
 invocation:
 
+<!-- name: test_permission_guard_abc -->
 ```python
+from abc import ABC, abstractmethod
+from typing import Any
+
+
 class PermissionGuard(ABC):
     @abstractmethod
     async def check(self, handler: Any) -> Any: ...

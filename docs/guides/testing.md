@@ -8,12 +8,15 @@ fast, deterministic tests for agents, tools, and custom components.
 `StubTransport` is a fake transport that yields pre-configured event
 sequences instead of calling a real LLM:
 
+<!-- name: test_stub_transport -->
 ```python
 from axio.testing import StubTransport, make_text_response
 
 transport = StubTransport([
     make_text_response("Hello!"),
 ])
+assert len(transport._responses) == 1
+assert transport._call_count == 0
 ```
 
 Each entry in the list is one transport call. The stub cycles through them
@@ -25,20 +28,31 @@ in order, repeating the last one if the agent makes more calls than expected.
 
 Create an event sequence for a simple text reply:
 
+<!-- name: test_make_text_response -->
 ```python
+from axio.events import TextDelta, IterationEnd, StopReason, Usage
 from axio.testing import make_text_response
 
 events = make_text_response(text="Hello world", iteration=1)
-# [TextDelta(index=0, delta="Hello world"),
-#  IterationEnd(iteration=1, stop_reason=StopReason.end_turn, usage=...)]
+assert events == [
+    TextDelta(index=0, delta="Hello world"),
+    IterationEnd(
+        iteration=1, 
+        stop_reason=StopReason.end_turn,
+        usage=Usage(input_tokens=10, output_tokens=5),
+    ),
+]
 ```
 
 ### make_tool_use_response
 
 Create an event sequence for a tool call:
 
+<!-- name: test_make_tool_use_response -->
 ```python
 from axio.testing import make_tool_use_response
+from axio.events import ToolUseStart, ToolInputDelta, IterationEnd
+from axio.types import StopReason
 
 events = make_tool_use_response(
     tool_name="greet",
@@ -46,39 +60,56 @@ events = make_tool_use_response(
     tool_input={"name": "Alice"},
     iteration=1,
 )
-# [ToolUseStart(index=0, tool_use_id="call_1", name="greet"),
-#  ToolInputDelta(index=0, tool_use_id="call_1", partial_json='{"name":"Alice"}'),
-#  IterationEnd(iteration=1, stop_reason=StopReason.tool_use, usage=...)]
+assert len(events) == 3
+assert isinstance(events[0], ToolUseStart)
+assert events[0].name == "greet"
+assert events[0].tool_use_id == "call_1"
+assert isinstance(events[1], ToolInputDelta)
+assert "Alice" in events[1].partial_json
+assert isinstance(events[2], IterationEnd)
+assert events[2].stop_reason == StopReason.tool_use
 ```
 
 ### make_stub_transport
 
-Create a transport that returns a single "Hello world" text response:
+Create transport that returns a single "Hello world" text response:
 
+<!-- name: test_make_stub_transport -->
 ```python
 from axio.testing import make_stub_transport
+from axio.events import TextDelta, IterationEnd
 
 transport = make_stub_transport()
+assert len(transport._responses) == 1
+assert isinstance(transport._responses[0][0], TextDelta)
+assert isinstance(transport._responses[0][-1], IterationEnd)
 ```
 
 ### make_ephemeral_context
 
 Create a fresh in-memory context store:
 
+<!-- name: test_make_ephemeral_context -->
 ```python
+from axio.context import MemoryContextStore
 from axio.testing import make_ephemeral_context
 
 context = make_ephemeral_context()
+assert isinstance(context, MemoryContextStore)
+assert context.session_id is not None
 ```
 
 ### make_echo_tool
 
 Create a test tool that echoes its input as JSON:
 
+<!-- name: test_make_echo_tool -->
 ```python
 from axio.testing import make_echo_tool
 
 tool = make_echo_tool()
+assert tool.name == "echo"
+assert "JSON" in tool.description
 ```
 
 ## Testing an agent with tools
@@ -86,9 +117,10 @@ tool = make_echo_tool()
 A typical test sets up a stub that first requests a tool call, then returns
 text after seeing the result:
 
+<!-- name: test_agent_calls_tool -->
 ```python
-import pytest
-from axio import Agent
+import asyncio
+from axio.agent import Agent
 from axio.testing import (
     StubTransport,
     make_tool_use_response,
@@ -110,6 +142,8 @@ async def test_agent_calls_tool():
     )
     result = await agent.run("Say hello", make_ephemeral_context())
     assert result == "Done!"
+
+asyncio.run(test_agent_calls_tool())
 ```
 
 No `@pytest.mark.asyncio` decorator needed — the project uses
@@ -119,34 +153,77 @@ No `@pytest.mark.asyncio` decorator needed — the project uses
 
 Test a tool handler directly:
 
+<!-- name: test_word_count_isolation -->
 ```python
-from my_package.tools import WordCount
+import asyncio
+from axio.tool import ToolHandler
+
+
+class WordCount(ToolHandler):
+    text: str
+    async def __call__(self) -> str:
+        count = len(self.text.split())
+        return f"The text contains {count} words."
 
 
 async def test_word_count():
     handler = WordCount(text="one two three")
     result = await handler()
     assert "3" in result
+
+asyncio.run(test_word_count())
 ```
 
 Or test through the `Tool` wrapper to exercise guards:
 
+<!-- name: test_word_count_via_tool -->
 ```python
-from axio import Tool
-from my_package.tools import WordCount
+import asyncio
+from axio.tool import Tool, ToolHandler
+
+
+class WordCount(ToolHandler):
+    text: str
+    async def __call__(self) -> str:
+        count = len(self.text.split())
+        return f"The text contains {count} words."
 
 
 async def test_word_count_tool():
     tool = Tool(name="word_count", description="Count words", handler=WordCount)
     result = await tool(text="one two three")
     assert "3" in result
+
+asyncio.run(test_word_count_tool())
 ```
 
 ## Testing guards
 
+<!-- name: test_guard_testing -->
 ```python
+import asyncio
+import pytest
+from typing import Any
+from axio.tool import ToolHandler
+from axio.permission import PermissionGuard
 from axio.exceptions import GuardError
-from my_package.guards import MaxLengthGuard
+
+
+class WordCount(ToolHandler):
+    text: str
+    async def __call__(self) -> str:
+        return str(len(self.text.split()))
+
+
+class MaxLengthGuard(PermissionGuard):
+    def __init__(self, max_length: int = 10000) -> None:
+        self.max_length = max_length
+
+    async def check(self, handler: Any) -> Any:
+        for name, value in handler.model_dump().items():
+            if isinstance(value, str) and len(value) > self.max_length:
+                raise GuardError(f"Field '{name}' exceeds {self.max_length} characters")
+        return handler
 
 
 async def test_guard_allows_short_input():
@@ -161,12 +238,18 @@ async def test_guard_denies_long_input():
     handler = WordCount(text="this is way too long")
     with pytest.raises(GuardError):
         await guard.check(handler)
+
+asyncio.run(test_guard_allows_short_input())
+asyncio.run(test_guard_denies_long_input())
 ```
 
 ## Testing context stores
 
+<!-- name: test_context_stores -->
 ```python
-from axio import MemoryContextStore, Message
+import asyncio
+from axio.context import MemoryContextStore
+from axio.messages import Message
 from axio.blocks import TextBlock
 
 
@@ -177,4 +260,6 @@ async def test_context_append_and_history():
     history = await ctx.get_history()
     assert len(history) == 1
     assert history[0].role == "user"
+
+asyncio.run(test_context_append_and_history())
 ```

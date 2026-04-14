@@ -165,6 +165,8 @@ It also provides convenience methods:
 `get_session_end() -> SessionEndEvent`
 : Consume the stream and return the final `SessionEndEvent`.
 
+<!-- Examples from this section onwards are covered by doc tests. -->
+
 ## Streaming tool call arguments
 
 `ToolInputDelta` events carry partial JSON fragments of tool arguments as the
@@ -181,6 +183,7 @@ similar to how Claude Code shows Edit tool diffs live.
 `axio` ships a zero-dependency, O(1)-per-character streaming JSON parser that
 converts `ToolInputDelta` chunks into structured `ToolField*` events:
 
+<!-- name: test_tool_arg_stream_basic -->
 ```python
 from axio.tool_args import ToolArgStream
 

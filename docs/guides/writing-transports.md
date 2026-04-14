@@ -5,7 +5,15 @@ A transport connects Axio to an LLM provider. Implement the
 
 ## The protocol
 
+<!-- name: test_completion_transport_protocol -->
 ```python
+from typing import runtime_checkable, Protocol
+from collections.abc import AsyncIterator
+from axio.messages import Message
+from axio.tool import Tool
+from axio.events import StreamEvent
+
+
 @runtime_checkable
 class CompletionTransport(Protocol):
     def stream(
@@ -21,10 +29,15 @@ The agent expects the stream to end with an `IterationEnd` event.
 
 ## Minimal implementation
 
+<!-- name: test_echo_transport -->
 ```python
+import asyncio
 from collections.abc import AsyncIterator
-from axio import CompletionTransport, Message, Tool, StreamEvent
-from axio.events import TextDelta, IterationEnd
+from axio.transport import CompletionTransport
+from axio.messages import Message
+from axio.blocks import TextBlock
+from axio.tool import Tool
+from axio.events import TextDelta, IterationEnd, StreamEvent
 from axio.types import StopReason, Usage
 
 
@@ -56,6 +69,18 @@ class EchoTransport:
             stop_reason=StopReason.end_turn,
             usage=Usage(input_tokens=0, output_tokens=0),
         )
+
+
+async def main():
+    transport = EchoTransport()
+    msgs = [Message(role="user", content=[TextBlock(text="ping")])]
+    events = [e async for e in transport.stream(msgs, [], "")]
+    assert isinstance(events[0], TextDelta)
+    assert events[0].delta == "Echo: ping"
+    assert isinstance(events[1], IterationEnd)
+    assert events[1].stop_reason == StopReason.end_turn
+
+asyncio.run(main())
 ```
 
 ## Event contract
@@ -76,10 +101,25 @@ Your transport should yield these events in order:
 
 When the LLM wants to call a tool, yield:
 
+<!-- name: test_tool_call_events -->
 ```python
-yield ToolUseStart(index=0, tool_use_id="call_abc", name="my_tool")
-yield ToolInputDelta(index=0, tool_use_id="call_abc", partial_json='{"arg": "value"}')
-yield IterationEnd(iteration=1, stop_reason=StopReason.tool_use, usage=usage)
+import asyncio
+from axio.events import ToolUseStart, ToolInputDelta, IterationEnd
+from axio.types import StopReason, Usage
+
+
+async def example_tool_call_stream():
+    usage = Usage(input_tokens=10, output_tokens=5)
+    yield ToolUseStart(index=0, tool_use_id="call_abc", name="my_tool")
+    yield ToolInputDelta(index=0, tool_use_id="call_abc", partial_json='{"arg": "value"}')
+    yield IterationEnd(iteration=1, stop_reason=StopReason.tool_use, usage=usage)
+
+
+async def main():
+    events = [e async for e in example_tool_call_stream()]
+    assert len(events) == 3
+
+asyncio.run(main())
 ```
 
 The agent assembles `ToolInputDelta` fragments into complete JSON. You can
@@ -90,12 +130,27 @@ streams the JSON incrementally.
 
 For parallel tool calls, use different `index` values:
 
+<!-- name: test_multiple_tool_calls -->
 ```python
-yield ToolUseStart(index=0, tool_use_id="call_1", name="tool_a")
-yield ToolUseStart(index=1, tool_use_id="call_2", name="tool_b")
-yield ToolInputDelta(index=0, tool_use_id="call_1", partial_json='{"x": 1}')
-yield ToolInputDelta(index=1, tool_use_id="call_2", partial_json='{"y": 2}')
-yield IterationEnd(iteration=1, stop_reason=StopReason.tool_use, usage=usage)
+import asyncio
+from axio.events import ToolUseStart, ToolInputDelta, IterationEnd
+from axio.types import StopReason, Usage
+
+
+async def example_parallel_stream():
+    usage = Usage(input_tokens=10, output_tokens=5)
+    yield ToolUseStart(index=0, tool_use_id="call_1", name="tool_a")
+    yield ToolUseStart(index=1, tool_use_id="call_2", name="tool_b")
+    yield ToolInputDelta(index=0, tool_use_id="call_1", partial_json='{"x": 1}')
+    yield ToolInputDelta(index=1, tool_use_id="call_2", partial_json='{"y": 2}')
+    yield IterationEnd(iteration=1, stop_reason=StopReason.tool_use, usage=usage)
+
+
+async def main():
+    events = [e async for e in example_parallel_stream()]
+    assert len(events) == 5
+
+asyncio.run(main())
 ```
 
 ## Registering as a plugin

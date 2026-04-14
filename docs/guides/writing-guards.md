@@ -5,8 +5,10 @@ can modify) the validated handler instance before it runs.
 
 ## Subclassing PermissionGuard
 
+<!-- name: test_max_length_guard -->
 ```python
-from axio import PermissionGuard
+from typing import Any
+from axio.permission import PermissionGuard
 from axio.exceptions import GuardError
 
 
@@ -33,13 +35,36 @@ Key rules:
 
 ## Attaching guards to tools
 
+<!--
+name: test_attaching_guards
 ```python
+from typing import Any
+from axio.tool import ToolHandler
+from axio.permission import PermissionGuard
+from axio.exceptions import GuardError
+class WriteFile(ToolHandler):
+    path: str
+    content: str
+    async def __call__(self) -> str: return "ok"
+class MaxLengthGuard(PermissionGuard):
+    def __init__(self, max_length: int = 10000) -> None:
+        self.max_length = max_length
+    async def check(self, handler: Any) -> Any:
+        return handler
+```
+-->
+<!-- name: test_attaching_guards -->
+```python
+from axio.tool import Tool
+
 tool = Tool(
     name="write_file",
     description="Write a file",
     handler=WriteFile,
     guards=(MaxLengthGuard(max_length=50000),),
 )
+assert tool.name == "write_file"
+assert len(tool.guards) == 1
 ```
 
 Guards run sequentially in tuple order. The output of one guard is the input
@@ -50,8 +75,11 @@ to the next.
 If your guard calls an external service (e.g., an LLM for risk assessment),
 use `ConcurrentGuard` to limit concurrent calls:
 
+<!-- name: test_llm_risk_guard -->
 ```python
-from axio import ConcurrentGuard
+from typing import Any
+from axio.exceptions import GuardError
+from axio.permission import ConcurrentGuard
 
 
 class LLMRiskGuard(ConcurrentGuard):
@@ -87,8 +115,30 @@ configured in the TUI.
 
 Guards compose naturally. Combine fast checks first, expensive checks last:
 
+<!--
+name: test_composing_guards
 ```python
-Tool(
+from typing import Any
+from axio.tool import ToolHandler
+from axio.permission import AllowAllGuard
+from axio.exceptions import GuardError
+
+class Shell(ToolHandler):
+    command: str
+    async def __call__(self) -> str: return self.command
+
+AllowedCommandGuard = AllowAllGuard
+PathGuard = AllowAllGuard
+
+class LLMRiskGuard(AllowAllGuard):
+    pass
+```
+-->
+<!-- name: test_composing_guards -->
+```python
+from axio.tool import Tool
+
+tool = Tool(
     name="shell",
     description="Run a shell command",
     handler=Shell,
@@ -98,6 +148,8 @@ Tool(
         LLMRiskGuard(),         # Slow: LLM assessment (only if fast checks pass)
     ),
 )
+assert tool.name == "shell"
+assert len(tool.guards) == 3
 ```
 
 If any guard raises `GuardError`, subsequent guards are skipped and the

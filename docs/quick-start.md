@@ -13,14 +13,14 @@ uv tool install "axio-tui[all]"
 Or pick only the extras you need:
 
 ```bash
-# OpenAI transport + local filesystem tools
+# OpenAI transport (includes Nebius, OpenRouter, custom) + local filesystem tools
 uv tool install "axio-tui[openai,local]"
 
-# Nebius transport + guards
-uv tool install "axio-tui[nebius,guards]"
+# Anthropic + guards
+uv tool install "axio-tui[anthropic,guards]"
 ```
 
-Available extras: `anthropic`, `openai`, `nebius`, `codex`, `local`, `mcp`,
+Available extras: `anthropic`, `openai`, `codex`, `local`, `mcp`,
 `rag`, `guards`, `all`.
 
 :::{dropdown} Alternative: pip install
