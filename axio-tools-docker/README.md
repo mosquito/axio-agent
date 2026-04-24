@@ -68,7 +68,38 @@ async def main() -> None:
 | `sandbox_write` | Write a file into the container's filesystem |
 | `sandbox_read` | Read a file from the container's filesystem |
 
+## Container lifecycle
+
+The sandbox container is created **lazily** on the first tool call (`sandbox_exec`,
+`sandbox_write`, or `sandbox_read`) — `plugin.init()` itself does not start Docker.
+The same container is reused for all subsequent tool calls within the session.
+
+When `await plugin.close()` is called the container is stopped and removed
+(`docker rm -f`). You should always call `close()` when the agent session ends
+to avoid leaving containers behind:
+
+```python
+async def run_with_cleanup(agent, ctx, plugin):
+    try:
+        result = await agent.run("...", ctx)
+    finally:
+        await plugin.close()
+```
+
+If Docker is not installed or the `docker` CLI is not on `PATH`, the container
+creation step will raise a `RuntimeError` on the first tool call. You can detect
+this before starting a session with `SandboxManager.docker_available()` (returns
+`True` if the `docker` executable is found on `PATH`).
+
 ## Configuration
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `image` | `str` | `"python:latest"` | Docker image to use for the sandbox container |
+| `memory` | `str` | `"256m"` | Memory limit passed to `docker run --memory` (e.g., `"512m"`, `"1g"`) |
+| `cpus` | `str` | `"1.0"` | CPU limit passed to `docker run --cpus` |
+| `network` | `bool` | `False` | Whether to allow network access. When `False`, `--network none` is set on the container. |
+| `workdir` | `str` | `"/workspace"` | Working directory inside the container |
 
 <!-- name: test_readme_config -->
 ```python

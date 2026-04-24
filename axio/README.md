@@ -60,7 +60,7 @@ greet_tool = Tool(name="greet", description="Greet someone by name", handler=Gre
 from axio_transport_openai import OpenAITransport
 
 transport = OpenAITransport(api_key="sk-...", model="gpt-4o-mini")
-agent = Agent(system="You are helpful.", tools=[greet_tool], transport=transport)
+agent = Agent(system="You are helpful.", transport=transport, tools=[greet_tool])
 
 # 3. Run
 async def main() -> None:
@@ -118,31 +118,38 @@ class CompletionTransport(Protocol):
 
 <!-- name: test_readme_context_store -->
 ```python
-from abc import ABC, abstractmethod
 from axio.context import ContextStore
 from axio.messages import Message
 
-class MyContextStore(ContextStore, ABC):
-    @abstractmethod
-    async def append(self, message: Message) -> None: ...
+class MyContextStore(ContextStore):
+    def __init__(self) -> None:
+        self._messages: list[Message] = []
 
-    @abstractmethod
-    async def get_history(self) -> list[Message]: ...
+    async def append(self, message: Message) -> None:
+        self._messages.append(message)
+
+    async def get_history(self) -> list[Message]:
+        return list(self._messages)
 
     # Everything else — session_id, close(), fork(), clear(),
-    # get/set_context_tokens() — has a default implementation.
+    # get/set_context_tokens(), add_context_tokens(), list_sessions()
+    # — has a default implementation.
 ```
 
 ### PermissionGuard
 
+`PermissionGuard` is an abstract base class (ABC). Subclass it and implement
+`check()`:
+
 <!-- name: test_readme_permission_guard -->
 ```python
-from typing import Protocol, runtime_checkable
-from axio.tool import ToolHandler
+from typing import Any
+from axio.permission import PermissionGuard
 
-@runtime_checkable
-class PermissionGuard(Protocol):
-    async def check(self, handler: ToolHandler) -> ToolHandler: ...
+class MyGuard(PermissionGuard):
+    async def check(self, handler: Any) -> Any:
+        # return handler to allow, raise GuardError to deny
+        return handler
 ```
 
 ## Stream events
@@ -223,11 +230,11 @@ my_guard = "my_package:MyGuard"
 | [axio-transport-anthropic](https://github.com/axio-agent/axio-transport-anthropic) | Anthropic Claude transport |
 | [axio-transport-openai](https://github.com/axio-agent/axio-transport-openai) | OpenAI-compatible transport (OpenAI, Nebius, OpenRouter, custom) |
 | [axio-transport-codex](https://github.com/axio-agent/axio-transport-codex) | ChatGPT OAuth transport |
+| [axio-context-sqlite](https://github.com/axio-agent/axio-context-sqlite) | SQLite-backed persistent context store |
 | [axio-tools-local](https://github.com/axio-agent/axio-tools-local) | Shell, file, Python tools |
 | [axio-tools-mcp](https://github.com/axio-agent/axio-tools-mcp) | MCP server bridge |
 | [axio-tools-docker](https://github.com/axio-agent/axio-tools-docker) | Docker sandbox tools |
 | [axio-tui](https://github.com/axio-agent/axio-tui) | Textual TUI application |
-| [axio-tui-rag](https://github.com/axio-agent/axio-tui-rag) | RAG / semantic search plugin |
 | [axio-tui-guards](https://github.com/axio-agent/axio-tui-guards) | Permission guard plugins |
 
 ## License

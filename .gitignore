@@ -10,3 +10,5 @@ dist/
 build/
 _build/
 .DS_Store
+*.sqlite
+*.db

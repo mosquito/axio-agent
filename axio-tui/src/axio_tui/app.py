@@ -205,7 +205,6 @@ class ModelRole(StrEnum):
     SUBAGENT = "subagent"
     GUARD = "guard"
     VISION = "vision"
-    EMBEDDING = "embedding"
     REASONING = "reasoning"
 
 
@@ -261,7 +260,6 @@ _ROLE_LABELS: dict[ModelRole, str] = {
     ModelRole.SUBAGENT: "Subagent",
     ModelRole.GUARD: "Guard",
     ModelRole.VISION: "Vision",
-    ModelRole.EMBEDDING: "Embedding",
     ModelRole.REASONING: "Reasoning",
 }
 
@@ -389,7 +387,6 @@ class AgentApp(App[None]):
         self._guard_classes: dict[str, type[PermissionGuard]] = {}
         self._active_tools: list[Tool] = []
         self._chat_transport: Any = None
-        self._embed_cache: Any = None
         self._selector_classes: dict[str, type] = {}
         self._selector_instances: dict[str, Any] = {}
         self._selector_labels: dict[str, str] = {}
@@ -536,22 +533,6 @@ class AgentApp(App[None]):
                 VisionAnalyze._transport = self._transports.make_transport(vb.transport, vb.model)
 
             self._chat_transport = chat_transport
-            if ModelRole.EMBEDDING in self._role_bindings:
-                eb = self._role_bindings[ModelRole.EMBEDDING]
-                raw_transport = self._transports.make_transport(eb.transport, eb.model)
-                try:
-                    from axio_tui_rag.embedding_cache import CachedEmbeddingTransport
-
-                    embed_db = DB_PATH.parent / "embed_cache.db"
-                    embed_cache = CachedEmbeddingTransport(raw_transport, embed_db, eb.model.id)
-                    self._embed_cache = embed_cache
-                    if "embedding" in self._selector_classes:
-                        cls = self._selector_classes["embedding"]
-                        self._selector_instances["embedding"] = cls(
-                            transport=embed_cache, top_k=6, pinned=frozenset({"status_line"})
-                        )
-                except ImportError:
-                    pass
 
             # Discover tools and guards via entry points
             tools: list[Tool] = discover_tools()
@@ -699,8 +680,6 @@ class AgentApp(App[None]):
                 await plugin.close()
             except Exception:
                 pass
-        if self._embed_cache is not None:
-            await self._embed_cache.close()
         if self._db_conn is not None:
             await self._db_conn.close()
         if self._config_conn is not None:
@@ -893,8 +872,6 @@ class AgentApp(App[None]):
                 models = self._transports.all_models()
             case ModelRole.VISION:
                 models = self._transports.all_models(Capability.vision)
-            case ModelRole.EMBEDDING:
-                models = self._transports.all_models(Capability.embedding)
             case ModelRole.REASONING:
                 models = self._transports.all_models(Capability.reasoning)
             case _:
@@ -923,24 +900,6 @@ class AgentApp(App[None]):
                 self.sub_title = spec.id
             case ModelRole.VISION:
                 VisionAnalyze._transport = self._transports.make_transport(transport_name, spec)
-            case ModelRole.EMBEDDING:
-                if self._agent is not None:
-                    if self._embed_cache is not None:
-                        await self._embed_cache.close()
-                    raw_transport = self._transports.make_transport(transport_name, spec)
-                    try:
-                        from axio_tui_rag.embedding_cache import CachedEmbeddingTransport
-
-                        embed_db = DB_PATH.parent / "embed_cache.db"
-                        self._embed_cache = CachedEmbeddingTransport(raw_transport, embed_db, spec.id)
-                        if "embedding" in self._selector_classes:
-                            cls = self._selector_classes["embedding"]
-                            self._selector_instances["embedding"] = cls(
-                                transport=self._embed_cache, top_k=6, pinned=frozenset({"status_line"})
-                            )
-                        self._agent.selector = self._get_active_selector()
-                    except ImportError:
-                        pass
             case ModelRole.GUARD:
                 # Re-instantiate LLMGuard with the new transport so it uses the chosen model.
                 if "llm" in self._guard_classes and "llm" not in self._disabled_guards:
@@ -1190,23 +1149,6 @@ class AgentApp(App[None]):
                         self._agent.transport = self._chat_transport
                 case ModelRole.VISION:
                     VisionAnalyze._transport = self._transports.make_transport(name, binding.model)
-                case ModelRole.EMBEDDING:
-                    if self._agent is not None and self._embed_cache is not None:
-                        await self._embed_cache.close()
-                        raw_transport = self._transports.make_transport(name, binding.model)
-                        try:
-                            from axio_tui_rag.embedding_cache import CachedEmbeddingTransport
-
-                            embed_db = DB_PATH.parent / "embed_cache.db"
-                            self._embed_cache = CachedEmbeddingTransport(raw_transport, embed_db, binding.model.id)
-                            if "embedding" in self._selector_classes:
-                                cls = self._selector_classes["embedding"]
-                                self._selector_instances["embedding"] = cls(
-                                    transport=self._embed_cache, top_k=6, pinned=frozenset({"status_line"})
-                                )
-                            self._agent.selector = self._get_active_selector()
-                        except ImportError:
-                            pass
         label = self._transports.get_transport(name).name
         await self._write_meta(f"[dim]{label} settings updated[/]")
 

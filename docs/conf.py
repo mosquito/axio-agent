@@ -2,12 +2,21 @@ project = "Axio"
 copyright = "2025, Axio contributors"
 author = "Axio contributors"
 
+import os
+import sys
+
+sys.path.insert(0, os.path.abspath("../axio/src"))
+
 extensions = [
     "myst_parser",
     "sphinx_copybutton",
     "sphinx_design",
     "sphinxcontrib.mermaid",
+    "sphinx.ext.autodoc",
+    "sphinx.ext.viewcode",
 ]
+
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", ".venv", "README.md"]
 
 myst_enable_extensions = [
     "colon_fence",
@@ -19,7 +28,6 @@ myst_enable_extensions = [
 templates_path = ["_templates"]
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", ".venv"]
 
 html_theme = "furo"
 html_title = "Axio"

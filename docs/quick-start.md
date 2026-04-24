@@ -21,7 +21,7 @@ uv tool install "axio-tui[anthropic,guards]"
 ```
 
 Available extras: `anthropic`, `openai`, `codex`, `local`, `mcp`,
-`rag`, `guards`, `all`.
+`guards`, `all`.
 
 :::{dropdown} Alternative: pip install
 ```bash

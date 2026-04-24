@@ -16,7 +16,7 @@ on rate-limit and overload errors.
 - **Prompt caching** — `cache_control: ephemeral` applied automatically to the
   system prompt and the last tool definition
 - **Extended thinking** — `ReasoningDelta` events emitted for thinking blocks
-- **Retry logic** — automatic backoff on 429 / 529; honours `Retry-After` header
+- **Retry logic** — automatic backoff on 429 and all 5xx errors; honours `Retry-After` header
 - **TUI integration** — settings screen for API key and model selection
 
 ## Installation
@@ -64,6 +64,12 @@ Set the API key via environment variable instead of passing it directly:
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
+Override the base URL (e.g. for a proxy or private endpoint):
+
+```bash
+export ANTHROPIC_BASE_URL="https://your-proxy.example.com/v1"
+```
+
 ## Models
 
 | Model ID | Context | Max output | Notes |
@@ -81,8 +87,26 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 | `api_key` | `""` | Anthropic API key |
 | `model` | `claude-sonnet-4-6` | Active model |
 | `base_url` | `https://api.anthropic.com/v1` | API base URL |
-| `max_retries` | `10` | Max retry attempts on 429/529 |
+| `max_retries` | `10` | Max retry attempts on 429 and 5xx errors |
 | `retry_base_delay` | `5.0` | Base delay (seconds) for exponential backoff |
+
+## `fetch_models()`
+
+`await transport.fetch_models()` resets `transport.models` to the built-in `ANTHROPIC_MODELS` registry. It does not make a network request. Override `model` directly to switch the active model.
+
+## Serialisation
+
+`AnthropicTransport` supports JSON round-trip for storing and restoring configuration:
+
+```python
+# Serialise
+data = transport.to_dict()   # -> {"name": ..., "base_url": ..., "api_key": ..., "models": [...]}
+
+# Restore
+transport = AnthropicTransport.from_dict(data, session=session)
+```
+
+`from_dict` falls back to `ANTHROPIC_API_KEY` and `ANTHROPIC_BASE_URL` environment variables if the stored values are empty.
 
 ## Part of the axio ecosystem
 

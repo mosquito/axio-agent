@@ -14,6 +14,32 @@ pip install axio-context-sqlite
 
 ## Usage
 
+### `connect(db_path)`
+
+Open (or create) a SQLite database at `db_path` and initialise the schema.
+Returns an `aiosqlite.Connection`. The caller is responsible for closing it.
+
+```python
+async def main():
+    conn = await connect("~/.axio/chat.db")
+    # ... use the connection ...
+    await conn.close()
+```
+
+The helper enables WAL journal mode and a 5-second busy timeout so concurrent
+readers and a single writer can safely share the same database file.
+
+### `SQLiteContextStore(conn, session_id, project=None, db_name="axio_context")`
+
+Create a context store bound to one session.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `conn` | `aiosqlite.Connection` | — | Open database connection (from `connect()`) |
+| `session_id` | `str` | — | Unique identifier for this conversation session |
+| `project` | `str \| None` | `str(Path.cwd().resolve())` | Logical project scope used to group and list sessions. Defaults to the current working directory. |
+| `db_name` | `str` | `"axio_context"` | Prefix used for the database table names (`axio_context_messages`, `axio_context_tokens`). |
+
 Open a connection with `connect()`, then create a `SQLiteContextStore` bound to a
 session. The caller owns the connection and is responsible for closing it.
 
@@ -42,6 +68,22 @@ asyncio.run(main())
 `SQLiteContextStore` implements the `axio.context.ContextStore` ABC and persists
 conversation history across process restarts. Multiple sessions can coexist in
 the same database file, isolated by `session_id` and `project`.
+
+#### Storage and compression
+
+Message content is stored as serialized JSON. Payloads larger than 512 bytes
+are automatically compressed with gzip (compresslevel 6) and stored
+base64-encoded with a `gzip:` prefix. Smaller payloads are stored as-is with a
+`plain:` prefix. Decompression happens transparently on read — callers never
+see the encoded form.
+
+#### SQLite performance settings
+
+Every connection opened by `connect()` is configured with:
+
+- `PRAGMA journal_mode=WAL` — enables concurrent readers alongside one writer
+- `PRAGMA busy_timeout=5000` — waits up to 5 seconds before raising a lock error
+- `PRAGMA synchronous=NORMAL` — balances durability and write throughput
 
 ### Agent integration
 
@@ -98,6 +140,16 @@ async def main() -> None:
 
 asyncio.run(main())
 ```
+
+### Token accounting
+
+`add_context_tokens(input_tokens, output_tokens)` atomically increments the
+stored token counts for the current session and project using a SQL UPSERT
+(`INSERT ... ON CONFLICT DO UPDATE SET ... = ... + excluded....`). This is safe
+to call concurrently from multiple coroutines without an application-level lock.
+
+`set_context_tokens()` replaces the counts unconditionally, and
+`get_context_tokens()` returns a `(input_tokens, output_tokens)` tuple.
 
 ### Forking
 

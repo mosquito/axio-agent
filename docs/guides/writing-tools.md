@@ -29,7 +29,9 @@ Key points:
 - The **docstring** becomes the tool description sent to the LLM.
 - Fields support all Pydantic features: defaults, validators, `Field()`
   metadata.
-- `__call__` must be async and return a string.
+- `__call__` must be `async`. It can return a `str`, a `dict`, or any
+  JSON-serialisable value. The agent coerces non-string return values to
+  JSON when building the `ToolResultBlock`.
 
 ## 2. Wrap it in a Tool
 
@@ -157,15 +159,38 @@ class ReadFile(ToolHandler):
 
 If your package needs to provide a variable number of tools based on
 configuration (like MCP servers or Docker containers), implement the
-`ToolsPlugin` protocol instead:
+`ToolsPlugin` protocol instead. `ToolsPlugin` is defined in the
+`axio_tui` package:
 
 ```python
-from axio.plugin import ToolsPlugin
+from typing import Any
+from axio_tui.plugin import ToolsPlugin
+from axio.tool import Tool
+
 
 class MyPlugin:
-    async def get_tools(self) -> list[Tool]:
-        # Build tools dynamically
+    """A dynamic tool provider."""
+
+    @property
+    def label(self) -> str:
+        return "My Plugin"
+
+    async def init(self, config: Any = None, global_config: Any = None) -> None:
+        # Load configuration, connect to external services, etc.
+        pass
+
+    @property
+    def all_tools(self) -> list[Tool]:
+        # Build and return tools based on current configuration
         return [...]
+
+    def settings_screen(self) -> Any:
+        # Return a Textual Screen for configuring this plugin in the TUI
+        return None
+
+    async def close(self) -> None:
+        # Clean up connections and resources
+        pass
 ```
 
 Register under `axio.tools.settings`:
@@ -174,3 +199,6 @@ Register under `axio.tools.settings`:
 [project.entry-points."axio.tools.settings"]
 my_plugin = "my_package.plugin:MyPlugin"
 ```
+
+See [Plugin System](../concepts/plugins.md) for the full `ToolsPlugin` protocol
+and lifecycle documentation.

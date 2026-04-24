@@ -74,34 +74,47 @@ from axio.blocks import ContentBlock
 
 @dataclass(slots=True)
 class Message:
-    role: Literal["user", "assistant"]
+    role: Literal["user", "assistant", "system"]
     content: list[ContentBlock]
 ```
 
 User messages typically contain `TextBlock` values. Assistant messages may
 contain `TextBlock` and `ToolUseBlock` values. Tool results go into a
-separate user message with `ToolResultBlock` values.
+separate user message with `ToolResultBlock` values. The `"system"` role is
+supported for representing system-level messages in history.
 
 ## ContextStore
 
 `ContextStore` is an abstract base class — implement it to store conversations
-anywhere.
+anywhere. Only two methods are truly abstract and must be overridden:
 
 <!-- name: test_context_store_abc -->
 ```python
-from abc import ABC, abstractmethod
 from axio.context import ContextStore
 from axio.messages import Message
 
-class ContextStore(ABC):
-    @abstractmethod
-    async def append(self, message: Message) -> None: ...
+class MyContextStore(ContextStore):
+    def __init__(self) -> None:
+        self._messages: list[Message] = []
 
-    @abstractmethod
-    async def get_history(self) -> list[Message]: ...
+    async def append(self, message: Message) -> None:
+        self._messages.append(message)
 
-    # Everything else — session_id, close(), fork(), clear(),
-    # get/set_context_tokens() — has a default implementation.
+    async def get_history(self) -> list[Message]:
+        return list(self._messages)
+
+    # All other methods have default implementations in ContextStore:
+    #   session_id       — lazy UUID hex property (no __init__ required)
+    #   clear()          — raises NotImplementedError by default
+    #   fork()           — deep-copies history into a MemoryContextStore
+    #   close()          — no-op by default
+    #   set_context_tokens(input, output)  — no-op by default
+    #   get_context_tokens()               — returns (0, 0) by default
+    #   add_context_tokens(input, output)  — increments via get/set above
+    #   list_sessions()  — returns a single SessionInfo for the current session
+
+store = MyContextStore()
+assert store.session_id  # auto-generated UUID hex
 ```
 
 ### Built-in implementations
@@ -199,6 +212,87 @@ async def main():
 asyncio.run(main())
 ```
 
+### Token tracking
+
+`ContextStore` includes optional token tracking. The agent calls
+`add_context_tokens()` after every LLM iteration to accumulate usage:
+
+`add_context_tokens(input_tokens, output_tokens)`
+: Increment the stored token counts by the given amounts. The base
+  implementation delegates to `get_context_tokens()` and
+  `set_context_tokens()`.
+
+`set_context_tokens(input_tokens, output_tokens)`
+: Overwrite the stored counts. No-op in the base class.
+
+`get_context_tokens() -> tuple[int, int]`
+: Return `(input_tokens, output_tokens)`. Returns `(0, 0)` in the base class.
+
+Both `MemoryContextStore` and `SQLiteContextStore` provide real storage for
+these values. Custom stores may override `set_context_tokens` and
+`get_context_tokens` to persist usage data.
+
+<!-- name: test_token_tracking -->
+```python
+import asyncio
+from axio.context import MemoryContextStore
+
+async def main():
+    ctx = MemoryContextStore()
+    await ctx.add_context_tokens(100, 50)
+    await ctx.add_context_tokens(200, 80)
+    in_tok, out_tok = await ctx.get_context_tokens()
+    assert in_tok == 300
+    assert out_tok == 130
+
+asyncio.run(main())
+```
+
+### Session listing
+
+`list_sessions() -> list[SessionInfo]`
+: Returns a list of `SessionInfo` dataclasses describing available sessions.
+  The base implementation returns a single entry for the current session.
+  `SQLiteContextStore` overrides this to list all sessions for the project,
+  ordered newest-first.
+
+`SessionInfo` is a frozen dataclass:
+
+<!-- name: test_session_info -->
+```python
+from axio.context import SessionInfo
+
+info = SessionInfo(
+    session_id="abc123",
+    message_count=10,
+    preview="What is the capital of France?",
+    created_at="2024-01-15 10:30:00",
+    input_tokens=1500,
+    output_tokens=300,
+)
+assert info.session_id == "abc123"
+assert info.message_count == 10
+```
+
+`session_id`
+: The unique identifier for the session.
+
+`message_count`
+: Total number of messages in the session.
+
+`preview`
+: A short excerpt (up to 80 characters) from the first user message.
+
+`created_at`
+: Creation timestamp as a string. `MemoryContextStore` returns an empty
+  string; `SQLiteContextStore` returns an ISO-format datetime.
+
+`input_tokens`
+: Cumulative input token count for the session. Defaults to 0.
+
+`output_tokens`
+: Cumulative output token count for the session. Defaults to 0.
+
 ## Context compaction
 
 Long conversations can exceed the model's context window. The
@@ -217,10 +311,31 @@ async def compact_context(
     *,
     max_messages: int = 20,
     keep_recent: int = 6,
-    system_prompt: str | None = None,
+    system_prompt: str = "...",  # defaults to a built-in summarization prompt
 ) -> list[Message] | None:
     ...
 ```
+
+`context`
+: The store whose history will be summarized.
+
+`transport`
+: A `CompletionTransport` used to run the summarization agent. This can be
+  the same transport as your main agent.
+
+`max_messages`
+: If the history has this many messages or fewer, compaction is skipped and
+  `None` is returned. Defaults to 20.
+
+`keep_recent`
+: The number of messages at the end of the history to keep verbatim.
+  Defaults to 6.
+
+`system_prompt`
+: The system prompt for the summarization agent. Defaults to a built-in
+  prompt that instructs the model to produce narrative-prose summaries
+  preserving user goals, decisions, key facts, tool outcomes, and state
+  changes.
 
 It uses a separate one-shot agent call to generate the summary. The function
 returns the compacted message list if the history exceeded `max_messages`, or
