@@ -24,7 +24,6 @@ jobs:
           - axio-transport-openai
           - axio-tui
           - axio-tui-guards
-          - axio-tui-rag
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -63,7 +62,6 @@ jobs:
           - axio-transport-openai
           - axio-tui
           - axio-tui-guards
-          - axio-tui-rag
     steps:
       - uses: actions/download-artifact@v4
         with:

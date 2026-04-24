@@ -165,6 +165,30 @@ class TestKVCache:
         payload = t.build_payload([], [], "")
         assert "system" not in payload
 
+    def test_system_message_in_history_appended_to_system(self) -> None:
+        t = AnthropicTransport(model=ANTHROPIC_MODELS["claude-sonnet-4-6"])
+        messages = [Message(role="system", content=[TextBlock(text="wrap up now")])]
+        payload = t.build_payload(messages, [], "")
+        assert payload["system"] == [{"type": "text", "text": "wrap up now"}]
+
+    def test_system_message_in_history_combined_with_prompt(self) -> None:
+        t = AnthropicTransport(model=ANTHROPIC_MODELS["claude-sonnet-4-6"])
+        messages = [Message(role="system", content=[TextBlock(text="wrap up now")])]
+        payload = t.build_payload(messages, [], "You are helpful.")
+        assert len(payload["system"]) == 2
+        assert payload["system"][0] == {
+            "type": "text",
+            "text": "You are helpful.",
+            "cache_control": {"type": "ephemeral"},
+        }
+        assert payload["system"][1] == {"type": "text", "text": "wrap up now"}
+
+    def test_system_message_not_in_messages_array(self) -> None:
+        t = AnthropicTransport(model=ANTHROPIC_MODELS["claude-sonnet-4-6"])
+        messages = [Message(role="system", content=[TextBlock(text="wrap up")])]
+        payload = t.build_payload(messages, [], "")
+        assert all(m.get("role") != "system" for m in payload["messages"])
+
     def test_last_tool_has_cache_control(self) -> None:
         t = AnthropicTransport(model=ANTHROPIC_MODELS["claude-sonnet-4-6"])
         tool_a = Tool(name="tool_a", description="A", handler=GetWeather)

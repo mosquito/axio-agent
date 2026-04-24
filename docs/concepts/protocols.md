@@ -14,15 +14,17 @@ classDiagram
     }
     class ContextStore {
         <<ABC>>
+        +append(message)*
+        +get_history() list~Message~*
         +session_id str
-        +append(message)
-        +get_history() list~Message~
-        +clear()
         +fork() ContextStore
+        +clear()
+        +close()
+        +list_sessions() list~SessionInfo~
     }
     class PermissionGuard {
         <<ABC>>
-        +check(handler) handler
+        +check(handler) handler*
     }
     Agent --> CompletionTransport
     Agent --> ContextStore
@@ -56,41 +58,61 @@ The agent calls `stream()` on every iteration, passing the full conversation
 history, the available tools, and the system prompt. The transport yields
 `StreamEvent` values as they arrive from the LLM.
 
-Built-in transports: `OpenAITransport`, `NebiusTransport`, `CodexTransport`.
+Available transports (each in its own installable package):
+
+| Transport | Package | Notes |
+|---|---|---|
+| `AnthropicTransport` | `axio-transport-anthropic` | Anthropic Claude models |
+| `OpenAITransport` | `axio-transport-openai` | OpenAI and OpenAI-compatible APIs |
+| `CodexTransport` | `axio-transport-codex` | ChatGPT via OAuth |
+
+The core `axio` package does not bundle any transport implementation — install
+the appropriate package for your model provider.
 
 See [Writing Transports](../guides/writing-transports.md) for a step-by-step guide.
 
 ## ContextStore
 
 The context store manages conversation history. It is an abstract base class
-with async methods:
+with async methods. Only `append` and `get_history` are truly abstract —
+everything else has a working default implementation:
 
 <!-- name: test_context_store_abc -->
 ```python
-from abc import ABC, abstractmethod
 from axio.messages import Message
+from axio.context import ContextStore
 
 
-class ContextStore(ABC):
-    @property
-    @abstractmethod
-    def session_id(self) -> str: ...
+class MyContextStore(ContextStore):
+    def __init__(self) -> None:
+        self._messages: list[Message] = []
 
-    @abstractmethod
-    async def append(self, message: Message) -> None: ...
+    async def append(self, message: Message) -> None:
+        self._messages.append(message)
 
-    @abstractmethod
-    async def get_history(self) -> list[Message]: ...
+    async def get_history(self) -> list[Message]:
+        return list(self._messages)
 
-    @abstractmethod
-    async def clear(self) -> None: ...
+    # Default implementations provided by ContextStore (override as needed):
+    #   session_id          — lazy UUID hex property
+    #   clear()             — raises NotImplementedError by default
+    #   fork()              — deep-copies history into a MemoryContextStore
+    #   close()             — no-op by default
+    #   set_context_tokens(input, output)  — no-op by default
+    #   get_context_tokens()               — returns (0, 0) by default
+    #   add_context_tokens(input, output)  — increments via get/set above
+    #   list_sessions()     — returns a single SessionInfo for the current session
 
-    @abstractmethod
-    async def fork(self) -> ContextStore: ...
+store = MyContextStore()
+assert store.session_id  # auto-generated UUID hex
 ```
 
-`MemoryContextStore` is the built-in in-memory implementation. The `axio-tui`
-package includes a SQLite-backed store for persistence across sessions.
+Built-in implementations:
+
+- `MemoryContextStore` (in `axio`) — in-memory, no persistence; ideal for
+  short-lived agents, tests, and prototypes.
+- `SQLiteContextStore` (in `axio-context-sqlite`) — persistent, SQLite-backed;
+  survives process restarts and supports multiple named sessions per project.
 
 Implement your own `ContextStore` to back conversations with Redis, a database,
 or any other storage layer.
@@ -100,22 +122,41 @@ See [Context & Messages](context.md) for details on the message model.
 ## PermissionGuard
 
 Guards gate tool execution. They sit between parameter validation and handler
-invocation:
+invocation. `PermissionGuard` is an abstract base class (ABC) — not a
+Protocol. Subclass it and implement `check()`:
 
 <!-- name: test_permission_guard_abc -->
 ```python
-from abc import ABC, abstractmethod
 from typing import Any
+from axio.permission import PermissionGuard
 
 
-class PermissionGuard(ABC):
-    @abstractmethod
-    async def check(self, handler: Any) -> Any: ...
+class MyGuard(PermissionGuard):
+    async def check(self, handler: Any) -> Any:
+        # return handler to allow, raise GuardError to deny
+        return handler
 ```
 
 A guard receives the validated handler instance and either returns it (allowing
 execution) or raises `GuardError` to deny. Guards can also modify the handler
 before returning it.
+
+Tool calls are made via `await guard(handler)`, which delegates to `check()`.
+The `ConcurrentGuard` subclass additionally wraps `check()` in an
+`asyncio.Semaphore` to control parallelism.
+
+Axio ships three built-in guards:
+
+`AllowAllGuard`
+: Always returns the handler unchanged — useful as a no-op default.
+
+`DenyAllGuard`
+: Always raises `GuardError("denied")` — useful for locked-down environments.
+
+`ConcurrentGuard`
+: Abstract base that serializes (or rate-limits) concurrent `check()` calls
+  via a semaphore. Set the `concurrency` class attribute to control
+  parallelism (default: 1).
 
 Multiple guards compose sequentially — each guard's output is passed to the
 next.

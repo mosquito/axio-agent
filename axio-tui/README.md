@@ -45,7 +45,6 @@ pip install "axio-tui[openai,local,mcp]"
 | `codex` | axio-transport-codex |
 | `local` | axio-tools-local |
 | `mcp` | axio-tools-mcp |
-| `rag` | axio-tui-rag |
 | `guards` | axio-tui-guards |
 | `all` | Everything above |
 
@@ -115,7 +114,7 @@ textual-serve axio_tui.__main__:app
 
 ## Part of the axio ecosystem
 
-[axio](https://github.com/axio-agent/axio) · [axio-transport-anthropic](https://github.com/axio-agent/axio-transport-anthropic) · [axio-tui-rag](https://github.com/axio-agent/axio-tui-rag) · [axio-tui-guards](https://github.com/axio-agent/axio-tui-guards) · [axio-tools-local](https://github.com/axio-agent/axio-tools-local) · [axio-tools-mcp](https://github.com/axio-agent/axio-tools-mcp) · [axio-tools-docker](https://github.com/axio-agent/axio-tools-docker)
+[axio](https://github.com/axio-agent/axio) · [axio-transport-anthropic](https://github.com/axio-agent/axio-transport-anthropic) · [axio-tui-guards](https://github.com/axio-agent/axio-tui-guards) · [axio-tools-local](https://github.com/axio-agent/axio-tools-local) · [axio-tools-mcp](https://github.com/axio-agent/axio-tools-mcp) · [axio-tools-docker](https://github.com/axio-agent/axio-tools-docker)
 
 ## License
 

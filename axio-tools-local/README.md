@@ -16,7 +16,7 @@ Gives your agent the ability to read, write, and patch files, run shell commands
 | `RunPython` | `run_python` | Execute a Python snippet in a subprocess |
 | `ReadFile` | `read_file` | Read a file, optionally with line range |
 | `WriteFile` | `write_file` | Write or overwrite a file |
-| `PatchFile` | `patch_file` | Apply a targeted string replacement (old → new) |
+| `PatchFile` | `patch_file` | Replace a range of lines in an existing file (1-indexed, both ends inclusive) |
 | `ListFiles` | `list_files` | List files matching a glob pattern |
 
 ## Installation
@@ -81,7 +81,11 @@ Parameters: `command: str`, `timeout: int = 5`, `cwd: str = "."`, `stdin: str | 
 
 ### PatchFile
 
-Applies an exact string replacement — safe for surgical edits without rewriting the whole file:
+Replaces a range of lines in an existing file — safe for surgical edits without
+rewriting the whole file. Lines are 1-indexed and both `from_line` and `to_line`
+are inclusive. To insert without deleting any existing lines, set
+`to_line = from_line - 1`. Always read the file first with `indexed=True` to
+get correct line numbers.
 
 <!--
 name: test_readme_patch_file
@@ -91,13 +95,32 @@ from axio_tools_local.patch_file import PatchFile
 -->
 <!-- name: test_readme_patch_file -->
 ```python
+# Replace line 5 with a new function signature
 PatchFile(
     file_path="src/main.py",
     from_line=5,
     to_line=5,
     content="def foo(x: int) -> int:",
 )
+
+# Replace lines 2-4 (both inclusive) with two new lines
+PatchFile(
+    file_path="src/main.py",
+    from_line=2,
+    to_line=4,
+    content="line_a\nline_b",
+)
+
+# Insert before line 3 (no lines deleted)
+PatchFile(
+    file_path="src/main.py",
+    from_line=3,
+    to_line=2,
+    content="# inserted comment",
+)
 ```
+
+Parameters: `file_path: str`, `from_line: int`, `to_line: int`, `content: str`, `mode: int = 0o644`
 
 ### ListFiles
 

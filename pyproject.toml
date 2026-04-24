@@ -10,7 +10,6 @@ members = [
     "axio-transport-openai",
     "axio-tui",
     "axio-tui-guards",
-    "axio-tui-rag",
     "docs",
 ]
 
@@ -25,7 +24,6 @@ axio-transport-codex       = { workspace = true }
 axio-transport-openai      = { workspace = true }
 axio-tui                   = { workspace = true }
 axio-tui-guards            = { workspace = true }
-axio-tui-rag               = { workspace = true }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

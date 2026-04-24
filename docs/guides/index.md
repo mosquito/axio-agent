@@ -8,5 +8,9 @@ Practical, step-by-step guides for extending Axio with your own components.
 writing-tools
 writing-transports
 writing-guards
+writing-context-stores
 testing
+cookbook
+best-practices
+tui-usage
 ```

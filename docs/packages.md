@@ -1,13 +1,15 @@
 # Packages
 
 The Axio monorepo contains 10 packages, each with a focused responsibility.
-All packages live under `packages/` and are managed as a uv workspace.
+Each package is a top-level directory in the monorepo root (e.g., `axio/`, `axio-tui/`)
+and all are managed as a uv workspace.
 
 ## Overview
 
 | Package | Purpose | Entry Point Groups |
 |---------|---------|-------------------|
 | `axio` | Core framework | — |
+| `axio-context-sqlite` | SQLite-backed persistent context store | — |
 | `axio-transport-anthropic` | Anthropic Claude transport | `axio.transport`, `axio.transport.settings` |
 | `axio-transport-openai` | OpenAI-compatible transport (OpenAI, Nebius, OpenRouter, custom) | `axio.transport`, `axio.transport.settings` |
 | `axio-transport-codex` | ChatGPT (Codex) OAuth transport | `axio.transport`, `axio.transport.settings` |
@@ -15,7 +17,6 @@ All packages live under `packages/` and are managed as a uv workspace.
 | `axio-tools-mcp` | MCP tool loader | `axio.tools.settings` |
 | `axio-tools-docker` | Docker sandbox tools | `axio.tools.settings` |
 | `axio-tui` | Textual-based TUI app | `axio.tools` |
-| `axio-tui-rag` | RAG plugin (LanceDB) | `axio.tools` |
 | `axio-tui-guards` | Permission guard plugins | `axio.guards` |
 
 ## Core
@@ -27,6 +28,23 @@ The foundation. Defines the agent loop, all protocols (`CompletionTransport`,
 testing helpers. Has no entry points — other packages depend on it.
 
 Dependencies: `pydantic>=2`
+
+## Context Stores
+
+### axio-context-sqlite
+
+SQLite-backed persistent context store. Implements the `axio.context.ContextStore`
+protocol so conversations survive process restarts. Multiple sessions can coexist
+in the same database file, isolated by `session_id` and `project`.
+
+Features:
+- Automatic gzip compression for large payloads (> 512 bytes)
+- WAL journal mode with a 5-second busy timeout for concurrent access
+- `list_sessions()` — list all sessions for a project, ordered newest first
+- `fork()` — copy a session's messages into a new session ID
+- `add_context_tokens()` — atomic token-count increment via SQL UPSERT
+
+Dependencies: `axio`, `aiosqlite>=0.20`
 
 ## Transports
 
@@ -117,16 +135,6 @@ Tools registered under `axio.tools`:
 Console script: `axio = "axio_tui.__main__:main"`
 
 Dependencies: `axio`, `textual>=2.1.0`, `aiosqlite>=0.20`
-
-### axio-tui-rag
-
-RAG (Retrieval-Augmented Generation) plugin using LanceDB for vector search.
-
-Tools registered under `axio.tools`:
-- `index_files` — Index files for semantic search
-- `semantic_search` — Search indexed content
-
-Dependencies: `axio`, `axio-tui`, `lancedb>=0.20`
 
 ### axio-tui-guards
 

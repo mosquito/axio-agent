@@ -188,7 +188,15 @@ class AnthropicTransport(CompletionTransport):
 
     def build_payload(self, messages: list[Message], tools: list[Tool], system: str) -> dict[str, Any]:
         converted_messages = _convert_messages(messages)
-        effective_system = system
+
+        system_blocks: list[dict[str, Any]] = []
+        if system:
+            system_blocks.append({"type": "text", "text": system, "cache_control": {"type": "ephemeral"}})
+        for msg in messages:
+            if msg.role == "system":
+                text = "".join(b.text for b in msg.content if isinstance(b, TextBlock))
+                if text:
+                    system_blocks.append({"type": "text", "text": text})
 
         payload: dict[str, Any] = {
             "model": self.model.id,
@@ -197,8 +205,8 @@ class AnthropicTransport(CompletionTransport):
             "max_tokens": self.model.max_output_tokens,
         }
 
-        if effective_system:
-            payload["system"] = [{"type": "text", "text": effective_system, "cache_control": {"type": "ephemeral"}}]
+        if system_blocks:
+            payload["system"] = system_blocks
 
         if tools:
             converted = _convert_tools(tools)

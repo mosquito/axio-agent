@@ -118,3 +118,44 @@ AxioError
 The agent catches both and wraps the error message in a `ToolResultBlock`
 with `is_error=True`, so the model can see what went wrong and retry or
 adjust its approach.
+
+## ToolSelector
+
+The `ToolSelector` protocol (defined in `axio.selector`) allows a component
+to filter or rank the full set of available tools before each LLM call. The
+agent passes the current message history and the full tool list to the
+selector, which returns the subset of tools that should be offered to the
+model for that turn.
+
+<!--
+name: test_tool_selector_protocol
+```python
+from dataclasses import dataclass
+from axio.tool import ToolHandler
+from axio.permission import PermissionGuard
+ToolName = str
+```
+-->
+<!-- name: test_tool_selector_protocol -->
+```python
+from collections.abc import Iterable
+from typing import Protocol, runtime_checkable
+from axio.messages import Message
+from axio.tool import Tool
+
+
+@runtime_checkable
+class ToolSelector(Protocol):
+    async def select(
+        self,
+        messages: Iterable[Message],
+        tools: Iterable[Tool],
+    ) -> Iterable[Tool]: ...
+```
+
+A selector is useful when you have a large tool catalogue and want to avoid
+sending every tool's schema to the model on every turn — for example, by
+using embeddings or keyword matching to pick only the relevant tools.
+
+`ToolSelector` implementations are registered via the `axio.selector` entry
+point group and discovered by `discover_selectors()` from `axio_tui.plugin`.

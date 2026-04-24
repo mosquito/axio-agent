@@ -117,7 +117,7 @@ llm  = "axio_tui_guards.guards:LLMGuard"
 
 ## Part of the axio ecosystem
 
-[axio](https://github.com/axio-agent/axio) · [axio-tui](https://github.com/axio-agent/axio-tui) · [axio-tui-rag](https://github.com/axio-agent/axio-tui-rag)
+[axio](https://github.com/axio-agent/axio) · [axio-tui](https://github.com/axio-agent/axio-tui)
 
 ## License
 

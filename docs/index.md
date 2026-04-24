@@ -165,6 +165,103 @@ Tools are Pydantic models
 : Define parameters as fields, get JSON schema for free, override `__call__` for execution.
   Guards gate every tool call through a composable permission chain.
 
+Multi-agent orchestration built-in
+: Spawn sub-agents via the `subagent` tool, share context between agents,
+  compose complex workflows — all without external dependencies.
+
+### Architecture
+
+```{mermaid}
+flowchart TB
+    subgraph User["User Code"]
+        A[Agent]
+    end
+
+    subgraph Core["axio - Core Framework"]
+        B[Tool Handler<br/>Pydantic model]
+        C[Permission Guard<br/>Protocol]
+        D[StreamEvent<br/>Typed events]
+    end
+
+    subgraph Transport["Transport (pluggable)"]
+        E[OpenAI Transport]
+        F[Anthropic Transport]
+        G[Custom Transport]
+    end
+
+    subgraph Context["Context Store (pluggable)"]
+        H[MemoryContextStore]
+        I[SQLiteContextStore]
+    end
+
+    subgraph LLM["LLM Provider"]
+        J[OpenAI]
+        K[Claude]
+        L[Custom]
+    end
+
+    A -->|1. configures| B
+    A -->|2. uses| C
+    A -->|3. builds| D
+    A -->|4. sends to| E
+    A -->|5. stores in| H
+    E -->|SSE| D
+    D -->|tool call| B
+    B -->|result| D
+    D -->|text| J
+    J -->|response| E
+    E -->|reply| A
+```
+
+The agent loop:
+1. You configure the agent with tools (Pydantic models) and guards (permission chain)
+2. User sends a message
+3. Agent sends to transport → LLM
+4. LLM responds with text or tool calls
+5. Tools execute → results return → LLM generates final response
+6. Events stream back to you (tokens, tool calls, results)
+
+## How does Axio compare?
+
+Here's how Axio compares to other popular Python agent frameworks:
+
+| | Axio | LangChain / LangGraph | AutoGen |
+|---|---|---|---|
+| **Architecture** | Minimal core + protocols | Heavy abstraction layer | Multi-agent orchestration |
+| **Streaming** | Built-in from day one | Added later, inconsistent | Limited |
+| **Tool definition** | Pydantic models | Functions + decorators | Class-based agents |
+| **Transport** | Pluggable protocol | Built-in, harder to swap | Azure OpenAI focused |
+| **Multi-agent** | Built-in (subagent tool) | Via LangGraph | Native |
+| **Learning curve** | Low — ~100 lines for agent | Medium — many abstractions | High — complex configs |
+| **Scope** | Agent loop + extensions | Full stack (RAG, chains, etc.) | Multi-agent scenarios |
+
+### When to choose each
+
+**Choose Axio if:**
+- You want a minimal foundation and full control over integrations
+- Streaming and visibility into agent decisions matter
+- You prefer explicit patterns over implicit "magic"
+- You're building a custom agent UI or need to swap LLM providers
+
+**Choose LangChain if:**
+- You need RAG, text splitters, and other built-in utilities
+- You want batteries-included with less wiring code
+- You're prototyping quickly and can accept abstraction overhead
+
+**Choose AutoGen if:**
+- You're building complex multi-agent scenarios with conversation flows
+- You need built-in support for human-in-the-loop
+- You're okay with Azure OpenAI as the primary backend
+
+**Actually — Axio also supports multi-agent:**
+- Sub-agents via the built-in `subagent` tool
+- Shared context stores for agent-to-agent communication
+- Composable workflows without external dependencies
+
+Axio's philosophy is thin abstraction over the prompt-completion loop,
+not a full framework with opinions about how you should structure your application.
+If that aligns with your needs — welcome.
+
 ```{toctree}
 :maxdepth: 2
 :hidden:
@@ -174,4 +271,7 @@ getting-started
 concepts/index
 guides/index
 packages
+api
+troubleshooting
+glossary
 ```

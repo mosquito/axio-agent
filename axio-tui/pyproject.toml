@@ -20,10 +20,9 @@ openai = ["axio-transport-openai"]
 codex = ["axio-transport-codex"]
 local = ["axio-tools-local"]
 mcp = ["axio-tools-mcp"]
-rag = ["axio-tui-rag"]
 guards = ["axio-tui-guards"]
 all = [
-    "axio-tui[anthropic,openai,codex,local,mcp,rag,guards]",
+    "axio-tui[anthropic,openai,codex,local,mcp,guards]",
 ]
 
 [project.entry-points."axio.tools"]
@@ -77,7 +76,6 @@ module = [
     "axio_tools_local", "axio_tools_local.*",
     "axio_tools_mcp", "axio_tools_mcp.*",
     "axio_tools_docker", "axio_tools_docker.*",
-    "axio_tui_rag", "axio_tui_rag.*",
     "axio_tui_guards", "axio_tui_guards.*",
 ]
 ignore_missing_imports = true

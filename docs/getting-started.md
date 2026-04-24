@@ -2,11 +2,29 @@
 
 ## Installation
 
-Axio is distributed as a uv workspace. Clone the repository and sync dependencies:
+Install Axio from PyPI:
 
 ```bash
-git clone https://github.com/axio-agent/axio.git
-cd axio
+pip install axio
+# or with uv:
+uv add axio
+```
+
+To install the terminal UI and all optional extras:
+
+```bash
+pip install "axio-tui[all]"
+# or with uv:
+uv add "axio-tui[all]"
+```
+
+### From source (development)
+
+If you want to work on Axio itself, clone the monorepo and sync dependencies:
+
+```bash
+git clone https://github.com/axio-agent/axio-agent.git
+cd axio-agent
 uv sync
 ```
 
@@ -81,6 +99,41 @@ agent = Agent(
     tools=[Tool(name="greet", description="Greet someone", handler=Greet)],
     transport=transport,
 )
+```
+
+## Streaming Events
+
+`run_stream()` returns an `AgentStream` that yields `StreamEvent` objects as the
+agent runs. This lets you react to text tokens, tool calls, and session-end
+signals as they arrive rather than waiting for the full response.
+
+<!-- name: test_streaming_example -->
+```python
+import asyncio
+from axio.agent import Agent
+from axio.context import MemoryContextStore
+from axio.events import TextDelta, SessionEndEvent
+from axio.testing import StubTransport, make_text_response
+
+async def main() -> None:
+    transport = StubTransport([
+        make_text_response("Streaming works!"),
+    ])
+    context = MemoryContextStore()
+    agent = Agent(
+        system="You are a helpful assistant.",
+        tools=[],
+        transport=transport,
+    )
+    collected = []
+    async for event in agent.run_stream("Hello!", context):
+        if isinstance(event, TextDelta):
+            collected.append(event.delta)
+        elif isinstance(event, SessionEndEvent):
+            break
+    return "".join(collected)
+
+assert asyncio.run(main()) == "Streaming works!"
 ```
 
 ## Running the TUI
