@@ -51,7 +51,7 @@ def build_handler(
     description: str,
     input_schema: dict[str, Any],
     session: MCPSession,
-) -> type[ToolHandler]:
+) -> type[ToolHandler[Any]]:
     """Create a dynamic ToolHandler subclass for an MCP tool.
 
     The returned class forwards calls to the MCP session.
@@ -59,7 +59,7 @@ def build_handler(
     fields = _build_fields(input_schema)
     class_name = "".join(part.capitalize() for part in tool_name.split("_")) + "Handler"
 
-    async def __call__(self: Any) -> str:
+    async def __call__(self: Any, context: Any) -> str:
         mcp_session: MCPSession = self.__class__._mcp_session
         name: str = self.__class__._mcp_tool_name
         data = self.model_dump(exclude_none=True)
@@ -70,7 +70,7 @@ def build_handler(
         parts = [c.text for c in result.content if isinstance(c, TextContent)]
         return "\n".join(parts) or ""
 
-    handler_cls: type[ToolHandler] = pydantic.create_model(
+    handler_cls: type[ToolHandler[Any]] = pydantic.create_model(
         class_name,
         __base__=ToolHandler,
         __doc__=description,

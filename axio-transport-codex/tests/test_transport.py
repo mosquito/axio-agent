@@ -38,11 +38,11 @@ from axio_transport_codex.transport import (
 # ---------------------------------------------------------------------------
 
 
-class GetWeather(ToolHandler):
+class GetWeather(ToolHandler[Any]):
     location: str
     units: str = "celsius"
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return f"Weather in {self.location}: 22{self.units[0]}"
 
 

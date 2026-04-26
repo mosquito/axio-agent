@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/axio-tools-docker)](https://pypi.org/project/axio-tools-docker/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Docker sandbox tools for [axio](https://github.com/axio-agent/axio).
+Docker sandbox tools for [axio](https://github.com/mosquito/axio-agent).
 
 Run agent-generated code and commands inside isolated Docker containers. The agent gets `sandbox_exec`, `sandbox_write`, and `sandbox_read` tools that operate entirely within the sandbox — the host filesystem stays untouched.
 
@@ -122,7 +122,7 @@ docker = "axio_tools_docker.plugin:DockerPlugin"
 
 ## Part of the axio ecosystem
 
-[axio](https://github.com/axio-agent/axio) · [axio-tools-local](https://github.com/axio-agent/axio-tools-local) · [axio-tools-mcp](https://github.com/axio-agent/axio-tools-mcp) · [axio-tui](https://github.com/axio-agent/axio-tui)
+[axio](https://github.com/mosquito/axio-agent) · [axio-tools-local](https://github.com/mosquito/axio-agent) · [axio-tools-mcp](https://github.com/mosquito/axio-agent) · [axio-tui](https://github.com/mosquito/axio-agent)
 
 ## License
 

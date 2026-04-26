@@ -2,7 +2,7 @@
 
 Documentation for the Axio agent framework.
 
-Part of the [axio-agent](https://github.com/axio-agent) ecosystem.
+Part of the [axio-agent](https://github.com/mosquito/axio-agent) ecosystem.
 
 ## Building the docs
 

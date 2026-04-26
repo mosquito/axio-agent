@@ -1,0 +1,35 @@
+[project]
+name = "agent-swarm-example"
+version = "0.1.0"
+description = "Agent swarm example: a team of specialist AI agents tackling tasks from idea to delivery"
+requires-python = ">=3.12"
+
+dependencies = [
+    "axio",
+    "axio-tools-local",
+    "axio-transport-openai",
+    "aiosqlite>=0.20",
+    "rich>=13",
+    "pytest-asyncio",
+]
+
+[project.scripts]
+axio-swarm = "agent_swarm.__main__:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent_swarm"]
+
+[tool.ruff]
+line-length = 119
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

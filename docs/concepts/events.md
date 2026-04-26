@@ -237,4 +237,4 @@ instantiating `ToolArgStream` yourself if you prefer to rely on the agent-level
 integration (see below).
 
 See the full working example in
-[examples/stream_tool_args.py](https://github.com/axio-agent/monorepo/blob/master/examples/stream_tool_args.py).
+[examples/stream_tool_args.py](https://github.com/mosquito/axio-agent/blob/master/examples/stream_tool_args.py).

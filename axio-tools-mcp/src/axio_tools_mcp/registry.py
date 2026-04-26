@@ -21,7 +21,7 @@ class MCPRegistry:
 
     _configs: dict[str, MCPServerConfig] = field(default_factory=dict)
     _sessions: dict[str, MCPSession] = field(default_factory=dict)
-    _tools: dict[str, list[Tool]] = field(default_factory=dict)
+    _tools: dict[str, list[Tool[Any]]] = field(default_factory=dict)
     _errors: dict[str, str] = field(default_factory=dict)
     _config_db: Any = field(default=None)
     _global_config_db: Any = field(default=None)
@@ -56,10 +56,10 @@ class MCPRegistry:
                 self._server_scope[name] = db
                 await self._connect_server(cfg)
 
-    async def _connect_server(self, config: MCPServerConfig) -> list[Tool]:
+    async def _connect_server(self, config: MCPServerConfig) -> list[Tool[Any]]:
         """Connect to a single server and discover its tools."""
         session = MCPSession(config)
-        tools: list[Tool] = []
+        tools: list[Tool[Any]] = []
         try:
             await session.connect()
             mcp_tools = await session.list_tools()
@@ -114,7 +114,7 @@ class MCPRegistry:
         await db.delete_prefix(f"mcp.{name}.")
         self._server_scope.pop(name, None)
 
-    async def add_server(self, config: MCPServerConfig, scope: Any = None) -> list[Tool]:
+    async def add_server(self, config: MCPServerConfig, scope: Any = None) -> list[Tool[Any]]:
         """Add new server, connect, load tools, persist config."""
         if config.name in self._configs:
             raise ValueError(f"Server {config.name!r} already exists")
@@ -138,7 +138,7 @@ class MCPRegistry:
         self._errors.pop(name, None)
         await self._delete_config(name)
 
-    async def update_server(self, name: str, config: MCPServerConfig, scope: Any = None) -> list[Tool]:
+    async def update_server(self, name: str, config: MCPServerConfig, scope: Any = None) -> list[Tool[Any]]:
         """Reconnect server with new config."""
         effective_scope = scope if scope is not None else self._server_scope.get(name)
         old_scope = self._server_scope.get(name)
@@ -175,9 +175,9 @@ class MCPRegistry:
         return tools
 
     @property
-    def all_tools(self) -> list[Tool]:
+    def all_tools(self) -> list[Tool[Any]]:
         """Flat list of all MCP tools across all servers."""
-        result: list[Tool] = []
+        result: list[Tool[Any]] = []
         for tools in self._tools.values():
             result.extend(tools)
         return result

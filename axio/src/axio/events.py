@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from axio.types import StopReason, ToolCallID, ToolName, Usage
+from .types import StopReason, ToolCallID, ToolName, Usage
 
 
 @dataclass(frozen=True, slots=True)

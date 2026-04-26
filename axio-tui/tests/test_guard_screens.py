@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from axio.tool import Tool, ToolHandler
 
 from axio_tui.screens import GuardSelectScreen, GuardToolsScreen, PluginHubScreen, ToolDetailScreen
 
 
-class _StubHandler(ToolHandler):
+class _StubHandler(ToolHandler[Any]):
     """Stub tool handler."""
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return ""
 
 
-def _make_tools(*names: str) -> list[Tool]:
+def _make_tools(*names: str) -> list[Tool[Any]]:
     return [Tool(name=n, description=f"Description for {n}", handler=_StubHandler) for n in names]
 
 
@@ -109,7 +111,7 @@ class TestGuardSelectScreen:
 
 
 def _make_hub(
-    tools: list[Tool],
+    tools: list[Tool[Any]],
     disabled_plugins: set[str] = frozenset(),  # type: ignore[assignment]
     disabled_guards: set[str] = frozenset(),  # type: ignore[assignment]
     guard_tool_map: dict[str, set[str]] | None = None,

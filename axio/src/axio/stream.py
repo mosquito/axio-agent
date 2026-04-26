@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
-from axio.events import Error, SessionEndEvent, StreamEvent, TextDelta
-from axio.exceptions import StreamError
+from .events import Error, SessionEndEvent, StreamEvent, TextDelta
+from .exceptions import StreamError
 
 
 class AgentStream:

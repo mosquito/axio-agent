@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from functools import singledispatch
 from typing import Any, Literal
 
-from axio.types import ToolCallID, ToolName
+from .types import ToolCallID, ToolName
 
 
 class ContentBlock:

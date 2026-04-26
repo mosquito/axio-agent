@@ -1,20 +1,22 @@
 import asyncio
 import subprocess
+from typing import Any
 
 from axio.tool import ToolHandler
+from pydantic import StrictStr
 
 from . import _short
 
 
-class Shell(ToolHandler):
+class Shell(ToolHandler[Any]):
     """Run a shell command and return combined stdout/stderr. Use for git,
     build tools, grep, tests, or any CLI operation. Non-zero exit codes
     are reported. Optionally pass stdin data for commands that read from
     standard input. Prefer short timeouts and avoid interactive commands."""
 
-    command: str
+    command: StrictStr
     timeout: int = 5
-    cwd: str = "."
+    cwd: StrictStr = "."
     stdin: str | None = None
 
     def __repr__(self) -> str:
@@ -43,5 +45,5 @@ class Shell(ToolHandler):
             output += f"\n[exit code: {result.returncode}]"
         return output.strip() or "(no output)"
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return await asyncio.to_thread(self._blocking)

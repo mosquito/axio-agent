@@ -10,17 +10,20 @@ The one allowed exception is a reusable connection pool (e.g. an
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
-from axio.events import StreamEvent
-from axio.messages import Message
-from axio.tool import Tool
+from .events import StreamEvent
+from .messages import Message
+from .tool import Tool
+
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
 class CompletionTransport(Protocol):
-    def stream(self, messages: list[Message], tools: list[Tool], system: str) -> AsyncIterator[StreamEvent]: ...
+    def stream(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> AsyncIterator[StreamEvent]: ...
 
 
 @runtime_checkable
@@ -41,3 +44,60 @@ class STTTransport(Protocol):
 @runtime_checkable
 class EmbeddingTransport(Protocol):
     async def embed(self, texts: list[str]) -> list[list[float]]: ...
+
+
+class DummyTransport:
+    """Placeholder transport that fails loudly if actually used.
+
+    Assign this as the default transport when constructing agent prototypes
+    that will be configured later via ``agent.copy(transport=real_transport)``.
+
+    Example::
+
+        from axio.agent import Agent
+        from axio.transport import DummyCompletionTransport
+
+        researcher = Agent(
+            system="You are a research assistant...",
+            transport=DummyCompletionTransport(),
+        )
+
+        # At runtime, swap in the real transport:
+        active = researcher.copy(transport=OpenAITransport())
+        result = await active.run(task, context)
+    """
+
+    @staticmethod
+    def _do_fail() -> None:
+        logger.warning(
+            "DummyCompletionTransport.stream() called — this agent has no real transport. "
+            "Use agent.copy(transport=<real_transport>) before running."
+        )
+        raise RuntimeError(
+            "DummyCompletionTransport is a placeholder. Configure a real transport with agent.copy(transport=...)."
+        )
+
+
+class DummyCompletionTransport(DummyTransport, CompletionTransport):
+    def stream(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> Any:
+        self._do_fail()
+
+
+class DummyImageGenTransport(DummyTransport, ImageGenTransport):
+    def generate(self, prompt: str, *, size: tuple[int, int] | None = None, n: int = 1) -> Any:
+        self._do_fail()
+
+
+class DummyTTSTransport(DummyTransport, TTSTransport):
+    def synthesize(self, text: str, *, voice: str | None = None) -> Any:
+        self._do_fail()
+
+
+class DummySTTTransport(DummyTransport, STTTransport):
+    def transcribe(self, audio: bytes, media_type: str = "audio/wav") -> Any:
+        self._do_fail()
+
+
+class DummyEmbeddingTransport(DummyTransport, EmbeddingTransport):
+    def embed(self, texts: list[str]) -> Any:
+        self._do_fail()

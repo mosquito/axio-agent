@@ -1,10 +1,10 @@
 from collections.abc import Iterable
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
-from axio.messages import Message
-from axio.tool import Tool
+from .messages import Message
+from .tool import Tool
 
 
 @runtime_checkable
 class ToolSelector(Protocol):
-    async def select(self, messages: Iterable[Message], tools: Iterable[Tool]) -> Iterable[Tool]: ...
+    async def select(self, messages: Iterable[Message], tools: Iterable[Tool[Any]]) -> Iterable[Tool[Any]]: ...

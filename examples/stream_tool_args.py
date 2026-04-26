@@ -73,7 +73,11 @@ class ReadFile(ToolHandler):
 
 
 TOOLS = [
-    Tool(name="edit_file", description="Replace old_string with new_string in a file.", handler=EditFile),
+    Tool(
+        name="edit_file",
+        description="Replace old_string with new_string in a file.",
+        handler=EditFile,
+    ),
     Tool(name="write_file", description="Write content to a file.", handler=WriteFile),
     Tool(name="read_file", description="Read content of a file.", handler=ReadFile),
 ]
@@ -125,7 +129,9 @@ class ToolArgTracker:
             elif new_text:
                 if key not in self.seen_newline and "\n" in new_text:
                     self.seen_newline.add(key)
-                    sys.stdout.write(f"\r\033[2K  {YELLOW}{key}{RESET}:{DIM}\n{value_str}")
+                    sys.stdout.write(
+                        f"\r\033[2K  {YELLOW}{key}{RESET}:{DIM}\n{value_str}"
+                    )
                 else:
                     sys.stdout.write(new_text)
 
@@ -141,10 +147,16 @@ class ToolArgTracker:
 async def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Stream tool call arguments with partial JSON decoding")
+    parser = argparse.ArgumentParser(
+        description="Stream tool call arguments with partial JSON decoding"
+    )
     parser.add_argument("prompt", help="prompt to send to the model")
-    parser.add_argument("--model", default="gpt-5.4", help="model name (default: gpt-5.4)")
-    parser.add_argument("--temperature", type=float, default=None, help="sampling temperature")
+    parser.add_argument(
+        "--model", default="gpt-5.4", help="model name (default: gpt-5.4)"
+    )
+    parser.add_argument(
+        "--temperature", type=float, default=None, help="sampling temperature"
+    )
     args = parser.parse_args()
 
     api_key = os.environ.get("OPENAI_API_KEY", "")
@@ -201,7 +213,9 @@ async def main() -> None:
                     if tid in trackers:
                         trackers[tid].feed(pj)
 
-                case ToolResult(tool_use_id=tid, name=name, is_error=is_error, content=content):
+                case ToolResult(
+                    tool_use_id=tid, name=name, is_error=is_error, content=content
+                ):
                     color = RED if is_error else GREEN
                     sys.stdout.write(f"{RESET}\n  {color}→ {content}{RESET}\n")
                     sys.stdout.flush()

@@ -156,19 +156,20 @@ Test a tool handler directly:
 <!-- name: test_word_count_isolation -->
 ```python
 import asyncio
+from typing import Any
 from axio.tool import ToolHandler
 
 
-class WordCount(ToolHandler):
+class WordCount(ToolHandler[Any]):
     text: str
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         count = len(self.text.split())
         return f"The text contains {count} words."
 
 
 async def test_word_count():
     handler = WordCount(text="one two three")
-    result = await handler()
+    result = await handler({})
     assert "3" in result
 
 asyncio.run(test_word_count())
@@ -179,12 +180,13 @@ Or test through the `Tool` wrapper to exercise guards:
 <!-- name: test_word_count_via_tool -->
 ```python
 import asyncio
+from typing import Any
 from axio.tool import Tool, ToolHandler
 
 
-class WordCount(ToolHandler):
+class WordCount(ToolHandler[Any]):
     text: str
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         count = len(self.text.split())
         return f"The text contains {count} words."
 
@@ -209,9 +211,9 @@ from axio.permission import PermissionGuard
 from axio.exceptions import GuardError
 
 
-class WordCount(ToolHandler):
+class WordCount(ToolHandler[Any]):
     text: str
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return str(len(self.text.split()))
 
 

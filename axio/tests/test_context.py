@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from typing import Literal
+from typing import Any, Literal
 
 from axio.blocks import TextBlock, ToolResultBlock
 from axio.compaction import _find_safe_boundary, compact_context
@@ -185,19 +185,20 @@ def _fill_store(store: MemoryContextStore, n: int) -> None:
 
 
 class TestCompactContext:
-    async def test_no_compaction_below_threshold(self) -> None:
+    async def test_compaction_returns_none_when_history_too_short(self) -> None:
+        # keep_recent=6, history=4 → split <= 0 → None
         store = MemoryContextStore()
-        _fill_store(store, 10)
+        _fill_store(store, 4)
         transport = StubTransport([make_text_response("summary")])
-        result = await compact_context(store, transport, max_messages=20)
+        result = await compact_context(store, transport, keep_recent=6)
         assert result is None
-        assert len(await store.get_history()) == 10
+        assert len(await store.get_history()) == 4
 
     async def test_compaction_returns_messages(self) -> None:
         store = MemoryContextStore()
         _fill_store(store, 22)
         transport = StubTransport([make_text_response("summary")])
-        messages = await compact_context(store, transport, max_messages=20, keep_recent=6)
+        messages = await compact_context(store, transport, keep_recent=6)
         assert messages is not None
         # 2 (summary user + ack assistant) + 6 recent = 8
         assert len(messages) == 8
@@ -212,7 +213,7 @@ class TestCompactContext:
         store = MemoryContextStore()
         _fill_store(store, 22)
         transport = StubTransport([make_text_response("summary")])
-        await compact_context(store, transport, max_messages=20, keep_recent=6)
+        await compact_context(store, transport, keep_recent=6)
         assert len(await store.get_history()) == 22
 
     async def test_safe_boundary_skips_tool_result(self) -> None:
@@ -227,26 +228,25 @@ class TestCompactContext:
         result = _find_safe_boundary(store._history, keep_recent=6)
         assert result < split_idx
 
-    async def test_no_recompaction_after_populating_new_store(self) -> None:
+    async def test_compacted_store_has_fewer_messages(self) -> None:
         store = MemoryContextStore()
         _fill_store(store, 22)
         transport = StubTransport([make_text_response("summary")])
-        messages = await compact_context(store, transport, max_messages=20, keep_recent=6)
+        messages = await compact_context(store, transport, keep_recent=6)
         assert messages is not None
-        # Populate a fresh store with compacted messages
-        new_store = MemoryContextStore(messages)
-        # 8 messages — below threshold of 20, no second compaction
-        result = await compact_context(new_store, transport, max_messages=20, keep_recent=6)
-        assert result is None
+        # 2 + keep_recent < original 22
+        assert len(messages) < 22
 
     async def test_compaction_failure_returns_none(self) -> None:
         store = MemoryContextStore()
         _fill_store(store, 22)
 
         class FailTransport:
-            def stream(self, messages: list[Message], tools: list[Tool], system: str) -> AsyncIterator[StreamEvent]:
+            def stream(
+                self, messages: list[Message], tools: list[Tool[Any]], system: str
+            ) -> AsyncIterator[StreamEvent]:
                 raise RuntimeError("boom")
 
-        result = await compact_context(store, FailTransport(), max_messages=20, keep_recent=6)
+        result = await compact_context(store, FailTransport(), keep_recent=6)
         assert result is None
         assert len(await store.get_history()) == 22

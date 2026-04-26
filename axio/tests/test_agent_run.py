@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Any
 
 from axio.agent import Agent
 from axio.blocks import TextBlock
@@ -26,17 +27,17 @@ class CapturingTransport:
         for event in events:
             yield event
 
-    def stream(self, messages: list[Message], tools: list[Tool], system: str) -> AsyncIterator[StreamEvent]:
+    def stream(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> AsyncIterator[StreamEvent]:
         self.calls.append(list(messages))
         idx = min(self._call_count, len(self._responses) - 1)
         self._call_count += 1
         return self._generate(self._responses[idx])
 
 
-class OkHandler(ToolHandler):
+class OkHandler(ToolHandler[Any]):
     msg: str
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return "ok"
 
 

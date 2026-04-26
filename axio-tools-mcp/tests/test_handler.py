@@ -72,7 +72,7 @@ async def test_call_forwarding() -> None:
     }
     handler_cls = build_handler("echo__say", "say", "Say something", schema, session)
     instance = cast(type[Any], handler_cls)(message="hi")
-    result = await instance()
+    result = await instance({})
 
     assert result == "hello world"
     mock_call.assert_awaited_once_with("say", {"message": "hi"})
@@ -95,7 +95,7 @@ async def test_error_handling() -> None:
     instance = cast(type[Any], handler_cls)(path="/missing")
 
     with pytest.raises(RuntimeError, match="not found"):
-        await instance()
+        await instance({})
 
 
 async def test_empty_schema() -> None:
@@ -108,7 +108,7 @@ async def test_empty_schema() -> None:
 
     handler_cls = build_handler("sys__status", "status", "Get status", {}, session)
     instance = handler_cls()
-    result = await instance()
+    result = await instance({})
     assert result == "done"
 
 

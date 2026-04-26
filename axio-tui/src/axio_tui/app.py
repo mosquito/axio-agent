@@ -378,14 +378,14 @@ class AgentApp(App[None]):
         self._last_input_tokens = 0
         self._chat_model: ModelSpec | None = None
         self._model_name = ""
-        self._all_tools: list[Tool] = []
+        self._all_tools: list[Tool[Any]] = []
         self._disabled_plugins: set[str] = set()
         self._disabled_transports: set[str] = set()
         self._disabled_guards: set[str] = set()
         self._guard_tool_map: dict[str, set[str]] = {}
         self._guard_instances: dict[str, PermissionGuard] = {}
         self._guard_classes: dict[str, type[PermissionGuard]] = {}
-        self._active_tools: list[Tool] = []
+        self._active_tools: list[Tool[Any]] = []
         self._chat_transport: Any = None
         self._selector_classes: dict[str, type] = {}
         self._selector_instances: dict[str, Any] = {}
@@ -535,7 +535,7 @@ class AgentApp(App[None]):
             self._chat_transport = chat_transport
 
             # Discover tools and guards via entry points
-            tools: list[Tool] = discover_tools()
+            tools: list[Tool[Any]] = discover_tools()
             self._guard_classes = discover_guards()
 
             # Load disabled plugins from config
@@ -842,7 +842,7 @@ class AgentApp(App[None]):
                     return None
 
     def _rebuild_agent_tools(self) -> None:
-        tools: list[Tool] = []
+        tools: list[Tool[Any]] = []
         for t in self._all_tools:
             if t.name in self._disabled_plugins:
                 continue
@@ -1005,7 +1005,7 @@ class AgentApp(App[None]):
             return False
         return self._last_input_tokens / self._chat_model.context_window > 0.7
 
-    async def _compact_with_progress(self, max_messages: int = 20) -> list[Message] | None:
+    async def _compact_with_progress(self) -> list[Message] | None:
         """Run compaction while showing a live elapsed-time counter in the chat."""
         if self._agent is None:
             return None
@@ -1027,7 +1027,7 @@ class AgentApp(App[None]):
                 transport = self._transports.make_transport(cb.transport, cb.model)
             else:
                 transport = self._agent.transport
-            return await compact_context(self._chat_context, transport, max_messages=max_messages)
+            return await compact_context(self._chat_context, transport)
         finally:
             timer.stop()
             await widget.remove()
@@ -1209,7 +1209,7 @@ class AgentApp(App[None]):
 
     def _on_tools_plugin_dismissed(self) -> None:
         # Rebuild tools list with all plugin tools
-        tools: list[Tool] = discover_tools()
+        tools: list[Tool[Any]] = discover_tools()
         for plugin in self._tools_plugins.values():
             tools.extend(plugin.all_tools)
         self._all_tools = tools
@@ -1297,7 +1297,7 @@ class AgentApp(App[None]):
 
         self._is_running = True
         if self._should_compact():
-            messages = await self._compact_with_progress(max_messages=0)
+            messages = await self._compact_with_progress()
             if messages is not None:
                 await self._replace_context(messages)
                 self._last_input_tokens = 0

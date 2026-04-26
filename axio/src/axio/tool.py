@@ -6,18 +6,19 @@ import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any
 
 from pydantic import BaseModel
 
-from axio.exceptions import GuardError, HandlerError
-from axio.permission import PermissionGuard
-from axio.types import ToolName
+from .exceptions import GuardError, HandlerError
+from .permission import PermissionGuard
+from .types import ToolName
 
 type JSONSchema = dict[str, Any]
 
 
-class ToolHandler(BaseModel):
+class ToolHandler[T](BaseModel):
     """Base for tool handlers.
 
     Subclass fields define the input JSON-schema.
@@ -25,18 +26,19 @@ class ToolHandler(BaseModel):
     Pydantic provides ``__repr__`` automatically — override for custom display.
     """
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: T) -> str:
         raise NotImplementedError
 
 
 @dataclass(frozen=True, slots=True)
-class Tool:
+class Tool[T]:
     name: ToolName
     description: str
-    handler: type[ToolHandler]
+    handler: type[ToolHandler[T]]
     guards: tuple[PermissionGuard, ...] = ()
     concurrency: int | None = None
 
+    context: T = field(default=MappingProxyType({}), compare=False)  # type: ignore[assignment]
     _semaphore: asyncio.Semaphore | None = field(init=False, default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -67,7 +69,7 @@ class Tool:
                 except Exception as exc:
                     raise GuardError(str(exc)) from exc
             try:
-                return await instance()
+                return await instance(self.context)
             except HandlerError:
                 raise
             except Exception as exc:

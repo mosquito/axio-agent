@@ -21,10 +21,10 @@ from axio.types import StopReason
 from axio_transport_anthropic import ANTHROPIC_MODELS, AnthropicTransport, _convert_messages
 
 
-class GetWeather(ToolHandler):
+class GetWeather(ToolHandler[Any]):
     location: str
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return f"Weather in {self.location}"
 
 

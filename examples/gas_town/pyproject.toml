@@ -1,0 +1,39 @@
+[project]
+name = "gas-town-example"
+version = "0.1.0"
+description = "Gas Town example: Mayor + Polecats + Witness + Refinery convoy system"
+requires-python = ">=3.12"
+
+dependencies = [
+    "axio",
+    "axio-tools-local",
+    "axio-transport-openai",
+    "aiosqlite>=0.20",
+    "rich>=13",
+]
+
+[project.scripts]
+axio-gastown = "gas_town.__main__:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["gas_town"]
+
+[tool.ruff]
+line-length = 119
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

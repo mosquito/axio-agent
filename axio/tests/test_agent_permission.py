@@ -13,10 +13,10 @@ from axio.testing import StubTransport, make_text_response, make_tool_use_respon
 from axio.tool import Tool, ToolHandler
 
 
-class EchoHandler(ToolHandler):
+class EchoHandler(ToolHandler[Any]):
     msg: str
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return self.model_dump_json()
 
 
@@ -44,10 +44,10 @@ class TestAllowGuard:
     async def test_handler_called_normally(self) -> None:
         calls: list[dict[str, Any]] = []
 
-        class Tracking(ToolHandler):
+        class Tracking(ToolHandler[Any]):
             msg: str
 
-            async def __call__(self) -> str:
+            async def __call__(self, context: Any) -> str:
                 calls.append(self.model_dump())
                 return self.model_dump_json()
 
@@ -63,10 +63,10 @@ class TestDenyGuard:
         """C5: deny never crashes, produces ToolResultBlock(is_error=True)."""
         calls: list[dict[str, Any]] = []
 
-        class Tracking(ToolHandler):
+        class Tracking(ToolHandler[Any]):
             msg: str
 
-            async def __call__(self) -> str:
+            async def __call__(self, context: Any) -> str:
                 calls.append(self.model_dump())
                 return self.model_dump_json()
 
@@ -94,10 +94,10 @@ class TestModifyGuard:
         """C6: handler receives modified_input, not original."""
         calls: list[dict[str, Any]] = []
 
-        class Tracking(ToolHandler):
+        class Tracking(ToolHandler[Any]):
             msg: str
 
-            async def __call__(self) -> str:
+            async def __call__(self, context: Any) -> str:
                 calls.append(self.model_dump())
                 return self.model_dump_json()
 
@@ -115,10 +115,10 @@ class TestGuardException:
     async def test_treated_as_deny(self) -> None:
         calls: list[dict[str, Any]] = []
 
-        class Tracking(ToolHandler):
+        class Tracking(ToolHandler[Any]):
             msg: str
 
-            async def __call__(self) -> str:
+            async def __call__(self, context: Any) -> str:
                 calls.append(self.model_dump())
                 return self.model_dump_json()
 
@@ -140,10 +140,10 @@ class TestNoGuard:
     async def test_handler_called_without_guard(self) -> None:
         calls: list[dict[str, Any]] = []
 
-        class Tracking(ToolHandler):
+        class Tracking(ToolHandler[Any]):
             msg: str
 
-            async def __call__(self) -> str:
+            async def __call__(self, context: Any) -> str:
                 calls.append(self.model_dump())
                 return self.model_dump_json()
 

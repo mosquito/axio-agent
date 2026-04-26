@@ -3,13 +3,14 @@ import os
 import subprocess
 import sys
 import tempfile
+from typing import Any
 
 from axio.tool import ToolHandler
 
 from . import _short
 
 
-class RunPython(ToolHandler):
+class RunPython(ToolHandler[Any]):
     """Run a Python code snippet in a subprocess and return stdout/stderr.
     The code is written to a temp file and executed with the current
     interpreter. Use for calculations, data processing, or testing
@@ -54,5 +55,5 @@ class RunPython(ToolHandler):
                 output += f"\n[exit code: {result.returncode}]"
             return output.strip() or "(no output)"
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return await asyncio.to_thread(self._blocking)

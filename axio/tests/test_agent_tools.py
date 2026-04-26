@@ -23,30 +23,30 @@ from axio.types import StopReason, Usage
 _calls: list[dict[str, Any]] = []
 
 
-class TrackingHandler(ToolHandler):
+class TrackingHandler(ToolHandler[Any]):
     msg: str
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         _calls.append(self.model_dump())
         return self.model_dump_json()
 
 
-class XHandler(ToolHandler):
+class XHandler(ToolHandler[Any]):
     x: int
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return "a"
 
 
-class YHandler(ToolHandler):
+class YHandler(ToolHandler[Any]):
     y: int
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return "b"
 
 
-class BadHandler(ToolHandler):
-    async def __call__(self) -> str:
+class BadHandler(ToolHandler[Any]):
+    async def __call__(self, context: Any) -> str:
         raise ValueError("boom")
 
 
@@ -79,17 +79,17 @@ class TestTwoToolsOneResponse:
         """C2: every ToolUseBlock has a corresponding ToolResultBlock."""
         calls: list[str] = []
 
-        class AHandler(ToolHandler):
+        class AHandler(ToolHandler[Any]):
             x: int
 
-            async def __call__(self) -> str:
+            async def __call__(self, context: Any) -> str:
                 calls.append("a")
                 return "a"
 
-        class BHandler(ToolHandler):
+        class BHandler(ToolHandler[Any]):
             y: int
 
-            async def __call__(self) -> str:
+            async def __call__(self, context: Any) -> str:
                 calls.append("b")
                 return "b"
 

@@ -36,8 +36,8 @@ axio = "axio_tui.__main__:main"
 
 
 [project.urls]
-Homepage = "https://github.com/axio-agent/axio-tui"
-Repository = "https://github.com/axio-agent/axio-tui"
+Homepage = "https://github.com/mosquito/axio-agent"
+Repository = "https://github.com/mosquito/axio-agent"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

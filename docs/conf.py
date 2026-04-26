@@ -33,7 +33,7 @@ html_theme = "furo"
 html_title = "Axio"
 html_logo = "_static/logo.svg"
 html_theme_options = {
-    "source_repository": "https://github.com/axio-agent/docs",
+    "source_repository": "https://github.com/mosquito/axio-agent",
     "source_branch": "main",
     "source_directory": "docs/",
 }

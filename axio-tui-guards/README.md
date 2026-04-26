@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/axio-tui-guards)](https://pypi.org/project/axio-tui-guards/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Permission guard plugins for [axio-tui](https://github.com/axio-agent/axio-tui).
+Permission guard plugins for [axio-tui](https://github.com/mosquito/axio-agent).
 
 Guards intercept tool calls before execution and can allow, modify, or deny them. Ships two guards: a path-access guard that asks the user before touching filesystem locations, and an LLM-based guard that reviews tool calls for safety.
 
@@ -117,7 +117,7 @@ llm  = "axio_tui_guards.guards:LLMGuard"
 
 ## Part of the axio ecosystem
 
-[axio](https://github.com/axio-agent/axio) · [axio-tui](https://github.com/axio-agent/axio-tui)
+[axio](https://github.com/mosquito/axio-agent) · [axio-tui](https://github.com/mosquito/axio-agent)
 
 ## License
 

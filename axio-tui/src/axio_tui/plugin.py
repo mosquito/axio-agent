@@ -27,7 +27,7 @@ class ToolsPlugin(Protocol):
     async def init(self, config: Any = None, global_config: Any = None) -> None: ...
 
     @property
-    def all_tools(self) -> list[Tool]: ...
+    def all_tools(self) -> list[Tool[Any]]: ...
 
     def settings_screen(self) -> Any: ...
 
@@ -42,7 +42,7 @@ TOOLS_SETTINGS_GROUP = "axio.tools.settings"
 SELECTOR_GROUP = "axio.selector"
 
 
-def _handler_description(handler: type[ToolHandler]) -> str:
+def _handler_description(handler: type[ToolHandler[Any]]) -> str:
     """Extract handler docstring as tool description."""
     doc = handler.__doc__
     if doc:
@@ -50,9 +50,9 @@ def _handler_description(handler: type[ToolHandler]) -> str:
     return handler.__name__
 
 
-def discover_tools() -> list[Tool]:
+def discover_tools() -> list[Tool[Any]]:
     """Load ToolHandler classes from 'axio.tools' entry points, build Tool objects."""
-    tools: list[Tool] = []
+    tools: list[Tool[Any]] = []
     for ep in entry_points(group=TOOLS_GROUP):
         try:
             handler = ep.load()
@@ -74,9 +74,9 @@ def discover_tools() -> list[Tool]:
     return tools
 
 
-def discover_tools_by_package() -> dict[str, list[Tool]]:
+def discover_tools_by_package() -> dict[str, list[Tool[Any]]]:
     """Return tools from 'axio.tools' entry points grouped by distribution package name."""
-    groups: dict[str, list[Tool]] = {}
+    groups: dict[str, list[Tool[Any]]] = {}
     for ep in entry_points(group=TOOLS_GROUP):
         try:
             handler = ep.load()

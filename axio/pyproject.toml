@@ -10,8 +10,8 @@ dependencies = ["pydantic>=2"]
 
 
 [project.urls]
-Homepage = "https://github.com/axio-agent/axio"
-Repository = "https://github.com/axio-agent/axio"
+Homepage = "https://github.com/mosquito/axio-agent"
+Repository = "https://github.com/mosquito/axio-agent"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

@@ -1,6 +1,6 @@
 PACKAGES := axio axio-context-sqlite axio-tools-docker axio-tools-local axio-tools-mcp \
             axio-transport-anthropic axio-transport-codex axio-transport-openai \
-            axio-tui axio-tui-guards
+            axio-tui axio-tui-guards examples/gas_town examples/agent_swarm
 
 .PHONY: $(PACKAGES) all pytest linter typing test tests test-docs
 

@@ -9,8 +9,8 @@ keywords = ["llm", "agent", "ai", "sqlite", "context", "storage"]
 dependencies = ["axio", "aiosqlite>=0.20"]
 
 [project.urls]
-Homepage = "https://github.com/axio-agent/monorepo"
-Repository = "https://github.com/axio-agent/monorepo"
+Homepage = "https://github.com/mosquito/axio-agent"
+Repository = "https://github.com/mosquito/axio-agent"
 
 [build-system]
 requires = ["hatchling"]

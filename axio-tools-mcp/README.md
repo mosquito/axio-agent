@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/axio-tools-mcp)](https://pypi.org/project/axio-tools-mcp/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-[Model Context Protocol (MCP)](https://modelcontextprotocol.io/) bridge for [axio](https://github.com/axio-agent/axio).
+[Model Context Protocol (MCP)](https://modelcontextprotocol.io/) bridge for [axio](https://github.com/mosquito/axio-agent).
 
 Connect any MCP server to your axio agent. Tools exposed by MCP servers are discovered at runtime and become first-class axio `Tool` instances — no manual wiring required.
 
@@ -134,7 +134,7 @@ mcp = "axio_tools_mcp.plugin:MCPPlugin"
 
 ## Part of the axio ecosystem
 
-[axio](https://github.com/axio-agent/axio) · [axio-tools-local](https://github.com/axio-agent/axio-tools-local) · [axio-tools-docker](https://github.com/axio-agent/axio-tools-docker) · [axio-tui](https://github.com/axio-agent/axio-tui)
+[axio](https://github.com/mosquito/axio-agent) · [axio-tools-local](https://github.com/mosquito/axio-agent) · [axio-tools-docker](https://github.com/mosquito/axio-agent) · [axio-tui](https://github.com/mosquito/axio-agent)
 
 ## License
 

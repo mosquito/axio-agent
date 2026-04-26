@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from typing import Self
 from uuid import uuid4
 
-from axio.blocks import TextBlock
-from axio.messages import Message
+from .blocks import TextBlock
+from .messages import Message
 
 logger = logging.getLogger(__name__)
 

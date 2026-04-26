@@ -32,7 +32,7 @@ pip install "axio-tui[all]"
 ### From source (development)
 
 ```bash
-git clone https://github.com/axio-agent/axio.git
+git clone https://github.com/mosquito/axio-agent
 cd axio
 uv sync
 ```

@@ -18,8 +18,8 @@ codex = "axio_transport_codex:CodexTransport"
 codex = "axio_transport_codex.tui:CodexSettingsScreen"
 
 [project.urls]
-Homepage = "https://github.com/axio-agent/axio-transport-codex"
-Repository = "https://github.com/axio-agent/axio-transport-codex"
+Homepage = "https://github.com/mosquito/axio-agent"
+Repository = "https://github.com/mosquito/axio-agent"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

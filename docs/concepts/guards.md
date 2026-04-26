@@ -33,14 +33,15 @@ output becomes the next guard's input:
 <!-- name: test_guard_chain -->
 ```python
 import asyncio
+from typing import Any
 from axio.permission import AllowAllGuard
 from axio.tool import ToolHandler
 
 
-class EchoHandler(ToolHandler):
+class EchoHandler(ToolHandler[Any]):
     """Echo text."""
     text: str
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return self.text
 
 
@@ -60,12 +61,13 @@ followed by an LLM-based risk-assessment guard:
 <!--
 name: test_tool_with_guards
 ```python
+from typing import Any
 from axio.tool import ToolHandler
 from axio.permission import AllowAllGuard
-class WriteFile(ToolHandler):
+class WriteFile(ToolHandler[Any]):
     path: str
     content: str
-    async def __call__(self) -> str: return "ok"
+    async def __call__(self, context: Any) -> str: return "ok"
 PathGuard = AllowAllGuard
 LLMGuard = AllowAllGuard
 ```

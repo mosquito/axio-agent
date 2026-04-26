@@ -19,7 +19,7 @@ def _short(value: Any, limit: int = 60) -> str:
     return s if len(s) <= limit else s[:limit] + "..."
 
 
-class StatusLine(ToolHandler):
+class StatusLine(ToolHandler[Any]):
     """Set a short status message shown to the user in the TUI status bar.
     Call this at the start of every turn before other tools to indicate
     what you are about to do (e.g. "Reading project files",
@@ -31,13 +31,13 @@ class StatusLine(ToolHandler):
     def __repr__(self) -> str:
         return f"StatusLine(message={self.message!r})"
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         if StatusLine._callback:
             StatusLine._callback(self.message)
         return "ok"
 
 
-class Confirm(ToolHandler):
+class Confirm(ToolHandler[Any]):
     """Submit a safety verdict for a pending tool call. Used by the
     LLM-based permission guard. Verdict must be SAFE, RISKY, or DENY.
     Provide a clear reason and a category for the action."""
@@ -49,7 +49,7 @@ class Confirm(ToolHandler):
     def __repr__(self) -> str:
         return f"Confirm(verdict={self.verdict!r}, category={self.category!r})"
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return self.verdict
 
 
@@ -142,7 +142,7 @@ SUBAGENT_SYSTEM_PROMPT = """\
 </subagent_behavior>"""
 
 
-class SubAgent(ToolHandler):
+class SubAgent(ToolHandler[Any]):
     """Delegate a task to an independent sub-agent. The sub-agent receives
     conversation context and has access to the same tools (except subagent).
     Up to 3 sub-agents run concurrently. Use for parallelizing independent
@@ -157,11 +157,11 @@ class SubAgent(ToolHandler):
     def __repr__(self) -> str:
         return f"SubAgent(task={_short(self.task)!r})"
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         if SubAgent._factory is None:
             return "SubAgent is not configured"
-        agent, context = await SubAgent._factory()
-        return await agent.run(self.task, context)
+        agent, store = await SubAgent._factory()
+        return await agent.run(self.task, store)
 
 
 _IMAGE_MEDIA_TYPES: dict[str, str] = {
@@ -173,7 +173,7 @@ _IMAGE_MEDIA_TYPES: dict[str, str] = {
 }
 
 
-class VisionAnalyze(ToolHandler):
+class VisionAnalyze(ToolHandler[Any]):
     """Analyze an image file using a vision-capable model. Supports
     JPEG, PNG, GIF, and WebP formats. Provide a path to the image and
     an optional prompt describing what to look for. Returns the model's
@@ -186,7 +186,7 @@ class VisionAnalyze(ToolHandler):
     def __repr__(self) -> str:
         return f"VisionAnalyze(path={_short(self.path)!r})"
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         import os
 
         if VisionAnalyze._transport is None:

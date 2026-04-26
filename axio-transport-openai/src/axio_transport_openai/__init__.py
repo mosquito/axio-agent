@@ -247,7 +247,7 @@ def _convert_messages(messages: list[Message], system: str) -> list[dict[str, An
     return result
 
 
-def _convert_tools(tools: list[Tool]) -> list[dict[str, Any]]:
+def _convert_tools(tools: list[Tool[Any]]) -> list[dict[str, Any]]:
     """Convert axio Tool list to OpenAI tool dicts."""
     return [
         {
@@ -338,7 +338,7 @@ class OpenAITransport(CompletionTransport, EmbeddingTransport):
                     pass
         return float(self.retry_base_delay * (2 ** (attempt - 1)))
 
-    def build_payload(self, messages: list[Message], tools: list[Tool], system: str) -> dict[str, Any]:
+    def build_payload(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": self.model.id,
             "messages": _convert_messages(messages, system),
@@ -466,10 +466,12 @@ class OpenAITransport(CompletionTransport, EmbeddingTransport):
         )
         yield IterationEnd(iteration=0, stop_reason=stop, usage=usage)
 
-    def stream(self, messages: list[Message], tools: list[Tool], system: str) -> AsyncIterator[StreamEvent]:
+    def stream(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> AsyncIterator[StreamEvent]:
         return self._do_stream(messages, tools, system)
 
-    async def _do_stream(self, messages: list[Message], tools: list[Tool], system: str) -> AsyncIterator[StreamEvent]:
+    async def _do_stream(
+        self, messages: list[Message], tools: list[Tool[Any]], system: str
+    ) -> AsyncIterator[StreamEvent]:
         assert self.session is not None, "session is required for streaming"
         url = f"{self.base_url.rstrip('/')}/chat/completions"
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}

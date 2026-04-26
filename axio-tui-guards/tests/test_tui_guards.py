@@ -20,33 +20,33 @@ from axio_tui_guards.guards import LLMGuard, PathGuard
 # ---------------------------------------------------------------------------
 
 
-class FakeReadFile(ToolHandler):
+class FakeReadFile(ToolHandler[Any]):
     filename: str
 
-    async def __call__(self) -> str:  # pragma: no cover
+    async def __call__(self, context: Any) -> str:  # pragma: no cover
         return ""
 
 
-class FakeWriteFile(ToolHandler):
+class FakeWriteFile(ToolHandler[Any]):
     file_path: str
     content: str
 
-    async def __call__(self) -> str:  # pragma: no cover
+    async def __call__(self, context: Any) -> str:  # pragma: no cover
         return ""
 
 
-class FakeShell(ToolHandler):
+class FakeShell(ToolHandler[Any]):
     command: str
     cwd: str = "."
 
-    async def __call__(self) -> str:  # pragma: no cover
+    async def __call__(self, context: Any) -> str:  # pragma: no cover
         return ""
 
 
-class FakeListFiles(ToolHandler):
+class FakeListFiles(ToolHandler[Any]):
     pattern: str = "*"
 
-    async def __call__(self) -> str:  # pragma: no cover
+    async def __call__(self, context: Any) -> str:  # pragma: no cover
         return ""
 
 

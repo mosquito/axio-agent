@@ -23,7 +23,7 @@ uv add "axio-tui[all]"
 If you want to work on Axio itself, clone the monorepo and sync dependencies:
 
 ```bash
-git clone https://github.com/axio-agent/axio-agent.git
+git clone https://github.com/mosquito/axio-agent
 cd axio-agent
 uv sync
 ```
@@ -76,6 +76,7 @@ name: test_adding_tools
 -->
 <!-- name: test_adding_tools -->
 ```python
+from typing import Any
 from axio.agent import Agent
 from axio.context import MemoryContextStore
 from axio.testing import StubTransport, make_text_response
@@ -86,11 +87,11 @@ transport = StubTransport([make_text_response("ok")])
 context = MemoryContextStore()
 
 
-class Greet(ToolHandler):
+class Greet(ToolHandler[Any]):
     """Greet someone by name."""
     name: str
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return f"Hello, {self.name}!"
 
 

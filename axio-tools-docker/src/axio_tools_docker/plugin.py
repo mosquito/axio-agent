@@ -23,7 +23,7 @@ class DockerPlugin:
 
     def __init__(self) -> None:
         self._manager = SandboxManager()
-        self._tools: list[Tool] = []
+        self._tools: list[Tool[Any]] = []
         self._config: Any = None
         self._global_config: Any = None
 
@@ -75,7 +75,7 @@ class DockerPlugin:
         ]
 
     @property
-    def all_tools(self) -> list[Tool]:
+    def all_tools(self) -> list[Tool[Any]]:
         return self._tools
 
     def settings_screen(self) -> Any:

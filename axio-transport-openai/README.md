@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/axio-transport-openai)](https://pypi.org/project/axio-transport-openai/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-OpenAI-compatible streaming transport for [axio](https://github.com/axio-agent/axio).
+OpenAI-compatible streaming transport for [axio](https://github.com/mosquito/axio-agent).
 
 Works with any API that speaks the OpenAI chat completions format — OpenAI itself, local models via Ollama/vLLM/LM Studio, Nebius AI Studio, OpenRouter, and any other compatible provider.
 
@@ -270,7 +270,7 @@ openai-custom  = "axio_transport_openai.custom:OpenAICompatibleTransport"
 
 ## Part of the axio ecosystem
 
-[axio](https://github.com/axio-agent/axio) · [axio-transport-codex](https://github.com/axio-agent/axio-transport-codex) · [axio-transport-anthropic](https://github.com/axio-agent/axio-transport-anthropic) · [axio-tui](https://github.com/axio-agent/axio-tui)
+[axio](https://github.com/mosquito/axio-agent) · [axio-transport-codex](https://github.com/mosquito/axio-agent) · [axio-transport-anthropic](https://github.com/mosquito/axio-agent) · [axio-tui](https://github.com/mosquito/axio-agent)
 
 ## License
 

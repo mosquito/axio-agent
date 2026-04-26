@@ -2,24 +2,26 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from axio.tool import Tool, ToolHandler
 
 from axio_tui.screens import ToolSelectScreen
 
 
-class _StubHandler(ToolHandler):
+class _StubHandler(ToolHandler[Any]):
     """Stub tool handler."""
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return ""
 
 
-def _make_tools(*names: str) -> list[Tool]:
+def _make_tools(*names: str) -> list[Tool[Any]]:
     return [Tool(name=n, description=f"Description for {n}", handler=_StubHandler) for n in names]
 
 
-def _screen(tools: list[Tool], disabled: set[str]) -> ToolSelectScreen:
+def _screen(tools: list[Tool[Any]], disabled: set[str]) -> ToolSelectScreen:
     return ToolSelectScreen(groups={"pkg": tools}, disabled=disabled)
 
 

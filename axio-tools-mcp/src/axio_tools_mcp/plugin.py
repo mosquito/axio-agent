@@ -31,7 +31,7 @@ class MCPPlugin:
         await self._registry.init(config=config, global_config=global_config)
 
     @property
-    def all_tools(self) -> list[Tool]:
+    def all_tools(self) -> list[Tool[Any]]:
         return self._registry.all_tools
 
     def settings_screen(self) -> Any:

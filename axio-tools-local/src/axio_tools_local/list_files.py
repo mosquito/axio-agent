@@ -3,17 +3,19 @@ import os
 import stat as stat_module
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from axio.tool import ToolHandler
+from pydantic import StrictStr
 
 
-class ListFiles(ToolHandler):
+class ListFiles(ToolHandler[Any]):
     """List files and directories. Shows permissions, size, modification time,
     and name for each entry. Directories are listed first and marked with
     a trailing slash. Use this to explore the project structure before
     reading or editing files."""
 
-    directory: str = "."
+    directory: StrictStr = "."
 
     def __repr__(self) -> str:
         return f"ListFiles(directory={self.directory!r})"
@@ -36,5 +38,5 @@ class ListFiles(ToolHandler):
             lines.append(f"{mode} {size:>8} {mtime} {name}")
         return "\n".join(lines) or "(empty directory)"
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return await asyncio.to_thread(self._blocking)

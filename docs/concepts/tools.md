@@ -16,7 +16,7 @@ from pydantic import BaseModel
 class ToolHandler(BaseModel):
     """Subclass fields define JSON-schema for input parameters."""
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         raise NotImplementedError
 ```
 
@@ -26,15 +26,16 @@ the actual execution.
 
 <!-- name: test_write_file_handler -->
 ```python
+from typing import Any
 from pathlib import Path
 from axio.tool import ToolHandler
 
-class WriteFile(ToolHandler):
+class WriteFile(ToolHandler[Any]):
     """Write content to a file at the given path."""
     path: str
     content: str
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         Path(self.path).write_text(self.content)
         return f"Wrote {len(self.content)} bytes to {self.path}"
 ```

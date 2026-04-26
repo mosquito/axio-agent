@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from axio.context import MemoryContextStore
@@ -20,5 +22,5 @@ def ephemeral_context() -> MemoryContextStore:
 
 
 @pytest.fixture
-def echo_tool() -> Tool:
+def echo_tool() -> Tool[Any]:
     return make_echo_tool()

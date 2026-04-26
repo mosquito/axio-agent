@@ -18,8 +18,8 @@ list_files = "axio_tools_local.list_files:ListFiles"
 
 
 [project.urls]
-Homepage = "https://github.com/axio-agent/axio-tools-local"
-Repository = "https://github.com/axio-agent/axio-tools-local"
+Homepage = "https://github.com/mosquito/axio-agent"
+Repository = "https://github.com/mosquito/axio-agent"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

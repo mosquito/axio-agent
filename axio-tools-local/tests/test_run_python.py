@@ -11,7 +11,7 @@ from axio_tools_local.run_python import RunPython
 
 
 async def run(code: str, **kwargs: Any) -> str:
-    return await RunPython(code=code, **kwargs)()
+    return await RunPython(code=code, **kwargs)({})
 
 
 class TestRunPythonBasic:

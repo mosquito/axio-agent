@@ -42,10 +42,10 @@ from typing import Any
 from axio.tool import ToolHandler
 from axio.permission import PermissionGuard
 from axio.exceptions import GuardError
-class WriteFile(ToolHandler):
+class WriteFile(ToolHandler[Any]):
     path: str
     content: str
-    async def __call__(self) -> str: return "ok"
+    async def __call__(self, context: Any) -> str: return "ok"
 class MaxLengthGuard(PermissionGuard):
     def __init__(self, max_length: int = 10000) -> None:
         self.max_length = max_length
@@ -123,9 +123,9 @@ from axio.tool import ToolHandler
 from axio.permission import AllowAllGuard
 from axio.exceptions import GuardError
 
-class Shell(ToolHandler):
+class Shell(ToolHandler[Any]):
     command: str
-    async def __call__(self) -> str: return self.command
+    async def __call__(self, context: Any) -> str: return self.command
 
 AllowedCommandGuard = AllowAllGuard
 PathGuard = AllowAllGuard

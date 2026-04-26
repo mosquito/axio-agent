@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/axio-transport-anthropic)](https://pypi.org/project/axio-transport-anthropic/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Anthropic Claude transport for [axio](https://github.com/axio-agent/axio).
+Anthropic Claude transport for [axio](https://github.com/mosquito/axio-agent).
 
 Streams Claude responses over the Anthropic Messages API using `aiohttp` and
 SSE parsing. Supports prompt caching, extended thinking, and automatic retry
@@ -110,7 +110,7 @@ transport = AnthropicTransport.from_dict(data, session=session)
 
 ## Part of the axio ecosystem
 
-[axio](https://github.com/axio-agent/axio) · [axio-tui](https://github.com/axio-agent/axio-tui) · [axio-transport-openai](https://github.com/axio-agent/axio-transport-openai) · [axio-transport-codex](https://github.com/axio-agent/axio-transport-codex)
+[axio](https://github.com/mosquito/axio-agent) · [axio-tui](https://github.com/mosquito/axio-agent) · [axio-transport-openai](https://github.com/mosquito/axio-agent) · [axio-transport-codex](https://github.com/mosquito/axio-agent)
 
 ## License
 

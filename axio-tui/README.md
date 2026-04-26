@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/axio-tui)](https://pypi.org/project/axio-tui/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Textual TUI application for [axio](https://github.com/axio-agent/axio).
+Textual TUI application for [axio](https://github.com/mosquito/axio-agent).
 
 A full-featured terminal chat interface with session management, a plugin system for transports and tools, and a built-in SQLite context store. Pick your LLM backend, load your tools, and start chatting — all from the terminal.
 
@@ -114,7 +114,7 @@ textual-serve axio_tui.__main__:app
 
 ## Part of the axio ecosystem
 
-[axio](https://github.com/axio-agent/axio) · [axio-transport-anthropic](https://github.com/axio-agent/axio-transport-anthropic) · [axio-tui-guards](https://github.com/axio-agent/axio-tui-guards) · [axio-tools-local](https://github.com/axio-agent/axio-tools-local) · [axio-tools-mcp](https://github.com/axio-agent/axio-tools-mcp) · [axio-tools-docker](https://github.com/axio-agent/axio-tools-docker)
+[axio](https://github.com/mosquito/axio-agent) · [axio-transport-anthropic](https://github.com/mosquito/axio-agent) · [axio-tui-guards](https://github.com/mosquito/axio-agent) · [axio-tools-local](https://github.com/mosquito/axio-agent) · [axio-tools-mcp](https://github.com/mosquito/axio-agent) · [axio-tools-docker](https://github.com/mosquito/axio-agent)
 
 ## License
 

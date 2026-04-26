@@ -151,6 +151,10 @@ async def main():
 asyncio.run(main())
 ```
 
+For long-running agents wrap `MemoryContextStore` with
+[`AutoCompactStore`](#autocompactstore) to automatically summarize old history
+when the context window fills up.
+
 #### SQLiteContextStore
 
 Persistent storage backed by SQLite. Survives process restarts and supports
@@ -182,6 +186,10 @@ async def main():
 
 asyncio.run(main())
 ```
+
+`SQLiteContextStore` is the natural choice for production TUI sessions. Pair it
+with [`AutoCompactStore`](#autocompactstore) to keep context within model limits
+across long conversations.
 
 ### Extension point
 
@@ -295,9 +303,81 @@ assert info.message_count == 10
 
 ## Context compaction
 
-Long conversations can exceed the model's context window. The
-`compact_context()` function summarizes older messages while keeping recent
-ones verbatim:
+Long conversations can exceed the model's context window. Axio provides
+`AutoCompactStore` — a delegating wrapper that automatically summarizes old
+history when token usage crosses a threshold.
+
+### AutoCompactStore
+
+`AutoCompactStore` wraps any `ContextStore` backend and compacts it
+transparently. It intercepts `add_context_tokens()`, which the agent loop
+calls after every `IterationEnd` with the real context size for that
+iteration.
+
+<!--
+name: test_auto_compact_store
+```python
+from axio.agent import Agent
+from axio.testing import StubTransport, make_text_response
+transport = StubTransport([make_text_response("ok")])
+agent = Agent(system="you are helpful", transport=transport)
+```
+-->
+<!-- name: test_auto_compact_store -->
+```python
+import asyncio
+from axio.compaction import AutoCompactStore
+from axio.context import MemoryContextStore
+from axio.messages import Message
+from axio.blocks import TextBlock
+
+async def main():
+    store = AutoCompactStore(
+        MemoryContextStore(),
+        transport,          # same transport as the agent
+        keep_recent=6,      # keep this many messages verbatim
+        threshold=0.75,     # compact at 75 % of context_window (default)
+    )
+    result = await agent.run("Build a rate limiter", store)
+
+asyncio.run(main())
+```
+
+The threshold is read from `transport.model.context_window` via duck typing;
+falls back to 128 000 if the transport has no `model` attribute. Pass
+`max_tokens` explicitly to override:
+
+<!-- name: test_auto_compact_explicit_max_tokens -->
+```python
+from axio.compaction import AutoCompactStore
+from axio.context import MemoryContextStore
+from axio.testing import StubTransport
+inner_store = MemoryContextStore()
+transport = StubTransport([])
+store = AutoCompactStore(inner_store, transport, max_tokens=60_000)
+```
+
+`AutoCompactStore` works with any `ContextStore` — `MemoryContextStore`,
+`SQLiteContextStore`, or custom implementations.  `fork()` returns an
+`AutoCompactStore` wrapping a fork of the inner store, preserving the same
+threshold and `keep_recent` settings.
+
+### How it works
+
+1. The agent loop calls `context.add_context_tokens(usage.input_tokens, ...)`
+   after each `IterationEnd`. `input_tokens` here is the actual context size
+   sent to the model — not a cumulative sum.
+2. If `input_tokens > max_tokens`, `_do_compact()` fires.
+3. `_do_compact()` forks the inner store first, giving `compact_context` a
+   stable snapshot while the live store remains writable.
+4. After the (async) summarization agent returns, the live store is cleared
+   and repopulated with the compacted messages. Cumulative token counts are
+   preserved.
+
+### `compact_context` — low-level function
+
+`AutoCompactStore` uses this internally. Call it directly if you need custom
+compaction logic:
 
 <!-- name: test_compact_context -->
 ```python
@@ -309,43 +389,15 @@ async def compact_context(
     context: ContextStore,
     transport: CompletionTransport,
     *,
-    max_messages: int = 20,
     keep_recent: int = 6,
     system_prompt: str = "...",  # defaults to a built-in summarization prompt
 ) -> list[Message] | None:
     ...
 ```
 
-`context`
-: The store whose history will be summarized.
-
-`transport`
-: A `CompletionTransport` used to run the summarization agent. This can be
-  the same transport as your main agent.
-
-`max_messages`
-: If the history has this many messages or fewer, compaction is skipped and
-  `None` is returned. Defaults to 20.
-
-`keep_recent`
-: The number of messages at the end of the history to keep verbatim.
-  Defaults to 6.
-
-`system_prompt`
-: The system prompt for the summarization agent. Defaults to a built-in
-  prompt that instructs the model to produce narrative-prose summaries
-  preserving user goals, decisions, key facts, tool outcomes, and state
-  changes.
-
-It uses a separate one-shot agent call to generate the summary. The function
-returns the compacted message list if the history exceeded `max_messages`, or
-`None` if no compaction was needed.
-
-The helper `_find_safe_boundary()` ensures that `ToolUseBlock` /
-`ToolResultBlock` pairs are never split across the boundary.
-
-When `compact_context` returns a list, populate a fresh store and continue
-from there:
+Returns the compacted message list, or `None` if the history is too short to
+split (`len(history) <= keep_recent`). Does not modify the store — the caller
+applies the result.
 
 <!--
 name: test_compact_context_usage
@@ -369,7 +421,7 @@ async def main():
         await ctx.append(Message(role=role, content=[TextBlock(text=f"Message {i}")]))
 
     # compact: keep 4 recent messages verbatim, summarize the rest
-    compacted = await compact_context(ctx, transport, max_messages=20, keep_recent=4)
+    compacted = await compact_context(ctx, transport, keep_recent=4)
     assert compacted is not None
     # [summary_user, "Understood" assistant] + 4 recent messages
     assert len(compacted) == 6

@@ -21,11 +21,11 @@ def tmp_cwd(tmp_path: Path) -> Generator[Path, None, None]:
 
 
 async def read(tmp_cwd: Path, filename: str, **kwargs: Any) -> str:
-    return await ReadFile(filename=filename, **kwargs)()
+    return await ReadFile(filename=filename, **kwargs)({})
 
 
 class TestReadFilePlain:
-    """indexed=False (default) — plain text, no line numbers."""
+    """line_numbers=False (default) — plain text, no line numbers."""
 
     async def test_single_line(self, tmp_cwd: Path) -> None:
         (tmp_cwd / "f.txt").write_text("content here")
@@ -56,16 +56,16 @@ class TestReadFilePlain:
 
 
 class TestReadFileIndexed:
-    """indexed=True — each line prefixed with 1-based number."""
+    """line_numbers=True — each line prefixed with 1-based number."""
 
     async def test_first_line_is_1(self, tmp_cwd: Path) -> None:
         (tmp_cwd / "f.txt").write_text("hello\n")
-        result = await read(tmp_cwd, "f.txt", indexed=True)
+        result = await read(tmp_cwd, "f.txt", line_numbers=True)
         assert result.startswith("1\t")
 
     async def test_numbers_are_one_indexed(self, tmp_cwd: Path) -> None:
         (tmp_cwd / "f.txt").write_text("a\nb\nc\n")
-        result = await read(tmp_cwd, "f.txt", indexed=True)
+        result = await read(tmp_cwd, "f.txt", line_numbers=True)
         lines = result.splitlines()
         assert lines[0] == "1\ta"
         assert lines[1] == "2\tb"
@@ -78,12 +78,12 @@ class TestReadFileIndexed:
 
     async def test_single_line_no_trailing_newline(self, tmp_cwd: Path) -> None:
         (tmp_cwd / "f.txt").write_text("only")
-        result = await read(tmp_cwd, "f.txt", indexed=True)
+        result = await read(tmp_cwd, "f.txt", line_numbers=True)
         assert result == "1\tonly"
 
     async def test_indentation_preserved_with_index(self, tmp_cwd: Path) -> None:
         (tmp_cwd / "f.py").write_text("def f():\n    pass\n")
-        result = await read(tmp_cwd, "f.py", indexed=True)
+        result = await read(tmp_cwd, "f.py", line_numbers=True)
         assert "2\t    pass" in result
 
 
@@ -122,7 +122,7 @@ class TestReadFileRange:
         """Line numbers must reflect position in the file, not position in the slice."""
         lines = [f"line{i}\n" for i in range(1, 11)]
         (tmp_cwd / "f.txt").write_text("".join(lines))
-        result = await read(tmp_cwd, "f.txt", start_line=5, end_line=7, indexed=True)
+        result = await read(tmp_cwd, "f.txt", start_line=5, end_line=7, line_numbers=True)
         out = result.splitlines()
         assert out[0] == "5\tline5"
         assert out[1] == "6\tline6"
@@ -160,7 +160,7 @@ class TestReadFileBinary:
     async def test_binary_raises_without_hex(self, tmp_cwd: Path) -> None:
         (tmp_cwd / "b.dat").write_bytes(b"\x80\x81\xff")
         with pytest.raises(UnicodeDecodeError):
-            await ReadFile(filename="b.dat", binary_as_hex=False)()
+            await ReadFile(filename="b.dat", binary_as_hex=False)({})
 
 
 class TestReadFileMisc:
