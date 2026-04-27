@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from axio.models import ModelSpec
+from axio.testing import StubTransport, make_text_response
 from axio.tool import Tool
 from axio.transport import DummyCompletionTransport
 
 from agent_swarm.swarm import (
     make_analyze_tool,
     make_delegate_tool,
+    run_swarm,
     transport_for,
 )
 
@@ -119,19 +122,11 @@ class TestRunSwarm:
     @pytest.mark.asyncio
     async def test_run_swarm_initialization(self, workspace: Path, stub_toolbox):
         """Test that run_swarm() initialization works with stub."""
-        # Create a stub transport that returns immediately
-        from axio.testing import StubTransport, make_text_response
-
-        from agent_swarm.swarm import run_swarm
-
         stub_transport = StubTransport([make_text_response("Test response")])
 
         on_event = AsyncMock()
 
         role_models = {"default": ModelSpec(id="gpt-4")}
-
-        # Run with a short timeout to avoid hanging
-        import asyncio
 
         async def run_test():
             try:
@@ -158,10 +153,6 @@ class TestRunSwarm:
     @pytest.mark.asyncio
     async def test_run_swarm_requires_default_model(self, workspace: Path):
         """Test that run_swarm requires a default model in role_models."""
-        from axio.transport import DummyCompletionTransport
-
-        from agent_swarm.swarm import run_swarm
-
         transport = DummyCompletionTransport()
         on_event = AsyncMock()
 
@@ -181,19 +172,12 @@ class TestRunSwarm:
     @pytest.mark.asyncio
     async def test_run_swarm_creates_workspace_directory(self, workspace: Path, stub_toolbox):
         """Test that run_swarm creates the workspace directory."""
-        from axio.testing import StubTransport, make_text_response
-
-        from agent_swarm.swarm import run_swarm
-
-        # Create a new workspace path that doesn't exist yet
         test_workspace = workspace / "new_workspace"
         assert not test_workspace.exists()
 
         stub_transport = StubTransport([make_text_response("Test response")])
         on_event = AsyncMock()
         role_models = {"default": ModelSpec(id="gpt-4")}
-
-        import asyncio
 
         async def run_test():
             try:
@@ -227,12 +211,6 @@ class TestSymlinkProtection:
     @pytest.mark.asyncio
     async def test_todo_db_symlink_deleted_before_open(self, workspace: Path, stub_toolbox, tmp_path: Path) -> None:
         """A symlink planted at .axio-swarm/todos.db must be deleted, not opened."""
-        import asyncio
-
-        from axio.testing import StubTransport, make_text_response
-
-        from agent_swarm.swarm import run_swarm
-
         axio_dir = workspace / ".axio-swarm"
         axio_dir.mkdir(parents=True)
         secret = tmp_path / "secret.db"

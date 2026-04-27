@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from axio.agent import Agent
+from axio.agent_loader import TomlAgentLoader
+from axio.exceptions import GuardError
 from axio.models import ModelSpec
+from axio.permission import PermissionGuard
+from axio.testing import StubTransport, make_text_response
 from axio.transport import DummyCompletionTransport
 
 from agent_swarm.roles import ROLE_NAMES, ROLES_DIR, make_orchestrator
@@ -21,14 +26,10 @@ class TestSwarmInitialization:
     @pytest.mark.asyncio
     async def test_swarm_can_be_initialized_with_stub_transport(self, workspace: Path, stub_toolbox):
         """Test that the swarm can be initialized with stub transport."""
-        from axio.testing import StubTransport, make_text_response
-
         stub_transport = StubTransport([make_text_response("Test initial response")])
 
         on_event = AsyncMock()
         role_models = {"default": ModelSpec(id="gpt-4")}
-
-        import asyncio
 
         async def run_test():
             try:
@@ -66,8 +67,6 @@ class TestSwarmInitialization:
 
     def test_role_can_be_copied_with_transport(self):
         """Test that role specs from TOML can be loaded and copied with a transport."""
-        from axio.agent_loader import TomlAgentLoader
-
         real_transport = DummyCompletionTransport()
 
         loader = TomlAgentLoader()
@@ -85,8 +84,6 @@ class TestToolCreationWithGuards:
     @pytest.mark.asyncio
     async def test_analyze_tool_respects_guard(self):
         """Test that analyze tool respects guard checks."""
-        from axio.exceptions import GuardError
-        from axio.permission import PermissionGuard
 
         class DenyGuard(PermissionGuard):
             """Guard that denies all requests."""
@@ -122,13 +119,9 @@ class TestWorkspaceSetup:
     @pytest.mark.asyncio
     async def test_swarm_workspace_chdir(self, workspace: Path, stub_toolbox):
         """Test that run_swarm initialises correctly with the workspace."""
-        from axio.testing import StubTransport, make_text_response
-
         stub_transport = StubTransport([make_text_response("response")])
         on_event = AsyncMock()
         role_models = {"default": ModelSpec(id="gpt-4")}
-
-        import asyncio
 
         async def run_test():
             try:
@@ -194,8 +187,6 @@ class TestEdgeCases:
 
     def test_analyze_tool_handler_validation(self):
         """Test analyze tool handler has required fields."""
-        from agent_swarm.swarm import make_analyze_tool
-
         on_event = AsyncMock()
         transport = DummyCompletionTransport()
         role_models = {"default": ModelSpec(id="gpt-4")}

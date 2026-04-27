@@ -12,7 +12,7 @@ from pathlib import Path
 import aiodocker
 import pytest
 
-from axio_tools_docker.sandbox import DockerSandbox
+from axio_tools_docker.sandbox import DockerSandbox, ListFiles, PatchFile, ReadFile, RunPython
 
 # ---------------------------------------------------------------------------
 # Config
@@ -142,7 +142,6 @@ async def test_write_file_mode(sandbox: DockerSandbox) -> None:
 @docker_available
 async def test_read_file_line_range(sandbox: DockerSandbox) -> None:
     await sandbox.write_file("/workspace/lines.txt", "a\nb\nc\nd\ne\n")
-    from axio_tools_docker.sandbox import ReadFile
 
     handler = ReadFile(filename="lines.txt", start_line=2, end_line=4)
     result = await handler(sandbox)
@@ -152,7 +151,6 @@ async def test_read_file_line_range(sandbox: DockerSandbox) -> None:
 @docker_available
 async def test_read_file_line_numbers(sandbox: DockerSandbox) -> None:
     await sandbox.write_file("/workspace/numbered.txt", "foo\nbar\n")
-    from axio_tools_docker.sandbox import ReadFile
 
     handler = ReadFile(filename="numbered.txt", line_numbers=True)
     result = await handler(sandbox)
@@ -163,7 +161,6 @@ async def test_read_file_line_numbers(sandbox: DockerSandbox) -> None:
 @docker_available
 async def test_read_file_truncation(sandbox: DockerSandbox) -> None:
     await sandbox.write_file("/workspace/big.txt", "x" * 100)
-    from axio_tools_docker.sandbox import ReadFile
 
     handler = ReadFile(filename="big.txt", max_chars=10)
     result = await handler(sandbox)
@@ -176,8 +173,6 @@ async def test_list_files(sandbox: DockerSandbox) -> None:
     await sandbox.write_file("/workspace/listing/a.py", "x")
     await sandbox.write_file("/workspace/listing/b.txt", "y")
     await sandbox.exec("mkdir -p /workspace/listing/subdir")
-
-    from axio_tools_docker.sandbox import ListFiles
 
     handler = ListFiles(directory="/workspace/listing")
     result = await handler(sandbox)
@@ -193,8 +188,6 @@ async def test_list_files(sandbox: DockerSandbox) -> None:
 async def test_patch_file(sandbox: DockerSandbox) -> None:
     await sandbox.write_file("/workspace/patch_me.txt", "line1\nline2\nline3\n")
 
-    from axio_tools_docker.sandbox import PatchFile
-
     handler = PatchFile(file_path="/workspace/patch_me.txt", from_line=2, to_line=2, content="REPLACED")
     await handler(sandbox)
 
@@ -207,8 +200,6 @@ async def test_patch_file_insert(sandbox: DockerSandbox) -> None:
     """to_line = from_line - 1 inserts without deleting."""
     await sandbox.write_file("/workspace/insert_me.txt", "line1\nline3\n")
 
-    from axio_tools_docker.sandbox import PatchFile
-
     handler = PatchFile(file_path="/workspace/insert_me.txt", from_line=2, to_line=1, content="line2")
     await handler(sandbox)
 
@@ -218,7 +209,6 @@ async def test_patch_file_insert(sandbox: DockerSandbox) -> None:
 
 @docker_available
 async def test_run_python(sandbox: DockerSandbox) -> None:
-    from axio_tools_docker.sandbox import RunPython
 
     handler = RunPython(code="print(2 + 2)")
     result = await handler(sandbox)
@@ -227,7 +217,6 @@ async def test_run_python(sandbox: DockerSandbox) -> None:
 
 @docker_available
 async def test_run_python_stdin(sandbox: DockerSandbox) -> None:
-    from axio_tools_docker.sandbox import RunPython
 
     handler = RunPython(code="import sys; print(sys.stdin.read().strip().upper())", stdin="hello")
     result = await handler(sandbox)
@@ -236,7 +225,6 @@ async def test_run_python_stdin(sandbox: DockerSandbox) -> None:
 
 @docker_available
 async def test_run_python_exit_code(sandbox: DockerSandbox) -> None:
-    from axio_tools_docker.sandbox import RunPython
 
     handler = RunPython(code="import sys; sys.exit(3)")
     result = await handler(sandbox)

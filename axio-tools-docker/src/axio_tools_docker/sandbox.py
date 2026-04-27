@@ -341,9 +341,7 @@ class DockerSandbox:
         except Exception as exc:
             await self._client.close()
             self._client = None
-            raise RuntimeError(
-                f"Docker daemon not available at {self.url!r}: {exc}"
-            ) from exc
+            raise RuntimeError(f"Docker daemon not available at {self.url!r}: {exc}") from exc
 
         if self.name:
             try:
@@ -389,13 +387,10 @@ class DockerSandbox:
                 host_config["Tmpfs"] = self.tmpfs
             if self.ports:
                 host_config["PortBindings"] = {
-                    f"{port}/tcp": [{"HostPort": str(host_port)}]
-                    for port, host_port in self.ports.items()
+                    f"{port}/tcp": [{"HostPort": str(host_port)}] for port, host_port in self.ports.items()
                 }
             if self.extra_hosts:
-                host_config["ExtraHosts"] = [
-                    f"{host}:{ip}" for host, ip in self.extra_hosts.items()
-                ]
+                host_config["ExtraHosts"] = [f"{host}:{ip}" for host, ip in self.extra_hosts.items()]
             if self.devices:
                 host_config["Devices"] = [parse_device(d) for d in self.devices]
             if self.dns:
