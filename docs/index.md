@@ -271,10 +271,11 @@ Here's how Axio compares to other popular Python agent frameworks:
 ### When to choose each
 
 **Choose Axio if:**
-- You want a minimal foundation and full control over integrations
-- Full, real-time streaming visibility into every token, tool call, and result matters
-- You prefer explicit protocols over decorator magic
-- You're building a custom agent UI or embedding agents in a larger system
+- You want full control over every step of the agent cycle — no hidden magic, no framework opinions baked in
+- You care about a lean dependency tree: every component is a separate PyPI package — install only what you need, fewer dependencies means fewer supply-chain attack risks; `aiohttp` is enough to wire up a transport for any HTTP-compatible LLM endpoint
+- You prefer explicit protocols over decorator-driven conventions
+- You need custom tooling and sandboxed execution — first-class from day one, with isolated Docker containers out of the box via [`axio-tools-docker`](guides/docker-sandbox.md)
+- You're embedding an agent into a larger system and need to own the event loop, the streaming pipeline, and the permission model
 
 **Choose pydantic-ai if:**
 - You already use Pydantic/FastAPI and want the same patterns for agents
