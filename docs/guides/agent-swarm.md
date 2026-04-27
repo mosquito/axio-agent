@@ -10,23 +10,20 @@ The full example lives in `examples/agent_swarm/` in the repository.
 
 ```{mermaid}
 flowchart TD
-    User([User]) -->|task| O[Orchestrator]
-
-    O -->|delegate| AR[Architect]
-    O -->|delegate| BE[Backend Dev]
-    O -->|delegate| QA[QA Engineer]
-    O -->|delegate| SEC[Security Engineer]
-    O -->|delegate| CH[Challenger]
-    O -->|delegate| AN[Analyst]
-
-    AR  -->|design| WS[(workspace)]
-    BE  -->|code|   WS
-    QA  -->|tests|  WS
-    SEC -->|review| WS
-
-    WS -->|reads| BE
-    WS -->|reads| QA
-    WS -->|reads| SEC
+    User --> Orchestrator
+    Orchestrator -->|delegate| Architect
+    Orchestrator -->|delegate| B[Backend Dev]
+    Orchestrator -->|delegate| Q[QA Engineer]
+    Orchestrator -->|delegate| S[Security Engineer]
+    Orchestrator -->|delegate| Challenger
+    Orchestrator -->|delegate| Analyst
+    Architect -->|design| W[Workspace]
+    B -->|code| W
+    Q -->|tests| W
+    S -->|review| W
+    W -->|reads| B
+    W -->|reads| Q
+    W -->|reads| S
 ```
 
 The **orchestrator** receives a task, decides which specialists to involve, and calls
