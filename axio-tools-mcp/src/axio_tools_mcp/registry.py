@@ -161,7 +161,7 @@ class MCPRegistry:
             self._configs.pop(name, None)
             await self._delete_config(name)
         elif effective_scope is not old_scope and old_scope is not None:
-            # Scope changed but name didn't — clean up old scope DB
+            # Scope changed but name didn't - clean up old scope DB
             await old_scope.delete_prefix(f"mcp.{name}.")
 
         self._configs[config.name] = config

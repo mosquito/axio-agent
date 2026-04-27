@@ -94,12 +94,12 @@ an `AsyncIterator[StreamEvent]`.
 
 Your transport should yield these events in order:
 
-1. **Content events** — any mix of:
+1. **Content events** - any mix of:
    - `TextDelta` for text chunks
    - `ReasoningDelta` for reasoning/thinking chunks
    - `ToolUseStart` followed by `ToolInputDelta` for tool calls
 
-2. **`IterationEnd`** — exactly once at the end, with:
+2. **`IterationEnd`** - exactly once at the end, with:
    - `iteration`: the agent passes this, but transports can use `1`
    - `stop_reason`: `end_turn`, `tool_use`, `max_tokens`, or `error`
    - `usage`: token counts for this call
@@ -294,7 +294,7 @@ my_llm = "my_package:MySettingsScreen"
 
 ## Tips
 
-- Stream tokens as they arrive — don't buffer the full response.
+- Stream tokens as they arrive - don't buffer the full response.
 - Track token usage accurately for cost monitoring.
 - Handle API errors gracefully: yield `IterationEnd` with
   `stop_reason=StopReason.error` rather than letting exceptions propagate.

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from axio.exceptions import AxioError, GuardError, HandlerError, StreamError, ToolError
 
 
@@ -36,13 +38,9 @@ class TestInstantiation:
         assert str(exc) == "no data"
 
     def test_catch_axon_error_catches_guard(self) -> None:
-        try:
+        with pytest.raises(AxioError):
             raise GuardError("test")
-        except AxioError:
-            pass
 
     def test_catch_tool_error_catches_handler(self) -> None:
-        try:
+        with pytest.raises(ToolError):
             raise HandlerError("test")
-        except ToolError:
-            pass

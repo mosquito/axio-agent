@@ -273,9 +273,6 @@ wheels = [
 name = "axio"
 version = "0.2.3"
 source = { editable = "axio" }
-dependencies = [
-    { name = "pydantic" },
-]
 
 [package.dev-dependencies]
 dev = [
@@ -288,7 +285,6 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2" }]
 
 [package.metadata.requires-dev]
 dev = [

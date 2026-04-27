@@ -26,10 +26,10 @@ all = [
 ]
 
 [project.entry-points."axio.tools"]
-status_line = "axio_tui.tools:StatusLine"
-confirm = "axio_tui.tools:Confirm"
-subagent = "axio_tui.tools:SubAgent"
-vision = "axio_tui.tools:VisionAnalyze"
+status_line = "axio_tui.tools:status_line"
+confirm = "axio_tui.tools:confirm"
+subagent = "axio_tui.tools:subagent"
+vision = "axio_tui.tools:vision_analyze"
 
 [project.scripts]
 axio = "axio_tui.__main__:main"

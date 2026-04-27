@@ -2,24 +2,24 @@
 
 Axio uses Python's **entry point groups** for plugin discovery. Packages
 register their components as entry points, and the framework discovers them
-at startup — no import-time coupling, no centralized registry.
+at startup - no import-time coupling, no centralized registry.
 
 ## Entry point groups
 
 ```{mermaid}
 flowchart TD
     EP["Entry Points in pyproject.toml"]
-    EP --> AT["axio.tools — ToolHandler classes"]
-    EP --> ATS["axio.tools.settings — ToolsPlugin (dynamic providers)"]
-    EP --> ATR["axio.transport — CompletionTransport classes"]
-    EP --> ATRS["axio.transport.settings — Transport settings screens"]
-    EP --> AG["axio.guards — PermissionGuard classes"]
-    EP --> AS["axio.selector — ToolSelector classes"]
+    EP --> AT["axio.tools - Tool handler functions"]
+    EP --> ATS["axio.tools.settings - ToolsPlugin (dynamic providers)"]
+    EP --> ATR["axio.transport - CompletionTransport classes"]
+    EP --> ATRS["axio.transport.settings - Transport settings screens"]
+    EP --> AG["axio.guards - PermissionGuard classes"]
+    EP --> AS["axio.selector - ToolSelector classes"]
 ```
 
 | Group | Registers | Example |
 |-------|-----------|---------|
-| `axio.tools` | Individual `ToolHandler` classes | `shell = "axio_tools_local.shell:Shell"` |
+| `axio.tools` | Individual tool handler functions | `shell = "axio_tools_local.shell:shell"` |
 | `axio.tools.settings` | `ToolsPlugin` providers (dynamic tool sets) | `mcp = "axio_tools_mcp.plugin:MCPPlugin"` |
 | `axio.transport` | `CompletionTransport` classes | `openai = "axio_transport_openai:OpenAITransport"` |
 | `axio.transport.settings` | Transport settings UI screens | `openai = "axio_transport_openai:OpenAISettingsScreen"` |
@@ -32,7 +32,7 @@ In your package's `pyproject.toml`:
 
 ```toml
 [project.entry-points."axio.tools"]
-my_tool = "my_package.tools:MyToolHandler"
+my_tool = "my_package.tools:my_tool"
 
 [project.entry-points."axio.transport"]
 my_transport = "my_package.transport:MyTransport"
@@ -106,7 +106,7 @@ class ToolsPlugin(Protocol):
 
     Plugins register via the ``axio.tools.settings`` entry point group.
     The TUI discovers them, calls ``init()``, collects tools, and shows
-    settings screens — without knowing anything about the plugin internals.
+    settings screens - without knowing anything about the plugin internals.
     """
 
     @property
@@ -171,5 +171,5 @@ The TUI uses `transport.name` to label the transport in the welcome screen
 and command palette.  A transport is considered *available* when its
 `fetch_models()` call succeeds; if it raises (e.g. because no API key is
 present), the transport is shown as unavailable.  API key lookup is each
-transport's own responsibility — typically via a `field(default_factory=...)`
+transport's own responsibility - typically via a `field(default_factory=...)`
 that reads the appropriate environment variable.

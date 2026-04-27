@@ -85,7 +85,7 @@ supported for representing system-level messages in history.
 
 ## ContextStore
 
-`ContextStore` is an abstract base class — implement it to store conversations
+`ContextStore` is an abstract base class - implement it to store conversations
 anywhere. Only two methods are truly abstract and must be overridden:
 
 <!-- name: test_context_store_abc -->
@@ -104,14 +104,14 @@ class MyContextStore(ContextStore):
         return list(self._messages)
 
     # All other methods have default implementations in ContextStore:
-    #   session_id       — lazy UUID hex property (no __init__ required)
-    #   clear()          — raises NotImplementedError by default
-    #   fork()           — deep-copies history into a MemoryContextStore
-    #   close()          — no-op by default
-    #   set_context_tokens(input, output)  — no-op by default
-    #   get_context_tokens()               — returns (0, 0) by default
-    #   add_context_tokens(input, output)  — increments via get/set above
-    #   list_sessions()  — returns a single SessionInfo for the current session
+    #   session_id       - lazy UUID hex property (no __init__ required)
+    #   clear()          - raises NotImplementedError by default
+    #   fork()           - deep-copies history into a MemoryContextStore
+    #   close()          - no-op by default
+    #   set_context_tokens(input, output)  - no-op by default
+    #   get_context_tokens()               - returns (0, 0) by default
+    #   add_context_tokens(input, output)  - increments via get/set above
+    #   list_sessions()  - returns a single SessionInfo for the current session
 
 store = MyContextStore()
 assert store.session_id  # auto-generated UUID hex
@@ -121,7 +121,7 @@ assert store.session_id  # auto-generated UUID hex
 
 #### MemoryContextStore
 
-In-memory list of messages. No persistence — use it for short-lived agents,
+In-memory list of messages. No persistence - use it for short-lived agents,
 tests, and prototypes. `fork()` returns an independent deep copy.
 
 <!-- name: test_memory_context_store -->
@@ -142,7 +142,7 @@ async def main():
     assert len(history) == 2
     assert history[0].role == "user"
 
-    # fork() creates an independent deep copy — useful for branching
+    # fork() creates an independent deep copy - useful for branching
     fork = await ctx.fork()
     await fork.append(Message(role="user", content=[TextBlock(text="(branch)")]))
     assert len(await ctx.get_history()) == 2   # original unchanged
@@ -306,7 +306,7 @@ assert info.message_count == 10
 ## Context compaction
 
 Long conversations can exceed the model's context window. Axio provides
-`AutoCompactStore` — a delegating wrapper that automatically summarizes old
+`AutoCompactStore` - a delegating wrapper that automatically summarizes old
 history when token usage crosses a threshold.
 
 ### AutoCompactStore
@@ -359,7 +359,7 @@ transport = StubTransport([])
 store = AutoCompactStore(inner_store, transport, max_tokens=60_000)
 ```
 
-`AutoCompactStore` works with any `ContextStore` — `MemoryContextStore`,
+`AutoCompactStore` works with any `ContextStore` - `MemoryContextStore`,
 `SQLiteContextStore`, or custom implementations.  `fork()` returns an
 `AutoCompactStore` wrapping a fork of the inner store, preserving the same
 threshold and `keep_recent` settings.
@@ -368,7 +368,7 @@ threshold and `keep_recent` settings.
 
 1. The agent loop calls `context.add_context_tokens(usage.input_tokens, ...)`
    after each `IterationEnd`. `input_tokens` here is the actual context size
-   sent to the model — not a cumulative sum.
+   sent to the model - not a cumulative sum.
 2. If `input_tokens > max_tokens`, `_do_compact()` fires.
 3. `_do_compact()` forks the inner store first, giving `compact_context` a
    stable snapshot while the live store remains writable.
@@ -376,7 +376,7 @@ threshold and `keep_recent` settings.
    and repopulated with the compacted messages. Cumulative token counts are
    preserved.
 
-### `compact_context` — low-level function
+### `compact_context` - low-level function
 
 `AutoCompactStore` uses this internally. Call it directly if you need custom
 compaction logic:
@@ -398,7 +398,7 @@ async def compact_context(
 ```
 
 Returns the compacted message list, or `None` if the history is too short to
-split (`len(history) <= keep_recent`). Does not modify the store — the caller
+split (`len(history) <= keep_recent`). Does not modify the store - the caller
 applies the result.
 
 <!--

@@ -91,7 +91,7 @@ class TestRoles:
 
     def test_make_orchestrator_system_contains_roster(self):
         """Test that make_orchestrator embeds the roster into the system prompt."""
-        roster = "\n".join(f"  {name:20s} — test description" for name in ROLE_NAMES)
+        roster = "\n".join(f"  {name:20s} - test description" for name in ROLE_NAMES)
         orchestrator = make_orchestrator(roster)
         for role_name in ROLE_NAMES:
             assert role_name in orchestrator.system, f"Role {role_name} not found in orchestrator system prompt"

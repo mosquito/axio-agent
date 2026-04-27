@@ -1,7 +1,7 @@
 # Writing Guards
 
 Guards control whether a tool call is allowed to execute. They inspect (and
-can modify) the validated handler instance before it runs.
+can modify) the raw keyword arguments before the handler runs.
 
 ## Subclassing PermissionGuard
 
@@ -10,6 +10,7 @@ can modify) the validated handler instance before it runs.
 from typing import Any
 from axio.permission import PermissionGuard
 from axio.exceptions import GuardError
+from axio.tool import Tool
 
 
 class MaxLengthGuard(PermissionGuard):
@@ -18,20 +19,21 @@ class MaxLengthGuard(PermissionGuard):
     def __init__(self, max_length: int = 10000) -> None:
         self.max_length = max_length
 
-    async def check(self, handler: Any) -> Any:
-        for name, value in handler.model_dump().items():
+    async def check(self, tool: Tool[Any], **kwargs: Any) -> dict[str, Any]:
+        for name, value in kwargs.items():
             if isinstance(value, str) and len(value) > self.max_length:
                 raise GuardError(
                     f"Field '{name}' exceeds {self.max_length} characters"
                 )
-        return handler
+        return kwargs
 ```
 
 Key rules:
 
-- **Return** the handler to allow execution.
+- **Return** a `dict` of (possibly modified) kwargs to allow execution.
 - **Raise** `GuardError` to deny. The error message is sent to the model.
-- You may return a **modified** handler instance (e.g., to sanitize inputs).
+- You may return a **modified** dict (e.g., to sanitize inputs).
+- The `tool` argument carries `.name`, `.description`, and `.input_schema`.
 
 ## Attaching guards to tools
 
@@ -39,18 +41,19 @@ Key rules:
 name: test_attaching_guards
 ```python
 from typing import Any
-from axio.tool import ToolHandler
+from axio.tool import Tool
 from axio.permission import PermissionGuard
 from axio.exceptions import GuardError
-class WriteFile(ToolHandler[Any]):
-    path: str
-    content: str
-    async def __call__(self, context: Any) -> str: return "ok"
+
+async def write_file(path: str, content: str) -> str:
+    """Write content to a file."""
+    return "ok"
+
 class MaxLengthGuard(PermissionGuard):
     def __init__(self, max_length: int = 10000) -> None:
         self.max_length = max_length
-    async def check(self, handler: Any) -> Any:
-        return handler
+    async def check(self, tool: Tool[Any], **kwargs: Any) -> dict[str, Any]:
+        return kwargs
 ```
 -->
 <!-- name: test_attaching_guards -->
@@ -59,16 +62,15 @@ from axio.tool import Tool
 
 tool = Tool(
     name="write_file",
-    description="Write a file",
-    handler=WriteFile,
+    handler=write_file,
     guards=(MaxLengthGuard(max_length=50000),),
 )
 assert tool.name == "write_file"
 assert len(tool.guards) == 1
 ```
 
-Guards run sequentially in tuple order. The output of one guard is the input
-to the next.
+Guards run sequentially in tuple order. The kwargs returned by one guard are
+passed as inputs to the next.
 
 ## ConcurrentGuard
 
@@ -80,6 +82,7 @@ use `ConcurrentGuard` to limit concurrent calls:
 from typing import Any
 from axio.exceptions import GuardError
 from axio.permission import ConcurrentGuard
+from axio.tool import Tool
 
 
 class LLMRiskGuard(ConcurrentGuard):
@@ -87,13 +90,13 @@ class LLMRiskGuard(ConcurrentGuard):
 
     concurrency = 2  # at most 2 concurrent risk assessments
 
-    async def check(self, handler: Any) -> Any:
-        risk = await self._assess_risk(handler)
+    async def check(self, tool: Tool[Any], **kwargs: Any) -> dict[str, Any]:
+        risk = await self._assess_risk(tool.name, kwargs)
         if risk > 0.8:
             raise GuardError(f"Tool call deemed too risky (score={risk:.2f})")
-        return handler
+        return kwargs
 
-    async def _assess_risk(self, handler: Any) -> float:
+    async def _assess_risk(self, tool_name: str, kwargs: dict[str, Any]) -> float:
         # Call a secondary LLM to evaluate the tool call
         ...
 ```
@@ -118,14 +121,11 @@ Guards compose naturally. Combine fast checks first, expensive checks last:
 <!--
 name: test_composing_guards
 ```python
-from typing import Any
-from axio.tool import ToolHandler
 from axio.permission import AllowAllGuard
-from axio.exceptions import GuardError
 
-class Shell(ToolHandler[Any]):
-    command: str
-    async def __call__(self, context: Any) -> str: return self.command
+async def shell(command: str) -> str:
+    """Run a shell command."""
+    return command
 
 AllowedCommandGuard = AllowAllGuard
 PathGuard = AllowAllGuard
@@ -140,8 +140,7 @@ from axio.tool import Tool
 
 tool = Tool(
     name="shell",
-    description="Run a shell command",
-    handler=Shell,
+    handler=shell,
     guards=(
         AllowedCommandGuard(),  # Fast: check against allowlist
         PathGuard(),            # Fast: validate file paths

@@ -1,11 +1,11 @@
-"""Dynamic ToolHandler creation from MCP tool schemas."""
+"""Dynamic async function creation from MCP tool schemas."""
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from collections.abc import Awaitable, Callable
+from typing import Annotated, Any
 
-import pydantic
-from axio.tool import ToolHandler
+from axio.field import FieldInfo
 from mcp.types import TextContent
 
 from .session import MCPSession
@@ -22,24 +22,24 @@ _JSON_TYPE_MAP: dict[str, type[Any]] = {
 
 def _build_fields(
     input_schema: dict[str, Any],
-) -> dict[str, Any]:
-    """Convert JSON Schema properties to Pydantic field definitions."""
+) -> dict[str, tuple[Any, FieldInfo]]:
+    """Convert JSON Schema properties to (py_type, FieldInfo) pairs."""
     properties: dict[str, Any] = input_schema.get("properties", {})
     required: set[str] = set(input_schema.get("required", []))
-    fields: dict[str, Any] = {}
+    fields: dict[str, tuple[Any, FieldInfo]] = {}
 
     for prop_name, prop_schema in properties.items():
         json_type = prop_schema.get("type", "string")
-        py_type = _JSON_TYPE_MAP.get(json_type, str)
+        py_type: type[Any] = _JSON_TYPE_MAP.get(json_type, str)
         description = prop_schema.get("description", "")
 
         if prop_name in required:
-            fields[prop_name] = (py_type, pydantic.Field(description=description))
+            fields[prop_name] = (py_type, FieldInfo(description=description))
         else:
             default = prop_schema.get("default")
             fields[prop_name] = (
                 py_type | None,
-                pydantic.Field(default=default, description=description),
+                FieldInfo(description=description, default=default),
             )
 
     return fields
@@ -51,38 +51,30 @@ def build_handler(
     description: str,
     input_schema: dict[str, Any],
     session: MCPSession,
-) -> type[ToolHandler[Any]]:
-    """Create a dynamic ToolHandler subclass for an MCP tool.
+) -> Callable[..., Awaitable[str]]:
+    """Create a plain async function handler for an MCP tool.
 
-    The returned class forwards calls to the MCP session.
+    The returned function accepts ``**kwargs`` matching the tool's JSON schema
+    and forwards the call to the MCP session.  Type annotations are set on
+    ``__annotations__`` so that ``Tool.__post_init__`` can build the schema.
     """
-    fields = _build_fields(input_schema)
-    class_name = "".join(part.capitalize() for part in tool_name.split("_")) + "Handler"
+    field_defs = _build_fields(input_schema)
 
-    async def __call__(self: Any, context: Any) -> str:
-        mcp_session: MCPSession = self.__class__._mcp_session
-        name: str = self.__class__._mcp_tool_name
-        data = self.model_dump(exclude_none=True)
-        result = await mcp_session.call_tool(name, data)
+    async def handler(**kwargs: Any) -> str:
+        data = {k: v for k, v in kwargs.items() if v is not None}
+        result = await session.call_tool(mcp_tool_name, data)
         if result.isError:
             parts = [c.text for c in result.content if isinstance(c, TextContent)]
             raise RuntimeError("\n".join(parts) or "MCP tool error")
         parts = [c.text for c in result.content if isinstance(c, TextContent)]
         return "\n".join(parts) or ""
 
-    handler_cls: type[ToolHandler[Any]] = pydantic.create_model(
-        class_name,
-        __base__=ToolHandler,
-        __doc__=description,
-        **fields,
-    )
+    annotations: dict[str, Any] = {}
+    for name, (py_type, fi) in field_defs.items():
+        annotations[name] = Annotated[py_type, fi]
+    annotations["return"] = str
+    handler.__annotations__ = annotations
+    handler.__doc__ = description
+    handler.__name__ = tool_name
 
-    handler_cls.__call__ = __call__  # type: ignore[method-assign]
-    handler_cls._mcp_session = session  # type: ignore[attr-defined]
-    handler_cls._mcp_tool_name = mcp_tool_name  # type: ignore[attr-defined]
-
-    # Add ClassVar annotations so mypy knows about them
-    handler_cls.__annotations__["_mcp_session"] = ClassVar[MCPSession]
-    handler_cls.__annotations__["_mcp_tool_name"] = ClassVar[str]
-
-    return handler_cls
+    return handler

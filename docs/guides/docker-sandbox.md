@@ -4,7 +4,7 @@ The `axio-tools-docker` package provides an isolated Docker container for
 running agent-generated code and commands. `DockerSandbox` is an async context
 manager: it creates a container on entry and removes it on exit. Inside the
 context it exposes six tools that are drop-in replacements for
-`axio-tools-local` — the agent gets the same `shell`, `write_file`,
+`axio-tools-local` - the agent gets the same `shell`, `write_file`,
 `read_file`, `list_files`, `run_python`, and `patch_file` tools, but every
 operation runs inside the container, not on the host.
 
@@ -16,7 +16,7 @@ pip install axio-tools-docker
 
 Docker must be installed and running on the host. The package communicates with
 the Docker Engine API directly via
-[aiodocker](https://aiodocker.readthedocs.io/) — the `docker` CLI is not
+[aiodocker](https://aiodocker.readthedocs.io/) - the `docker` CLI is not
 required.
 
 ## Quick start
@@ -109,7 +109,7 @@ async def first_session() -> None:
         await sandbox.exec("pip install requests")
 
 async def second_session() -> None:
-    # Attaches to the existing container — requests is already installed
+    # Attaches to the existing container - requests is already installed
     async with DockerSandbox(name="my-sandbox") as sandbox:
         result = await sandbox.exec(
             "python3 -c 'import requests; print(requests.__version__)'"
@@ -238,7 +238,7 @@ sandbox = DockerSandbox(
 | `shm_size` | `str` | `""` | `/dev/shm` size (e.g. `"64m"`). Useful for PyTorch and shared-memory IPC. |
 | `cap_add` | `list[str]` | `[]` | Linux capabilities to add (e.g. `["NET_ADMIN", "SYS_PTRACE"]`). |
 | `cap_drop` | `list[str]` | `[]` | Linux capabilities to drop (e.g. `["ALL"]`). |
-| `privileged` | `bool` | `False` | Extended privileges — full capability set and device access. Use with care. |
+| `privileged` | `bool` | `False` | Extended privileges - full capability set and device access. Use with care. |
 | `ulimits` | `dict[str, int \| tuple[int, int]]` | `{}` | Resource limits. `{"nofile": 1024}` → soft=hard=1024. `{"nofile": (1024, 65536)}` → soft/hard split. |
 | `tmpfs` | `dict[str, str]` | `{}` | Tmpfs mounts as `{path: options}` (e.g. `{"/tmp": "size=128m,mode=1777"}`). Empty string uses Docker defaults. |
 | `ports` | `dict[int, int]` | `{}` | Port bindings as `{container_port: host_port}`. Only meaningful when `network != False`. |
@@ -257,9 +257,9 @@ RuntimeError: Docker daemon not available at 'unix:///var/run/docker.sock': ...
 
 Common causes:
 
-- Docker Desktop is not running — start it and try again.
-- Wrong socket path — pass the correct `url` or set `DOCKER_HOST`.
-- Permission denied — on Linux, add your user to the `docker` group:
+- Docker Desktop is not running - start it and try again.
+- Wrong socket path - pass the correct `url` or set `DOCKER_HOST`.
+- Permission denied - on Linux, add your user to the `docker` group:
   ```bash
   sudo usermod -aG docker $USER
   ```

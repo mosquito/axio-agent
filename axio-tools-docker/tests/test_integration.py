@@ -1,4 +1,4 @@
-"""Integration tests for DockerSandbox — require a running Docker daemon."""
+"""Integration tests for DockerSandbox - require a running Docker daemon."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pathlib import Path
 import aiodocker
 import pytest
 
-from axio_tools_docker.sandbox import DockerSandbox, ListFiles, PatchFile, ReadFile, RunPython
+from axio_tools_docker.sandbox import DockerSandbox
 
 # ---------------------------------------------------------------------------
 # Config
@@ -23,7 +23,7 @@ IMAGE = "python:3.12-alpine"
 
 
 # ---------------------------------------------------------------------------
-# Availability check (sync — no loop-scope concerns)
+# Availability check (sync - no loop-scope concerns)
 # ---------------------------------------------------------------------------
 
 
@@ -77,7 +77,7 @@ def container_name(request: pytest.FixtureRequest) -> str:
 
 @pytest.fixture
 async def sandbox(pull_image: None) -> AsyncGenerator[DockerSandbox, None]:
-    """Fresh container per test — avoids cross-test state and event-loop issues."""
+    """Fresh container per test - avoids cross-test state and event-loop issues."""
     async with DockerSandbox(DOCKER_URL, image=IMAGE, workdir="/workspace") as sb:
         await sb.exec("mkdir -p /workspace")
         yield sb
@@ -142,18 +142,16 @@ async def test_write_file_mode(sandbox: DockerSandbox) -> None:
 @docker_available
 async def test_read_file_line_range(sandbox: DockerSandbox) -> None:
     await sandbox.write_file("/workspace/lines.txt", "a\nb\nc\nd\ne\n")
-
-    handler = ReadFile(filename="lines.txt", start_line=2, end_line=4)
-    result = await handler(sandbox)
+    tool = next(t for t in sandbox.tools if t.name == "read_file")
+    result = await tool(filename="lines.txt", start_line=2, end_line=4)
     assert result.strip() == "b\nc\nd"
 
 
 @docker_available
 async def test_read_file_line_numbers(sandbox: DockerSandbox) -> None:
     await sandbox.write_file("/workspace/numbered.txt", "foo\nbar\n")
-
-    handler = ReadFile(filename="numbered.txt", line_numbers=True)
-    result = await handler(sandbox)
+    tool = next(t for t in sandbox.tools if t.name == "read_file")
+    result = await tool(filename="numbered.txt", line_numbers=True)
     assert "1\tfoo" in result
     assert "2\tbar" in result
 
@@ -161,9 +159,8 @@ async def test_read_file_line_numbers(sandbox: DockerSandbox) -> None:
 @docker_available
 async def test_read_file_truncation(sandbox: DockerSandbox) -> None:
     await sandbox.write_file("/workspace/big.txt", "x" * 100)
-
-    handler = ReadFile(filename="big.txt", max_chars=10)
-    result = await handler(sandbox)
+    tool = next(t for t in sandbox.tools if t.name == "read_file")
+    result = await tool(filename="big.txt", max_chars=10)
     assert "truncated" in result
 
 
@@ -174,23 +171,20 @@ async def test_list_files(sandbox: DockerSandbox) -> None:
     await sandbox.write_file("/workspace/listing/b.txt", "y")
     await sandbox.exec("mkdir -p /workspace/listing/subdir")
 
-    handler = ListFiles(directory="/workspace/listing")
-    result = await handler(sandbox)
+    tool = next(t for t in sandbox.tools if t.name == "list_files")
+    result = await tool(directory="/workspace/listing")
 
     assert "a.py" in result
     assert "b.txt" in result
     assert "subdir/" in result
-    # dirs come before files
     assert result.index("subdir/") < result.index("a.py")
 
 
 @docker_available
 async def test_patch_file(sandbox: DockerSandbox) -> None:
     await sandbox.write_file("/workspace/patch_me.txt", "line1\nline2\nline3\n")
-
-    handler = PatchFile(file_path="/workspace/patch_me.txt", from_line=2, to_line=2, content="REPLACED")
-    await handler(sandbox)
-
+    tool = next(t for t in sandbox.tools if t.name == "patch_file")
+    await tool(file_path="/workspace/patch_me.txt", from_line=2, to_line=2, content="REPLACED")
     raw = await sandbox.read_file_bytes("/workspace/patch_me.txt")
     assert raw == b"line1\nREPLACED\nline3\n"
 
@@ -199,35 +193,30 @@ async def test_patch_file(sandbox: DockerSandbox) -> None:
 async def test_patch_file_insert(sandbox: DockerSandbox) -> None:
     """to_line = from_line - 1 inserts without deleting."""
     await sandbox.write_file("/workspace/insert_me.txt", "line1\nline3\n")
-
-    handler = PatchFile(file_path="/workspace/insert_me.txt", from_line=2, to_line=1, content="line2")
-    await handler(sandbox)
-
+    tool = next(t for t in sandbox.tools if t.name == "patch_file")
+    await tool(file_path="/workspace/insert_me.txt", from_line=2, to_line=1, content="line2")
     raw = await sandbox.read_file_bytes("/workspace/insert_me.txt")
     assert raw == b"line1\nline2\nline3\n"
 
 
 @docker_available
 async def test_run_python(sandbox: DockerSandbox) -> None:
-
-    handler = RunPython(code="print(2 + 2)")
-    result = await handler(sandbox)
+    tool = next(t for t in sandbox.tools if t.name == "run_python")
+    result = await tool(code="print(2 + 2)")
     assert result.strip() == "4"
 
 
 @docker_available
 async def test_run_python_stdin(sandbox: DockerSandbox) -> None:
-
-    handler = RunPython(code="import sys; print(sys.stdin.read().strip().upper())", stdin="hello")
-    result = await handler(sandbox)
+    tool = next(t for t in sandbox.tools if t.name == "run_python")
+    result = await tool(code="import sys; print(sys.stdin.read().strip().upper())", stdin="hello")
     assert result.strip() == "HELLO"
 
 
 @docker_available
 async def test_run_python_exit_code(sandbox: DockerSandbox) -> None:
-
-    handler = RunPython(code="import sys; sys.exit(3)")
-    result = await handler(sandbox)
+    tool = next(t for t in sandbox.tools if t.name == "run_python")
+    result = await tool(code="import sys; sys.exit(3)")
     assert "[exit code: 3]" in result
 
 

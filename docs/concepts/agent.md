@@ -86,7 +86,7 @@ flowchart TD
 `Agent` exposes two methods:
 
 `run_stream(user_message, context) -> AgentStream`
-: Returns an `AgentStream` — an async iterator over `StreamEvent` values.
+: Returns an `AgentStream` - an async iterator over `StreamEvent` values.
   Use this when you need per-token streaming or want to observe tool calls
   as they happen.
 
@@ -108,7 +108,7 @@ async def dispatch_tools(
 
 Each tool call goes through the full guard chain before execution. If a tool
 raises an exception, the agent catches it and wraps it in a `ToolResultBlock`
-with `is_error=True` — the model sees the error and can react accordingly.
+with `is_error=True` - the model sees the error and can react accordingly.
 
 If a tool's JSON arguments could not be parsed from the stream, the agent
 returns a `ToolResultBlock` with `is_error=True` and a message asking the

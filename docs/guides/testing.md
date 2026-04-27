@@ -147,7 +147,7 @@ async def test_agent_calls_tool():
 asyncio.run(test_agent_calls_tool())
 ```
 
-No `@pytest.mark.asyncio` decorator needed — the project uses
+No `@pytest.mark.asyncio` decorator needed - the project uses
 `asyncio_mode = "auto"`.
 
 ## Testing tools in isolation
@@ -157,20 +157,18 @@ Test a tool handler directly:
 <!-- name: test_word_count_isolation -->
 ```python
 import asyncio
-from typing import Any
-from axio.tool import ToolHandler
+from axio.tool import Tool
 
 
-class WordCount(ToolHandler[Any]):
-    text: str
-    async def __call__(self, context: Any) -> str:
-        count = len(self.text.split())
-        return f"The text contains {count} words."
+async def word_count(text: str) -> str:
+    """Count words in text."""
+    count = len(text.split())
+    return f"The text contains {count} words."
 
 
 async def test_word_count():
-    handler = WordCount(text="one two three")
-    result = await handler({})
+    tool = Tool(name="word_count", handler=word_count)
+    result = await tool(text="one two three")
     assert "3" in result
 
 asyncio.run(test_word_count())
@@ -181,19 +179,17 @@ Or test through the `Tool` wrapper to exercise guards:
 <!-- name: test_word_count_via_tool -->
 ```python
 import asyncio
-from typing import Any
-from axio.tool import Tool, ToolHandler
+from axio.tool import Tool
 
 
-class WordCount(ToolHandler[Any]):
-    text: str
-    async def __call__(self, context: Any) -> str:
-        count = len(self.text.split())
-        return f"The text contains {count} words."
+async def word_count(text: str) -> str:
+    """Count words in text."""
+    count = len(text.split())
+    return f"The text contains {count} words."
 
 
 async def test_word_count_tool():
-    tool = Tool(name="word_count", description="Count words", handler=WordCount)
+    tool = Tool(name="word_count", handler=word_count)
     result = await tool(text="one two three")
     assert "3" in result
 
@@ -207,40 +203,40 @@ asyncio.run(test_word_count_tool())
 import asyncio
 import pytest
 from typing import Any
-from axio.tool import ToolHandler
+from axio.tool import Tool
 from axio.permission import PermissionGuard
 from axio.exceptions import GuardError
 
 
-class WordCount(ToolHandler[Any]):
-    text: str
-    async def __call__(self, context: Any) -> str:
-        return str(len(self.text.split()))
+async def word_count(text: str) -> str:
+    """Count words."""
+    return str(len(text.split()))
+
+
+_tool: Tool[Any] = Tool(name="word_count", handler=word_count)
 
 
 class MaxLengthGuard(PermissionGuard):
     def __init__(self, max_length: int = 10000) -> None:
         self.max_length = max_length
 
-    async def check(self, handler: Any) -> Any:
-        for name, value in handler.model_dump().items():
+    async def check(self, tool: Tool[Any], **kwargs: Any) -> dict[str, Any]:
+        for name, value in kwargs.items():
             if isinstance(value, str) and len(value) > self.max_length:
                 raise GuardError(f"Field '{name}' exceeds {self.max_length} characters")
-        return handler
+        return kwargs
 
 
 async def test_guard_allows_short_input():
     guard = MaxLengthGuard(max_length=100)
-    handler = WordCount(text="short")
-    result = await guard.check(handler)
-    assert result is handler
+    result = await guard.check(_tool, text="short")
+    assert result == {"text": "short"}
 
 
 async def test_guard_denies_long_input():
     guard = MaxLengthGuard(max_length=5)
-    handler = WordCount(text="this is way too long")
     with pytest.raises(GuardError):
-        await guard.check(handler)
+        await guard.check(_tool, text="this is way too long")
 
 asyncio.run(test_guard_allows_short_input())
 asyncio.run(test_guard_denies_long_input())

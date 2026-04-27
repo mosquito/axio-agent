@@ -76,11 +76,11 @@ def mock_docker_factory(
         return mock_container
 
     mock_containers.create = create_container
-    # Default: no named container exists — callers can override per test.
+    # Default: no named container exists - callers can override per test.
     mock_containers.get = AsyncMock(side_effect=aiodocker.exceptions.DockerError(404, "Not found"))
 
     mock_images = MagicMock()
-    mock_images.inspect = AsyncMock()  # image present by default — no pull needed
+    mock_images.inspect = AsyncMock()  # image present by default - no pull needed
     mock_images.pull = AsyncMock()
 
     mock_system = MagicMock()
@@ -156,7 +156,7 @@ async def test_client_closed_on_exit() -> None:
 
 
 async def test_named_existing_container_attaches() -> None:
-    """name= reuses an existing container — no create, no start."""
+    """name= reuses an existing container - no create, no start."""
     cls, client, container = mock_docker_factory()
     client.containers.get = AsyncMock(return_value=container)
     with patch("axio_tools_docker.sandbox.aiodocker.Docker", cls):
@@ -803,7 +803,7 @@ async def test_devices_full_format() -> None:
 
 
 async def test_devices_short_format() -> None:
-    """Just the host path — maps to same container path with rwm."""
+    """Just the host path - maps to same container path with rwm."""
     cls, client, container = mock_docker_factory()
     with patch("axio_tools_docker.sandbox.aiodocker.Docker", cls):
         async with DockerSandbox(devices=["/dev/net/tun"]):

@@ -8,7 +8,7 @@ Docker sandbox tools for [axio](https://github.com/mosquito/axio-agent).
 
 `DockerSandbox` is an async context manager that spins up an isolated Docker
 container on entry and removes it on exit. Inside the context it exposes six
-`axio` tools — the same `shell`, `write_file`, `read_file`, `list_files`,
+`axio` tools - the same `shell`, `write_file`, `read_file`, `list_files`,
 `run_python`, and `patch_file` as `axio-tools-local`, but every operation runs
 inside the container, never on the host.
 
@@ -21,7 +21,7 @@ docker info   # should succeed
 ```
 
 The package talks to the Docker Engine API directly via
-[aiodocker](https://aiodocker.readthedocs.io/) — the `docker` CLI is not
+[aiodocker](https://aiodocker.readthedocs.io/) - the `docker` CLI is not
 required.
 
 ## Installation
@@ -57,7 +57,7 @@ asyncio.run(main())
 
 ## Sandbox tools
 
-These mirror `axio-tools-local` exactly — same names and field schemas:
+These mirror `axio-tools-local` exactly - same names and field schemas:
 
 | Tool | Description |
 |---|---|
@@ -94,7 +94,7 @@ The running container's ID is available as `sandbox.container_id` inside the
 
 Pass `name=` to give the container a fixed name. If a running container with
 that name already exists, the sandbox attaches to it instead of creating a new
-one, and never removes it on exit — regardless of `remove`:
+one, and never removes it on exit - regardless of `remove`:
 
 ```python
 import asyncio
@@ -162,7 +162,7 @@ sandbox = DockerSandbox(
 | `shm_size` | `str` | `""` | `/dev/shm` size (e.g. `"64m"`). Useful for PyTorch / shared-memory IPC. |
 | `cap_add` | `list[str]` | `[]` | Linux capabilities to add (e.g. `["NET_ADMIN", "SYS_PTRACE"]`). |
 | `cap_drop` | `list[str]` | `[]` | Linux capabilities to drop (e.g. `["ALL"]`). |
-| `privileged` | `bool` | `False` | Extended privileges — full capability set and device access. Use with care. |
+| `privileged` | `bool` | `False` | Extended privileges - full capability set and device access. Use with care. |
 | `ulimits` | `dict[str, int \| tuple[int, int]]` | `{}` | Resource limits. `{"nofile": 1024}` → soft=hard=1024. `{"nofile": (1024, 65536)}` → soft/hard split. |
 | `tmpfs` | `dict[str, str]` | `{}` | Tmpfs mounts as `{path: options}` (e.g. `{"/tmp": "size=128m,mode=1777"}`). |
 | `ports` | `dict[int, int]` | `{}` | Port bindings as `{container_port: host_port}`. Only meaningful when `network != False`. |

@@ -5,8 +5,8 @@ description = "Minimal, streaming-first, protocol-driven foundation for LLM-powe
 readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "MIT"}
-keywords = ["llm", "agent", "ai", "async", "streaming", "pydantic", "protocol"]
-dependencies = ["pydantic>=2"]
+keywords = ["llm", "agent", "ai", "async", "streaming", "protocol"]
+dependencies = []
 
 
 [project.urls]
