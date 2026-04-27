@@ -6,17 +6,17 @@ import json
 from collections.abc import AsyncIterator
 from typing import Any
 
-from axio.context import MemoryContextStore
-from axio.events import IterationEnd, StreamEvent, TextDelta, ToolInputDelta, ToolUseStart
-from axio.messages import Message
-from axio.tool import Tool, ToolHandler
-from axio.types import StopReason, Usage
+from .context import MemoryContextStore
+from .events import IterationEnd, StreamEvent, TextDelta, ToolInputDelta, ToolUseStart
+from .messages import Message
+from .tool import Tool, ToolHandler
+from .types import StopReason, Usage
 
 
-class MsgInput(ToolHandler):
+class MsgInput(ToolHandler[Any]):
     msg: str
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return self.model_dump_json()
 
 
@@ -34,7 +34,7 @@ class StubTransport:
         for event in events:
             yield event
 
-    def stream(self, messages: list[Message], tools: list[Tool], system: str) -> AsyncIterator[StreamEvent]:
+    def stream(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> AsyncIterator[StreamEvent]:
         idx = min(self._call_count, len(self._responses) - 1)
         events = self._responses[idx]
         self._call_count += 1
@@ -83,5 +83,5 @@ def make_ephemeral_context() -> MemoryContextStore:
     return MemoryContextStore()
 
 
-def make_echo_tool() -> Tool:
+def make_echo_tool() -> Tool[Any]:
     return Tool(name="echo", description="Returns input as JSON", handler=MsgInput)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from typing import Any
 
 from axio.agent import Agent
 from axio.context import MemoryContextStore
@@ -10,18 +11,18 @@ from axio.testing import StubTransport, make_text_response
 from axio.tool import Tool, ToolHandler
 
 
-class HandlerA(ToolHandler):
-    async def __call__(self) -> str:
+class HandlerA(ToolHandler[Any]):
+    async def __call__(self, context: Any) -> str:
         return "a"
 
 
-class HandlerB(ToolHandler):
-    async def __call__(self) -> str:
+class HandlerB(ToolHandler[Any]):
+    async def __call__(self, context: Any) -> str:
         return "b"
 
 
-class NoopHandler(ToolHandler):
-    async def __call__(self) -> str:
+class NoopHandler(ToolHandler[Any]):
+    async def __call__(self, context: Any) -> str:
         return ""
 
 

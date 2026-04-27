@@ -13,4 +13,6 @@ testing
 cookbook
 best-practices
 tui-usage
+agent-swarm
+gas-town
 ```

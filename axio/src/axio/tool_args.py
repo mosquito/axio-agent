@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from enum import IntEnum
 from types import MappingProxyType
 
-from axio.events import ToolFieldDelta, ToolFieldEnd, ToolFieldStart
+from .events import ToolFieldDelta, ToolFieldEnd, ToolFieldStart
 
 type ToolFieldEvent = ToolFieldStart | ToolFieldDelta | ToolFieldEnd
 

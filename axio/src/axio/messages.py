@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from axio.blocks import ContentBlock, from_dict, to_dict
+from .blocks import ContentBlock, from_dict, to_dict
 
 
 @dataclass(slots=True)

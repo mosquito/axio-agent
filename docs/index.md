@@ -1,9 +1,9 @@
 # Axio
 
-[![GitHub org](https://img.shields.io/badge/github-axio--agent-181717?logo=github&logoColor=white)](https://github.com/axio-agent)
-[![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/axio-agent/axio/blob/master/LICENSE)
+[![GitHub](https://img.shields.io/badge/github-mosquito%2Faxio--agent-181717?logo=github&logoColor=white)](https://github.com/mosquito/axio-agent)
+[![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/mosquito/axio-agent/blob/master/LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue?logo=python&logoColor=white)](https://python.org)
-[![Docs](https://img.shields.io/github/actions/workflow/status/axio-agent/docs/docs.yml?label=docs&logo=readthedocs&logoColor=white)](https://github.com/axio-agent/docs/actions)
+[![Docs](https://img.shields.io/github/actions/workflow/status/mosquito/axio-agent/docs.yml?label=docs&logo=readthedocs&logoColor=white)](https://github.com/mosquito/axio-agent/actions)
 [![PyPI axio](https://img.shields.io/pypi/v/axio?label=axio&logo=pypi&logoColor=white)](https://pypi.org/project/axio/)
 [![PyPI axio-tui](https://img.shields.io/pypi/v/axio-tui?label=axio-tui&logo=pypi&logoColor=white)](https://pypi.org/project/axio-tui/)
 
@@ -78,14 +78,15 @@ Overview of every package in the monorepo and their entry points.
 <!-- name: test_index_example -->
 ```python
 import aiohttp
+from typing import Any
 from axio.tool import Tool, ToolHandler
 
 
-class Fetch(ToolHandler):
+class Fetch(ToolHandler[Any]):
     """Fetch the text content of a URL."""
     url: str
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         async with aiohttp.ClientSession() as session:
             async with session.get(self.url) as r:
                 return (await r.text())[:2000]
@@ -225,23 +226,30 @@ The agent loop:
 
 Here's how Axio compares to other popular Python agent frameworks:
 
-| | Axio | LangChain / LangGraph | AutoGen |
-|---|---|---|---|
-| **Architecture** | Minimal core + protocols | Heavy abstraction layer | Multi-agent orchestration |
-| **Streaming** | Built-in from day one | Added later, inconsistent | Limited |
-| **Tool definition** | Pydantic models | Functions + decorators | Class-based agents |
-| **Transport** | Pluggable protocol | Built-in, harder to swap | Azure OpenAI focused |
-| **Multi-agent** | Built-in (subagent tool) | Via LangGraph | Native |
-| **Learning curve** | Low — ~100 lines for agent | Medium — many abstractions | High — complex configs |
-| **Scope** | Agent loop + extensions | Full stack (RAG, chains, etc.) | Multi-agent scenarios |
+| | Axio | pydantic-ai | LangChain / LangGraph | AutoGen |
+|---|---|---|---|---|
+| **Architecture** | Minimal core + protocols | Pydantic-native, validation-centric | Heavy abstraction layer | Multi-agent orchestration |
+| **Streaming** | All events typed, full tool visibility | Text streaming works; tool calls and final answer can't stream simultaneously | Added later, inconsistent | Limited |
+| **Tool definition** | Pydantic model subclass | Decorator + function signature → auto JSON schema | Functions + decorators | Class-based agents |
+| **Transport** | Pluggable protocol; you bring the client | Built-in 20+ providers, trivial to swap | Built-in, harder to swap | Azure OpenAI focused |
+| **Multi-agent** | Built-in (`subagent` tool, shared context stores) | Agent-as-tool pattern; not the primary focus | Via LangGraph | Native |
+| **Learning curve** | Low — ~100 lines for an agent | Low for Pydantic/FastAPI users; moderate otherwise | Medium — many abstractions | High — complex configs |
+| **Scope** | Agent loop + extensions | Agent + structured outputs; no RAG, no built-in memory | Full stack (RAG, chains, etc.) | Multi-agent scenarios |
+| **API stability** | Stable | Beta (v0.x, breaking changes possible) | Stable | Stable |
 
 ### When to choose each
 
 **Choose Axio if:**
 - You want a minimal foundation and full control over integrations
-- Streaming and visibility into agent decisions matter
-- You prefer explicit patterns over implicit "magic"
-- You're building a custom agent UI or need to swap LLM providers
+- Full, real-time streaming visibility into every token, tool call, and result matters
+- You prefer explicit protocols over decorator magic
+- You're building a custom agent UI or embedding agents in a larger system
+
+**Choose pydantic-ai if:**
+- You already use Pydantic/FastAPI and want the same patterns for agents
+- Your agent must return strongly typed, validated structured outputs
+- You need trivial provider swapping across 20+ LLM backends
+- You're okay with beta-stage API stability
 
 **Choose LangChain if:**
 - You need RAG, text splitters, and other built-in utilities

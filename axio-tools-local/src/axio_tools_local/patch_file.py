@@ -1,19 +1,21 @@
 import asyncio
 import os
 from pathlib import Path
+from typing import Any
 
 from axio.tool import ToolHandler
+from pydantic import StrictStr
 
 
-class PatchFile(ToolHandler):
+class PatchFile(ToolHandler[Any]):
     """Replace a range of lines in an existing file. Lines are 1-indexed:
     from_line and to_line are both inclusive (from_line=2, to_line=4 replaces
     lines 2, 3, 4). To insert without deleting, set to_line = from_line - 1.
-    Always read the file first with indexed=True to get correct line numbers.
+    Always read the file first with line_numbers=True to get correct line numbers.
     Use this for surgical edits instead of rewriting the whole file with
     write_file."""
 
-    file_path: str
+    file_path: StrictStr
     mode: int = 0o644
     from_line: int
     to_line: int
@@ -45,5 +47,5 @@ class PatchFile(ToolHandler):
             f.writelines(new_lines)
             return f"{f.tell()} bytes written to {self.file_path}"
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return await asyncio.to_thread(self._blocking)

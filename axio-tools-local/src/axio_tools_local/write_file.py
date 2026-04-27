@@ -1,15 +1,17 @@
 import asyncio
 import os
+from typing import Any
 
 from axio.tool import ToolHandler
+from pydantic import StrictStr
 
 
-class WriteFile(ToolHandler):
+class WriteFile(ToolHandler[Any]):
     """Create or overwrite a file with the given content. Parent directories
     are created automatically. Use this for new files or full rewrites.
     For partial edits prefer patch_file instead."""
 
-    file_path: str
+    file_path: StrictStr
     content: str
     mode: int = 0o644
 
@@ -24,5 +26,5 @@ class WriteFile(ToolHandler):
         os.chmod(path, mode=self.mode)
         return f"Wrote {len(self.content)} bytes to {self.file_path}"
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return await asyncio.to_thread(self._blocking)

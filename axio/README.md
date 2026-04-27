@@ -227,15 +227,15 @@ my_guard = "my_package:MyGuard"
 
 | Package | Purpose |
 |---|---|
-| [axio-transport-anthropic](https://github.com/axio-agent/axio-transport-anthropic) | Anthropic Claude transport |
-| [axio-transport-openai](https://github.com/axio-agent/axio-transport-openai) | OpenAI-compatible transport (OpenAI, Nebius, OpenRouter, custom) |
-| [axio-transport-codex](https://github.com/axio-agent/axio-transport-codex) | ChatGPT OAuth transport |
-| [axio-context-sqlite](https://github.com/axio-agent/axio-context-sqlite) | SQLite-backed persistent context store |
-| [axio-tools-local](https://github.com/axio-agent/axio-tools-local) | Shell, file, Python tools |
-| [axio-tools-mcp](https://github.com/axio-agent/axio-tools-mcp) | MCP server bridge |
-| [axio-tools-docker](https://github.com/axio-agent/axio-tools-docker) | Docker sandbox tools |
-| [axio-tui](https://github.com/axio-agent/axio-tui) | Textual TUI application |
-| [axio-tui-guards](https://github.com/axio-agent/axio-tui-guards) | Permission guard plugins |
+| [axio-transport-anthropic](https://github.com/mosquito/axio-agent) | Anthropic Claude transport |
+| [axio-transport-openai](https://github.com/mosquito/axio-agent) | OpenAI-compatible transport (OpenAI, Nebius, OpenRouter, custom) |
+| [axio-transport-codex](https://github.com/mosquito/axio-agent) | ChatGPT OAuth transport |
+| [axio-context-sqlite](https://github.com/mosquito/axio-agent) | SQLite-backed persistent context store |
+| [axio-tools-local](https://github.com/mosquito/axio-agent) | Shell, file, Python tools |
+| [axio-tools-mcp](https://github.com/mosquito/axio-agent) | MCP server bridge |
+| [axio-tools-docker](https://github.com/mosquito/axio-agent) | Docker sandbox tools |
+| [axio-tui](https://github.com/mosquito/axio-agent) | Textual TUI application |
+| [axio-tui-guards](https://github.com/mosquito/axio-agent) | Permission guard plugins |
 
 ## License
 

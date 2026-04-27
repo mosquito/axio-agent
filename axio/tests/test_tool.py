@@ -9,26 +9,27 @@ from axio.permission import PermissionGuard
 from axio.tool import Tool, ToolHandler
 
 
-class EmptyHandler(ToolHandler):
-    async def __call__(self) -> str:
+class EmptyHandler(ToolHandler[Any]):
+    async def __call__(self, context: Any) -> str:
         return "empty"
 
 
-class MsgHandler(ToolHandler):
+class MsgHandler(ToolHandler[Any]):
     msg: str
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return self.msg
 
 
 class TestToolHandler:
     async def test_call_with_fields(self) -> None:
         h = MsgHandler(msg="hello")
-        assert await h() == "hello"
+        assert await h({}) == "hello"
 
     async def test_base_raises(self) -> None:
+        h: ToolHandler[Any] = ToolHandler()
         try:
-            await ToolHandler()()
+            await h({})
             assert False, "should raise"
         except NotImplementedError:
             pass
@@ -148,8 +149,8 @@ class TestToolCall:
         assert captured[0] == {"msg": "hello"}
 
     async def test_handler_error_wrapping(self) -> None:
-        class _Failing(ToolHandler):
-            async def __call__(self) -> str:
+        class _Failing(ToolHandler[Any]):
+            async def __call__(self, context: Any) -> str:
                 raise ValueError("handler boom")
 
         t = Tool(name="t", description="t", handler=_Failing)

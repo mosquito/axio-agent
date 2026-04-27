@@ -6,34 +6,32 @@ Install Axio from PyPI:
 
 ```bash
 pip install axio
-# or with uv:
-uv add axio
 ```
 
-To install the terminal UI and all optional extras:
+To install the terminal UI with extras:
 
 ```bash
 pip install "axio-tui[all]"
-# or with uv:
-uv add "axio-tui[all]"
+# or with uv (global tool install):
+uv tool install "axio-tui[anthropic,openai,codex,local,mcp,guards]"
 ```
+
+Available TUI extras: `anthropic`, `openai`, `codex`, `local`, `mcp`, `guards`, `all`.
 
 ### From source (development)
 
 If you want to work on Axio itself, clone the monorepo and sync dependencies:
 
 ```bash
-git clone https://github.com/axio-agent/axio-agent.git
+git clone https://github.com/mosquito/axio-agent
 cd axio-agent
-uv sync
+uv sync --all-packages
 ```
 
-To include optional packages (transports, tools, guards):
+### Prerequisites
 
-```bash
-uv sync --all-extras
-```
-
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/) — for workspace management and tool installation
 ## Minimal Agent
 
 The smallest possible agent needs three things: a **transport** to talk to an LLM,
@@ -76,6 +74,7 @@ name: test_adding_tools
 -->
 <!-- name: test_adding_tools -->
 ```python
+from typing import Any
 from axio.agent import Agent
 from axio.context import MemoryContextStore
 from axio.testing import StubTransport, make_text_response
@@ -86,11 +85,11 @@ transport = StubTransport([make_text_response("ok")])
 context = MemoryContextStore()
 
 
-class Greet(ToolHandler):
+class Greet(ToolHandler[Any]):
     """Greet someone by name."""
     name: str
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return f"Hello, {self.name}!"
 
 

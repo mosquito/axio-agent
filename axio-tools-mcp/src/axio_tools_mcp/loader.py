@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from axio.tool import Tool
 
@@ -15,13 +16,13 @@ logger = logging.getLogger(__name__)
 
 async def load_mcp_tools(
     servers: list[MCPServerConfig],
-) -> tuple[list[Tool], list[MCPSession]]:
+) -> tuple[list[Tool[Any]], list[MCPSession]]:
     """Connect to MCP servers and discover their tools.
 
     Returns ``(tools, sessions)``. The caller is responsible for closing sessions.
     Failed servers are logged and skipped.
     """
-    all_tools: list[Tool] = []
+    all_tools: list[Tool[Any]] = []
     sessions: list[MCPSession] = []
 
     for config in servers:

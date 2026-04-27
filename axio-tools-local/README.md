@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/axio-tools-local)](https://pypi.org/project/axio-tools-local/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Core filesystem and shell tool handlers for [axio](https://github.com/axio-agent/axio).
+Core filesystem and shell tool handlers for [axio](https://github.com/mosquito/axio-agent).
 
 Gives your agent the ability to read, write, and patch files, run shell commands, execute Python snippets, and browse directory trees — the essential toolkit for a coding assistant.
 
@@ -84,7 +84,7 @@ Parameters: `command: str`, `timeout: int = 5`, `cwd: str = "."`, `stdin: str | 
 Replaces a range of lines in an existing file — safe for surgical edits without
 rewriting the whole file. Lines are 1-indexed and both `from_line` and `to_line`
 are inclusive. To insert without deleting any existing lines, set
-`to_line = from_line - 1`. Always read the file first with `indexed=True` to
+`to_line = from_line - 1`. Always read the file first with `line_numbers=True` to
 get correct line numbers.
 
 <!--
@@ -163,7 +163,7 @@ list_files = "axio_tools_local.list_files:ListFiles"
 
 ## Part of the axio ecosystem
 
-[axio](https://github.com/axio-agent/axio) · [axio-tools-mcp](https://github.com/axio-agent/axio-tools-mcp) · [axio-tools-docker](https://github.com/axio-agent/axio-tools-docker) · [axio-tui](https://github.com/axio-agent/axio-tui)
+[axio](https://github.com/mosquito/axio-agent) · [axio-tools-mcp](https://github.com/mosquito/axio-agent) · [axio-tools-docker](https://github.com/mosquito/axio-agent) · [axio-tui](https://github.com/mosquito/axio-agent)
 
 ## License
 

@@ -26,8 +26,8 @@ openai-custom = "axio_transport_openai.tui:CustomHubScreen"
 
 
 [project.urls]
-Homepage = "https://github.com/axio-agent/axio-transport-openai"
-Repository = "https://github.com/axio-agent/axio-transport-openai"
+Homepage = "https://github.com/mosquito/axio-agent"
+Repository = "https://github.com/mosquito/axio-agent"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

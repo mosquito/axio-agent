@@ -11,6 +11,8 @@ members = [
     "axio-tui",
     "axio-tui-guards",
     "docs",
+    "examples/agent_swarm",
+    "examples/gas_town",
 ]
 
 [tool.uv.sources]
@@ -24,6 +26,8 @@ axio-transport-codex       = { workspace = true }
 axio-transport-openai      = { workspace = true }
 axio-tui                   = { workspace = true }
 axio-tui-guards            = { workspace = true }
+agent-swarm-example        = { workspace = true }
+gas-town-example           = { workspace = true }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

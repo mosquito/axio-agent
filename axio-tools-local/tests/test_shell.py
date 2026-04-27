@@ -9,7 +9,7 @@ from axio_tools_local.shell import Shell
 
 
 async def sh(command: str, **kwargs: Any) -> str:
-    return await Shell(command=command, **kwargs)()
+    return await Shell(command=command, **kwargs)({})
 
 
 class TestShellBasic:

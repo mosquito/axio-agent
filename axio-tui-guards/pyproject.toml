@@ -14,8 +14,8 @@ llm = "axio_tui_guards.guards:LLMGuard"
 
 
 [project.urls]
-Homepage = "https://github.com/axio-agent/axio-tui-guards"
-Repository = "https://github.com/axio-agent/axio-tui-guards"
+Homepage = "https://github.com/mosquito/axio-agent"
+Repository = "https://github.com/mosquito/axio-agent"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

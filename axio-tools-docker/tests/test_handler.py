@@ -17,7 +17,7 @@ async def test_exec_handler_forwards_to_manager() -> None:
     instance = cast(type[Any], handler_cls)(command="echo hi", timeout=10)
 
     with patch.object(SandboxManager, "docker_available", return_value=True):
-        result = await instance()
+        result = await instance({})
 
     assert result == "output"
     manager.exec.assert_awaited_once_with("echo hi", timeout=10)
@@ -31,7 +31,7 @@ async def test_write_handler_forwards_to_manager() -> None:
     instance = cast(type[Any], handler_cls)(path="/workspace/test.py", content="print('hi')")
 
     with patch.object(SandboxManager, "docker_available", return_value=True):
-        result = await instance()
+        result = await instance({})
 
     assert result == "Wrote /workspace/test.py"
     manager.write_file.assert_awaited_once_with("/workspace/test.py", "print('hi')")
@@ -45,7 +45,7 @@ async def test_read_handler_forwards_to_manager() -> None:
     instance = cast(type[Any], handler_cls)(path="/workspace/test.py")
 
     with patch.object(SandboxManager, "docker_available", return_value=True):
-        result = await instance()
+        result = await instance({})
 
     assert result == "file content"
     manager.read_file.assert_awaited_once_with("/workspace/test.py")
@@ -57,7 +57,7 @@ async def test_exec_handler_returns_error_when_docker_missing() -> None:
     instance = cast(type[Any], handler_cls)(command="echo hi")
 
     with patch.object(SandboxManager, "docker_available", return_value=False):
-        result = await instance()
+        result = await instance({})
 
     assert "not installed" in result
 
@@ -68,7 +68,7 @@ async def test_write_handler_returns_error_when_docker_missing() -> None:
     instance = cast(type[Any], handler_cls)(path="/test", content="x")
 
     with patch.object(SandboxManager, "docker_available", return_value=False):
-        result = await instance()
+        result = await instance({})
 
     assert "not installed" in result
 
@@ -79,7 +79,7 @@ async def test_read_handler_returns_error_when_docker_missing() -> None:
     instance = cast(type[Any], handler_cls)(path="/test")
 
     with patch.object(SandboxManager, "docker_available", return_value=False):
-        result = await instance()
+        result = await instance({})
 
     assert "not installed" in result
 

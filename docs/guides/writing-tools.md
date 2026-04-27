@@ -11,15 +11,16 @@ input parameters; the `__call__` method implements execution.
 <!-- name: test_word_count_tool -->
 ```python
 # my_tools/word_count.py
+from typing import Any
 from axio.tool import ToolHandler
 
 
-class WordCount(ToolHandler):
+class WordCount(ToolHandler[Any]):
     """Count the number of words in the given text."""
 
     text: str
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         count = len(self.text.split())
         return f"The text contains {count} words."
 ```
@@ -89,12 +90,13 @@ Attach guards to control when the tool can run:
 <!--
 name: test_tool_with_guard
 ```python
+from typing import Any
 from axio.tool import Tool, ToolHandler
 
-class WordCount(ToolHandler):
+class WordCount(ToolHandler[Any]):
     """Count words."""
     text: str
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return str(len(self.text.split()))
 ```
 -->
@@ -136,6 +138,7 @@ For expected failures, raise `HandlerError` directly with a clear message:
 <!--
 name: test_error_handling
 ```python
+from typing import Any
 from pathlib import Path
 from axio.tool import ToolHandler
 ```
@@ -144,11 +147,11 @@ from axio.tool import ToolHandler
 ```python
 from axio.exceptions import HandlerError
 
-class ReadFile(ToolHandler):
+class ReadFile(ToolHandler[Any]):
     """Read a file."""
     path: str
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         p = Path(self.path)
         if not p.exists():
             raise HandlerError(f"File not found: {self.path}")

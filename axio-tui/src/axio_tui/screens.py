@@ -247,13 +247,13 @@ class ToolSelectScreen(ModalScreen[set[str] | None]):
     #tool-list { height: 1fr; }
     """
 
-    def __init__(self, groups: dict[str, list[Tool]], disabled: set[str]) -> None:
+    def __init__(self, groups: dict[str, list[Tool[Any]]], disabled: set[str]) -> None:
         super().__init__()
         self._groups = groups
-        self._all_tools: list[Tool] = [t for ts in groups.values() for t in ts]
+        self._all_tools: list[Tool[Any]] = [t for ts in groups.values() for t in ts]
         self._disabled = set(disabled)
         self._filter_query = ""
-        self._items: list[str | Tool] = []
+        self._items: list[str | Tool[Any]] = []
         self._rebuild_items()
 
     def _rebuild_items(self) -> None:
@@ -261,7 +261,7 @@ class ToolSelectScreen(ModalScreen[set[str] | None]):
         if q:
             self._items = [t for t in self._all_tools if q in t.name.lower() or q in t.description.lower()]
             return
-        items: list[str | Tool] = []
+        items: list[str | Tool[Any]] = []
         for pkg, tools in self._groups.items():
             items.append(pkg)
             items.extend(tools)
@@ -274,12 +274,12 @@ class ToolSelectScreen(ModalScreen[set[str] | None]):
         mark = "[*]" if n_on == total else ("[ ]" if n_on == 0 else "[-]")
         return f"{mark} ── {pkg} ({n_on}/{total}) ──"
 
-    def _tool_line(self, tool: Tool, *, indent: bool = False) -> str:
+    def _tool_line(self, tool: Tool[Any], *, indent: bool = False) -> str:
         mark = "[ ]" if tool.name in self._disabled else "[*]"
         prefix = "  " if indent else ""
         return f"{prefix}{mark} {tool.name:<22} {tool.description}"
 
-    def _format(self, item: str | Tool) -> str:
+    def _format(self, item: str | Tool[Any]) -> str:
         if isinstance(item, str):
             return self._group_header(item)
         return self._tool_line(item, indent=not self._filter_query)
@@ -323,7 +323,7 @@ class ToolSelectScreen(ModalScreen[set[str] | None]):
             self._rebuild_items()
             self._refresh_list()
 
-    def _select(self, item: str | Tool) -> None:
+    def _select(self, item: str | Tool[Any]) -> None:
         if isinstance(item, str):
             tools = self._groups[item]
             all_on = all(t.name not in self._disabled for t in tools)
@@ -400,7 +400,7 @@ class PluginHubScreen(ModalScreen[None]):
 
     def __init__(
         self,
-        tool_groups: dict[str, list[Tool]],
+        tool_groups: dict[str, list[Tool[Any]]],
         transport_available: list[str],
         transport_discovered: list[str],
         transport_model_counts: dict[str, int],
@@ -419,7 +419,7 @@ class PluginHubScreen(ModalScreen[None]):
     ) -> None:
         super().__init__()
         self._tool_groups = tool_groups
-        self._all_tools: list[Tool] = [t for ts in tool_groups.values() for t in ts]
+        self._all_tools: list[Tool[Any]] = [t for ts in tool_groups.values() for t in ts]
         self._transport_available = transport_available
         self._transport_discovered = transport_discovered
         self._transport_model_counts = transport_model_counts

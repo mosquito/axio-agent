@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
 
 from axio.permission import PermissionGuard
@@ -11,29 +11,29 @@ from axio.tool import ToolHandler
 from axio_tui.plugin import discover_guards, discover_tools, discover_transports
 
 
-class _EchoHandler(ToolHandler):
+class _EchoHandler(ToolHandler[Any]):
     """Echo back input text."""
 
     text: str = ""
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return self.text
 
 
-class _NoDocHandler(ToolHandler):
+class _NoDocHandler(ToolHandler[Any]):
     text: str = ""
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return self.text
 
 
-class _ConcurrentHandler(ToolHandler):
+class _ConcurrentHandler(ToolHandler[Any]):
     """Handler with concurrency limit."""
 
     _tool_concurrency: ClassVar[int | None] = 2
     text: str = ""
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return self.text
 
 

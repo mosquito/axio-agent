@@ -152,7 +152,7 @@ def _convert_messages(messages: list[Message]) -> list[dict[str, Any]]:
     return result
 
 
-def _convert_tools(tools: list[Tool]) -> list[dict[str, Any]]:
+def _convert_tools(tools: list[Tool[Any]]) -> list[dict[str, Any]]:
     """Convert axio Tool list to Anthropic tool dicts."""
     return [
         {
@@ -186,7 +186,7 @@ class AnthropicTransport(CompletionTransport):
                     pass
         return float(self.retry_base_delay * (2 ** (attempt - 1)))
 
-    def build_payload(self, messages: list[Message], tools: list[Tool], system: str) -> dict[str, Any]:
+    def build_payload(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> dict[str, Any]:
         converted_messages = _convert_messages(messages)
 
         system_blocks: list[dict[str, Any]] = []
@@ -285,10 +285,12 @@ class AnthropicTransport(CompletionTransport):
         )
         yield IterationEnd(iteration=0, stop_reason=stop, usage=usage_obj)
 
-    def stream(self, messages: list[Message], tools: list[Tool], system: str) -> AsyncIterator[StreamEvent]:
+    def stream(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> AsyncIterator[StreamEvent]:
         return self._do_stream(messages, tools, system)
 
-    async def _do_stream(self, messages: list[Message], tools: list[Tool], system: str) -> AsyncIterator[StreamEvent]:
+    async def _do_stream(
+        self, messages: list[Message], tools: list[Tool[Any]], system: str
+    ) -> AsyncIterator[StreamEvent]:
         assert self.session is not None, "session is required for streaming"
         url = f"{self.base_url.rstrip('/')}/messages"
         headers = {

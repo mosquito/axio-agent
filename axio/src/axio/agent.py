@@ -10,9 +10,9 @@ from collections.abc import AsyncGenerator, Iterable
 from dataclasses import dataclass, field
 from typing import Any, Self
 
-from axio.blocks import TextBlock, ToolResultBlock, ToolUseBlock
-from axio.context import ContextStore
-from axio.events import (
+from .blocks import TextBlock, ToolResultBlock, ToolUseBlock
+from .context import ContextStore
+from .events import (
     Error,
     IterationEnd,
     SessionEndEvent,
@@ -22,12 +22,12 @@ from axio.events import (
     ToolResult,
     ToolUseStart,
 )
-from axio.messages import Message
-from axio.selector import ToolSelector
-from axio.stream import AgentStream
-from axio.tool import Tool
-from axio.transport import CompletionTransport
-from axio.types import StopReason, Usage
+from .messages import Message
+from .selector import ToolSelector
+from .stream import AgentStream
+from .tool import Tool
+from .transport import CompletionTransport
+from .types import StopReason, Usage
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 class Agent:
     system: str
     transport: CompletionTransport
-    tools: list[Tool] = field(default_factory=list)
+    tools: list[Tool[Any]] = field(default_factory=list)
     selector: ToolSelector | None = field(default=None)
     max_iterations: int = field(default=50)
     last_iteration_message: Message | None = field(default=None)
@@ -74,7 +74,7 @@ class Agent:
         logger.info("Tools complete: %d total, %d errors", len(results), error_count)
         return results
 
-    def _find_tool(self, name: str) -> Tool | None:
+    def _find_tool(self, name: str) -> Tool[Any] | None:
         for tool in self.tools:
             if tool.name == name:
                 return tool
@@ -128,7 +128,7 @@ class Agent:
             blocks.append(ToolUseBlock(id=tid, name=info["name"], input=inp))
         return blocks, malformed
 
-    async def _select_tools(self, history: list[Message], tools: list[Tool]) -> Iterable[Tool]:
+    async def _select_tools(self, history: list[Message], tools: list[Tool[Any]]) -> Iterable[Tool[Any]]:
         if not tools:
             return []
         if not self.selector:

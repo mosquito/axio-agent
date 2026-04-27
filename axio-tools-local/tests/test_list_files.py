@@ -20,7 +20,7 @@ def tmp_cwd(tmp_path: Path) -> Generator[Path, None, None]:
 
 
 async def ls(directory: str = ".") -> str:
-    return await ListFiles(directory=directory)()
+    return await ListFiles(directory=directory)({})
 
 
 class TestListFilesBasic:

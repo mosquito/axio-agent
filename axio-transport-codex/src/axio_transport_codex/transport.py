@@ -70,7 +70,7 @@ def _strip_title(schema: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _convert_tools(tools: list[Tool]) -> list[dict[str, Any]]:
+def _convert_tools(tools: list[Tool[Any]]) -> list[dict[str, Any]]:
     """Convert axio Tool list to Responses API function tool dicts."""
     return [
         {
@@ -240,7 +240,7 @@ class CodexTransport(CompletionTransport):
             except Exception:
                 logger.warning("Failed to persist refreshed tokens", exc_info=True)
 
-    def build_payload(self, messages: list[Message], tools: list[Tool], system: str) -> dict[str, Any]:
+    def build_payload(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> dict[str, Any]:
         instructions, input_items = _convert_messages(messages, system)
         payload: dict[str, Any] = {
             "model": self.model.id,
@@ -376,10 +376,12 @@ class CodexTransport(CompletionTransport):
         )
         yield IterationEnd(iteration=0, stop_reason=stop_reason, usage=usage)
 
-    def stream(self, messages: list[Message], tools: list[Tool], system: str) -> AsyncIterator[StreamEvent]:
+    def stream(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> AsyncIterator[StreamEvent]:
         return self._do_stream(messages, tools, system)
 
-    async def _do_stream(self, messages: list[Message], tools: list[Tool], system: str) -> AsyncIterator[StreamEvent]:
+    async def _do_stream(
+        self, messages: list[Message], tools: list[Tool[Any]], system: str
+    ) -> AsyncIterator[StreamEvent]:
         assert self.session is not None, "session is required for streaming"
 
         logger.debug("Stream start: model=%s, messages=%d, tools=%d", self.model.id, len(messages), len(tools))

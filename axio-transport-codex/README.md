@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/axio-transport-codex)](https://pypi.org/project/axio-transport-codex/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-ChatGPT OAuth transport for [axio](https://github.com/axio-agent/axio) using the OpenAI Responses API.
+ChatGPT OAuth transport for [axio](https://github.com/mosquito/axio-agent) using the OpenAI Responses API.
 
 Authenticates via the same OAuth2 PKCE flow used by the ChatGPT desktop client — no API key purchase required; your ChatGPT subscription covers usage. Implements the OpenAI Responses API (not the legacy chat completions endpoint).
 
@@ -184,7 +184,7 @@ codex = "axio_transport_codex.tui:CodexSettingsScreen"
 
 ## Part of the axio ecosystem
 
-[axio](https://github.com/axio-agent/axio) · [axio-transport-openai](https://github.com/axio-agent/axio-transport-openai) · [axio-transport-anthropic](https://github.com/axio-agent/axio-transport-anthropic) · [axio-tui](https://github.com/axio-agent/axio-tui)
+[axio](https://github.com/mosquito/axio-agent) · [axio-transport-openai](https://github.com/mosquito/axio-agent) · [axio-transport-anthropic](https://github.com/mosquito/axio-agent) · [axio-tui](https://github.com/mosquito/axio-agent)
 
 ## License
 

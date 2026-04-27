@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Any
 
 from axio.events import StreamEvent
 from axio.messages import Message
@@ -11,7 +12,7 @@ from axio.transport import CompletionTransport, ImageGenTransport, STTTransport,
 
 
 class _MockCompletion:
-    def stream(self, messages: list[Message], tools: list[Tool], system: str) -> AsyncIterator[StreamEvent]:
+    def stream(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> AsyncIterator[StreamEvent]:
         raise NotImplementedError
 
     stream.__doc__ = "Mock"

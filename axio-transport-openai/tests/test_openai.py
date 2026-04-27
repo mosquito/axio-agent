@@ -25,11 +25,11 @@ from axio_transport_openai import OPENAI_MODELS, OpenAITransport, ThinkTagParser
 # ---------------------------------------------------------------------------
 
 
-class GetWeather(ToolHandler):
+class GetWeather(ToolHandler[Any]):
     location: str
     units: str = "celsius"
 
-    async def __call__(self) -> str:
+    async def __call__(self, context: Any) -> str:
         return f"Weather in {self.location}: 22{self.units[0]}"
 
 

@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/axio-tui-guards)](https://pypi.org/project/axio-tui-guards/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Permission guard plugins for [axio-tui](https://github.com/axio-agent/axio-tui).
+Permission guard plugins for [axio-tui](https://github.com/mosquito/axio-agent).
 
 Guards intercept tool calls before execution and can allow, modify, or deny them. Ships two guards: a path-access guard that asks the user before touching filesystem locations, and an LLM-based guard that reviews tool calls for safety.
 
@@ -33,10 +33,30 @@ pip install "axio-tui[guards]"
 
 Intercepts tool calls that contain filesystem paths (`file_path`, `filename`, `directory`, `path`, `cwd`). On the first access to a new directory it asks the user to **allow**, **allow all** (subtree), or **deny**.
 
+<!--
+name: test_readme_path_guard
+```python
+from typing import Any
+from axio.tool import ToolHandler
+
+class WriteFile(ToolHandler[Any]):
+    """Write content to a file."""
+    file_path: str
+    content: str
+    async def __call__(self, context: Any) -> str:
+        return "ok"
+
+class Shell(ToolHandler[Any]):
+    """Run a shell command."""
+    command: str
+    cwd: str = "."
+    async def __call__(self, context: Any) -> str:
+        return "ok"
+```
+-->
 <!-- name: test_readme_path_guard -->
 ```python
 from axio_tui_guards.guards import PathGuard
-from axio_tools_local.write_file import WriteFile
 from axio.tool import Tool
 
 guard = PathGuard()   # uses TUI prompt_fn by default
@@ -73,10 +93,23 @@ guard = LLMGuard(agent=reviewer, context=MemoryContextStore())
 
 Guards are applied in order — attach both for layered protection:
 
+<!--
+name: test_readme_composing
+```python
+from typing import Any
+from axio.tool import ToolHandler
+
+class Shell(ToolHandler[Any]):
+    """Run a shell command."""
+    command: str
+    cwd: str = "."
+    async def __call__(self, context: Any) -> str:
+        return "ok"
+```
+-->
 <!-- name: test_readme_composing -->
 ```python
 from axio_tui_guards.guards import PathGuard, LLMGuard
-from axio_tools_local.shell import Shell
 from axio.agent import Agent
 from axio.context import MemoryContextStore
 from axio.testing import StubTransport, make_text_response
@@ -117,7 +150,7 @@ llm  = "axio_tui_guards.guards:LLMGuard"
 
 ## Part of the axio ecosystem
 
-[axio](https://github.com/axio-agent/axio) · [axio-tui](https://github.com/axio-agent/axio-tui)
+[axio](https://github.com/mosquito/axio-agent) · [axio-tui](https://github.com/mosquito/axio-agent)
 
 ## License
 

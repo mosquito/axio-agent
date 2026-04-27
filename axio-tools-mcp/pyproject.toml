@@ -13,8 +13,8 @@ mcp = "axio_tools_mcp.plugin:MCPPlugin"
 
 
 [project.urls]
-Homepage = "https://github.com/axio-agent/axio-tools-mcp"
-Repository = "https://github.com/axio-agent/axio-tools-mcp"
+Homepage = "https://github.com/mosquito/axio-agent"
+Repository = "https://github.com/mosquito/axio-agent"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

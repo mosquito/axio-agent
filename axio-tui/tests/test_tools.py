@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from axio.agent import Agent
@@ -20,13 +21,13 @@ from axio_tui.tools import Confirm, StatusLine, SubAgent, VisionAnalyze
 class TestStatusLine:
     async def test_returns_ok(self) -> None:
         handler = StatusLine(message="working")
-        assert await handler() == "ok"
+        assert await handler({}) == "ok"
 
 
 class TestConfirm:
     async def test_returns_verdict(self) -> None:
         handler = Confirm(verdict="SAFE", reason="harmless", category="read")
-        assert await handler() == "SAFE"
+        assert await handler({}) == "SAFE"
 
     async def test_repr(self) -> None:
         handler = Confirm(verdict="DENY", reason="bad", category="exec")
@@ -36,7 +37,7 @@ class TestConfirm:
 
 
 class TestSubAgent:
-    def _make_agent(self, transport: StubTransport, tools: list[Tool] | None = None) -> Agent:
+    def _make_agent(self, transport: StubTransport, tools: list[Tool[Any]] | None = None) -> Agent:
         return Agent(system="test", tools=tools or [], transport=transport, max_iterations=5)
 
     async def test_returns_subagent_result(self) -> None:
@@ -49,7 +50,7 @@ class TestSubAgent:
         SubAgent._factory = factory
         try:
             handler = SubAgent(task="do something")
-            result = await handler()
+            result = await handler({})
             assert result == "sub-result"
         finally:
             SubAgent._factory = None
@@ -57,7 +58,7 @@ class TestSubAgent:
     async def test_no_factory_returns_error(self) -> None:
         SubAgent._factory = None
         handler = SubAgent(task="do something")
-        result = await handler()
+        result = await handler({})
         assert result == "SubAgent is not configured"
 
     async def test_context_forking(self) -> None:
@@ -80,7 +81,7 @@ class TestSubAgent:
         SubAgent._factory = factory
         try:
             handler = SubAgent(task="check context")
-            await handler()
+            await handler({})
             assert len(received_context) == 1
             history = await received_context[0].get_history()
             assert history[0].content[0].text == "hello"  # type: ignore[attr-defined]
@@ -97,7 +98,7 @@ class TestSubAgent:
         try:
             handler = SubAgent(task="boom")
             with pytest.raises(RuntimeError, match="factory failed"):
-                await handler()
+                await handler({})
         finally:
             SubAgent._factory = None
 
@@ -152,7 +153,7 @@ class TestVisionAnalyze:
     async def test_no_transport_returns_error(self) -> None:
         VisionAnalyze._transport = None
         handler = VisionAnalyze(path="img.png")
-        result = await handler()
+        result = await handler({})
         assert "not configured" in result
 
     async def test_file_not_found(self, tmp_path: Path) -> None:
@@ -161,7 +162,7 @@ class TestVisionAnalyze:
         try:
             os.chdir(tmp_path)
             handler = VisionAnalyze(path="missing.png")
-            result = await handler()
+            result = await handler({})
             assert "File not found" in result
         finally:
             os.chdir(old_cwd)
@@ -174,7 +175,7 @@ class TestVisionAnalyze:
         try:
             os.chdir(tmp_path)
             handler = VisionAnalyze(path="file.bmp")
-            result = await handler()
+            result = await handler({})
             assert "Unsupported image format" in result
         finally:
             os.chdir(old_cwd)
@@ -188,7 +189,7 @@ class TestVisionAnalyze:
         try:
             os.chdir(tmp_path)
             handler = VisionAnalyze(path="photo.png", prompt="What is this?")
-            result = await handler()
+            result = await handler({})
             assert result == "A red pixel"
         finally:
             os.chdir(old_cwd)
@@ -202,7 +203,9 @@ class TestVisionAnalyze:
         captured: list[list[Message]] = []
 
         class CapturingTransport(StubTransport):
-            def stream(self, messages: list[Message], tools: list[Tool], system: str) -> AsyncIterator[StreamEvent]:
+            def stream(
+                self, messages: list[Message], tools: list[Tool[Any]], system: str
+            ) -> AsyncIterator[StreamEvent]:
                 captured.append(messages)
                 return super().stream(messages, tools, system)
 
@@ -212,7 +215,7 @@ class TestVisionAnalyze:
         try:
             os.chdir(tmp_path)
             handler = VisionAnalyze(path="test.jpg", prompt="Describe it")
-            await handler()
+            await handler({})
             assert len(captured) == 1
             msg = captured[0][0]
             assert len(msg.content) == 2
