@@ -87,6 +87,5 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: uv sync --frozen --all-extras
-      - run: uv sync --frozen
       - run: uv run pytest -vv --cov=${{ matrix.package.cov }} --cov-report=term-missing
         working-directory: ${{ matrix.package.name }}
