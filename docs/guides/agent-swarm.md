@@ -19,14 +19,14 @@ flowchart TD
     O -->|delegate| CH[Challenger]
     O -->|delegate| AN[Analyst]
 
-    AR  -->|design.md|         WS[(workspace)]
-    BE  -->|solution.py|       WS
-    QA  -->|test_solution.py|  WS
-    SEC -->|security_review.md| WS
+    AR  -->|design| WS[(workspace)]
+    BE  -->|code|   WS
+    QA  -->|tests|  WS
+    SEC -->|review| WS
 
-    WS -->|reads artifacts| BE
-    WS -->|reads artifacts| QA
-    WS -->|reads artifacts| SEC
+    WS -->|reads| BE
+    WS -->|reads| QA
+    WS -->|reads| SEC
 ```
 
 The **orchestrator** receives a task, decides which specialists to involve, and calls

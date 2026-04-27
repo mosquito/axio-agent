@@ -25,17 +25,17 @@ Gas Town is an opinionated orchestration model with a few core ideas:
 flowchart TD
     User([Overseer]) -->|task| M[Mayor]
 
-    M -->|spawn_polecat x N| PC1[Polecat 1]
-    M -->|spawn_polecat x N| PC2[Polecat 2]
-    M -->|spawn_polecat x N| PCn["Polecat N"]
-    M -->|spawn_witness| W[Witness]
-    M -->|spawn_refinery| R[Refinery]
-    M -->|spawn_crew| C[Crew]
+    M -->|spawn polecat| PC1[Polecat 1]
+    M -->|spawn polecat| PC2[Polecat 2]
+    M -->|spawn polecat| PCn[Polecat N]
+    M -->|spawn witness| W[Witness]
+    M -->|spawn refinery| R[Refinery]
+    M -->|spawn crew| C[Crew]
 
-    PC1 -->|closes bead 1| DB[(beads.db)]
+    PC1 -->|closes bead 1| DB[(bead store)]
     PC2 -->|closes bead 2| DB
     PCn -->|closes bead N| DB
-    W   -->|reads bead store| DB
+    W   -->|reads beads| DB
     R   -->|notes results| DB
     M   -->|tracks convoy| DB
 ```
