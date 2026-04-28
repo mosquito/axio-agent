@@ -143,3 +143,84 @@ def test_mcp_schema_passed_through_to_tool() -> None:
     assert "optional_with_default" not in required
     assert "default" not in props["optional_no_default"]
     assert props["optional_with_default"].get("default") == "hello"
+
+
+async def test_schema_type_validated_at_runtime() -> None:
+    """Tool enforces MCP schema types at call time - wrong type raises HandlerError."""
+    session = _make_mock_session()
+    cast(AsyncMock, session.call_tool).return_value = CallToolResult(
+        content=[TextContent(type="text", text="ok")],
+        isError=False,
+    )
+
+    mcp_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {"count": {"type": "integer"}},
+        "required": ["count"],
+    }
+    handler = build_handler("t__count", "count_tool", "Count", session)
+    tool: Tool[Any] = Tool(
+        name="t__count",
+        description="Count",
+        handler=handler,
+        schema=MappingProxyType(mcp_schema),
+    )
+
+    from axio.exceptions import HandlerError
+
+    with pytest.raises(HandlerError, match="requires int"):
+        await tool(count="not-an-int")
+
+    # Correct type passes and reaches the server.
+    cast(AsyncMock, session.call_tool).reset_mock()
+    await tool(count=42)
+    cast(AsyncMock, session.call_tool).assert_awaited_once_with("count_tool", {"count": 42})
+
+
+async def test_schema_default_injected() -> None:
+    """Schema property defaults are injected before the call reaches the MCP server."""
+    session = _make_mock_session()
+    cast(AsyncMock, session.call_tool).return_value = CallToolResult(
+        content=[TextContent(type="text", text="ok")],
+        isError=False,
+    )
+
+    mcp_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "encoding": {"type": "string", "default": "utf-8"},
+        },
+        "required": ["path"],
+    }
+    handler = build_handler("fs__read", "read", "Read", session)
+    tool: Tool[Any] = Tool(
+        name="fs__read",
+        description="Read",
+        handler=handler,
+        schema=MappingProxyType(mcp_schema),
+    )
+
+    await tool(path="/tmp/file.txt")
+    cast(AsyncMock, session.call_tool).assert_awaited_once_with("read", {"path": "/tmp/file.txt", "encoding": "utf-8"})
+
+
+async def test_empty_properties_strips_all_extras() -> None:
+    """A schema with properties:{} accepts no kwargs - extras are silently dropped."""
+    session = _make_mock_session()
+    cast(AsyncMock, session.call_tool).return_value = CallToolResult(
+        content=[TextContent(type="text", text="ok")],
+        isError=False,
+    )
+
+    mcp_schema: dict[str, Any] = {"type": "object", "properties": {}}
+    handler = build_handler("sys__ping", "ping", "Ping", session)
+    tool: Tool[Any] = Tool(
+        name="sys__ping",
+        description="Ping",
+        handler=handler,
+        schema=MappingProxyType(mcp_schema),
+    )
+
+    await tool(_extra="ignored")
+    cast(AsyncMock, session.call_tool).assert_awaited_once_with("ping", {})

@@ -211,6 +211,8 @@ class DockerSandbox:
         network: bool | str = False,
         workdir: str = "/workspace",
         volumes: dict[str, str] | None = None,
+        named_volumes: dict[str, str] | None = None,
+        volumes_remove: bool = False,
         env: dict[str, str] | None = None,
         user: str = "",
         name: str = "",
@@ -240,7 +242,12 @@ class DockerSandbox:
                 A string sets ``NetworkMode`` explicitly, e.g. ``"host"``,
                 ``"bridge"``, or a named network like ``"my-project_default"``.
             workdir: Working directory inside the container.
-            volumes: Mapping of {container_path: host_path} to mount.
+            volumes: Mapping of {container_path: host_path} bind mounts.
+            named_volumes: Mapping of {container_path: volume_name} named Docker volumes.
+                Docker creates the volume automatically if it does not exist. Named volumes
+                persist across container restarts and can be shared between sandbox sessions.
+            volumes_remove: Remove named volumes on exit. Has no effect when attaching to
+                an existing container (``name=`` reuse) or when ``named_volumes`` is empty.
             env: Environment variables passed to all commands, e.g. {"PYTHONPATH": "/app"}.
             user: User to run as inside the container, e.g. "1000" or "nobody".
             name: Container name. If a container with this name already exists and
@@ -282,6 +289,8 @@ class DockerSandbox:
         self.network: bool | str = network
         self.workdir = workdir
         self.volumes: dict[str, str] = volumes or {}
+        self.named_volumes: dict[str, str] = named_volumes or {}
+        self.volumes_remove = volumes_remove
         self.env: dict[str, str] = env or {}
         self.user = user
         self.name = name
@@ -323,6 +332,7 @@ class DockerSandbox:
         if not self._attached:
             await self._ensure_image()
             binds = [f"{host}:{container}" for container, host in self.volumes.items()]
+            binds += [f"{vol}:{path}" for path, vol in self.named_volumes.items()]
             host_config: dict[str, Any] = {
                 "Init": True,
                 "Memory": parse_memory(self.memory),
@@ -396,16 +406,23 @@ class DockerSandbox:
         return self
 
     async def __aexit__(self, *exc: object) -> None:
+        was_attached = self._attached
         if self._container is not None:
-            if self.remove and not self._attached:
+            if self.remove and not was_attached:
                 with contextlib.suppress(Exception):
                     await self._container.delete(force=True)
                 logger.info("Removed sandbox container")
             else:
-                logger.info("Kept sandbox container (attached=%r, remove=%r)", self._attached, self.remove)
+                logger.info("Kept sandbox container (attached=%r, remove=%r)", was_attached, self.remove)
             self._container = None
             self._attached = False
         if self._client is not None:
+            if self.named_volumes and self.volumes_remove and not was_attached:
+                for vol_name in self.named_volumes.values():
+                    with contextlib.suppress(Exception):
+                        vol = await self._client.volumes.get(vol_name)  # type: ignore[no-untyped-call]
+                        await vol.delete()
+                logger.info("Removed %d named volume(s)", len(self.named_volumes))
             await self._client.close()
             self._client = None
         self._tools = None

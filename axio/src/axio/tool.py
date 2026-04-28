@@ -24,6 +24,32 @@ type JSONSchema = dict[str, Any]
 
 logger = logging.getLogger(__name__)
 
+# Maps JSON Schema primitive type names to Python types used for validation.
+SCHEMA_JSON_TYPE_MAP: dict[str, type] = {
+    "string": str,
+    "integer": int,
+    "number": float,
+    "boolean": bool,
+    "array": list,
+    "object": dict,
+}
+
+
+def hint_from_json_schema(prop_schema: dict[str, Any]) -> Any:
+    """Return the Python type hint for a single JSON Schema property definition."""
+    t = prop_schema.get("type")
+    if t is not None:
+        return SCHEMA_JSON_TYPE_MAP.get(t, object)
+    any_of = prop_schema.get("anyOf")
+    if any_of is not None:
+        non_null = [s for s in any_of if s.get("type") != "null"]
+        has_null = len(non_null) < len(any_of)
+        if len(non_null) == 1:
+            inner = hint_from_json_schema(non_null[0])
+            return (inner | None) if has_null else inner
+    return object
+
+
 # Set to the tool's ``context`` value before each handler invocation.
 # Handlers that cannot receive context as a parameter retrieve it via ``CONTEXT.get()``.
 CONTEXT: ContextVar[Any] = ContextVar("CONTEXT")
@@ -44,6 +70,7 @@ class Tool[T]:
         init=False, repr=False, compare=False, default_factory=lambda: MappingProxyType({})
     )
     _accepts_var_kwargs: bool = field(init=False, default=False, repr=False, compare=False)
+    _schema_explicit: bool = field(init=False, default=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not inspect.iscoroutinefunction(self.handler):
@@ -79,10 +106,23 @@ class Tool[T]:
         accepts_var_kwargs = sig is not None and any(
             p.kind is inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
         )
+        schema_explicit = bool(self.schema)
         if not self.schema:
             object.__setattr__(self, "schema", MappingProxyType(build_tool_schema(self.handler, hints=param_hints)))
+        # For **kwargs handlers with an explicit schema (e.g. MCP tools): synthesise
+        # _fields from schema properties so type validation and default injection work.
+        if accepts_var_kwargs and schema_explicit:
+            schema_props: dict[str, Any] = dict(self.schema).get("properties") or {}
+            schema_fields: dict[str, tuple[Any, FieldInfo]] = {}
+            for prop_name, prop_schema in schema_props.items():
+                hint = hint_from_json_schema(prop_schema)
+                default = prop_schema.get("default", MISSING)
+                schema_fields[prop_name] = (hint, FieldInfo(default=default))
+            if schema_fields:
+                param_fields = MappingProxyType(schema_fields)
         object.__setattr__(self, "_fields", param_fields)
         object.__setattr__(self, "_accepts_var_kwargs", accepts_var_kwargs)
+        object.__setattr__(self, "_schema_explicit", schema_explicit)
         if self.concurrency is not None:
             object.__setattr__(self, "_semaphore", asyncio.Semaphore(self.concurrency))
 
@@ -122,11 +162,11 @@ class Tool[T]:
             #    what the handler will actually receive.
             if not self._accepts_var_kwargs:
                 kwargs = {k: v for k, v in kwargs.items() if k in self._fields}
-            elif self.schema:
-                # **kwargs handlers with an explicit schema (e.g. MCP tools):
-                # filter to declared properties so unknown extras are not forwarded.
+            elif self._schema_explicit:
+                # **kwargs handlers with an explicit schema (e.g. MCP tools): filter
+                # to declared properties. Even an empty-properties schema strips all extras.
                 schema_props = self.schema.get("properties")
-                if schema_props:
+                if schema_props is not None:
                     kwargs = {k: v for k, v in kwargs.items() if k in schema_props}
 
             # 3. Guards run sequentially on stripped kwargs.

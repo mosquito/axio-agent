@@ -238,3 +238,35 @@ class TestValidateExtended:
         fi = FieldInfo()
         with pytest.raises(ValueError, match="must be one of"):
             fi.validate(None, "status", Literal["active", "inactive"])
+
+    def test_bool_rejected_for_int_hint(self) -> None:
+        fi = FieldInfo()
+        with pytest.raises(TypeError, match="requires int, got bool"):
+            fi.validate(True, "count", int)
+
+    def test_bool_rejected_for_float_hint(self) -> None:
+        fi = FieldInfo()
+        with pytest.raises(TypeError, match="requires float, got bool"):
+            fi.validate(False, "value", float)
+
+    def test_bool_accepted_for_bool_hint(self) -> None:
+        fi = FieldInfo()
+        fi.validate(True, "flag", bool)
+
+    def test_strict_bool_rejected_for_int(self) -> None:
+        fi = FieldInfo(strict=True)
+        with pytest.raises(TypeError, match="requires int, got bool"):
+            fi.validate(True, "count", int)
+
+    def test_list_str_rejects_int_element(self) -> None:
+        fi = FieldInfo()
+        with pytest.raises(TypeError, match="element 1 requires str"):
+            fi.validate(["ok", 42], "tags", list[str])
+
+    def test_list_int_accepts_all_ints(self) -> None:
+        fi = FieldInfo()
+        fi.validate([1, 2, 3], "nums", list[int])
+
+    def test_list_no_type_args_skips_element_check(self) -> None:
+        fi = FieldInfo()
+        fi.validate([1, "x", None], "items", list)  # bare list - no element check

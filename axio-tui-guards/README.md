@@ -115,14 +115,15 @@ Implement the `PermissionGuard` protocol to write your own:
 
 <!-- name: test_readme_custom_guard -->
 ```python
+from typing import Any
 from axio.permission import PermissionGuard
 from axio.exceptions import GuardError
 
 class MyGuard(PermissionGuard):
-    async def check(self, handler):
-        if "rm -rf" in getattr(handler, "command", ""):
+    async def check(self, tool: Any, **kwargs: Any) -> dict[str, Any]:
+        if "rm -rf" in str(kwargs.get("command", "")):
             raise GuardError("Refusing to run rm -rf")
-        return handler
+        return kwargs
 ```
 
 ## Plugin registration

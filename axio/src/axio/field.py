@@ -8,7 +8,70 @@ from dataclasses import dataclass
 from typing import Annotated, Any, Final, Literal, get_args, get_origin
 
 # Types for which basic isinstance checks are applied in non-strict mode.
-_PRIMITIVE_TYPES: frozenset[type] = frozenset({str, int, float, bool, list, dict})
+PRIMITIVE_TYPES: frozenset[type] = frozenset({str, int, float, bool, list, dict})
+
+
+def unwrap_hint(hint: Any) -> tuple[Any, bool]:
+    """Strip ``Annotated`` and ``Optional`` wrappers.
+
+    Returns ``(inner_type, is_optional)`` where *inner_type* has no Annotated or
+    Union-with-None wrappers and *is_optional* is True when ``None`` was one of
+    the Union members.
+    """
+    inner = get_args(hint)[0] if get_origin(hint) is typing.Annotated else hint
+    origin = get_origin(inner)
+    if origin is types.UnionType or origin is typing.Union:
+        inner_args = get_args(inner)
+        non_none = [a for a in inner_args if a is not type(None)]
+        is_optional = len(non_none) < len(inner_args)
+        inner = non_none[0] if len(non_none) == 1 else inner
+        return inner, is_optional
+    return inner, False
+
+
+def check_scalar(value: Any, name: str, b: type, strict: bool) -> None:
+    """Raise TypeError when *value* does not satisfy the scalar type *b*."""
+    if strict:
+        if not isinstance(value, b):
+            raise TypeError(f"Field '{name}' requires {b.__name__}, got {type(value).__name__}")
+    elif b is float and isinstance(value, int):
+        pass  # int is a valid JSON "number"
+    elif b in PRIMITIVE_TYPES and value is not None and not isinstance(value, b):
+        raise TypeError(f"Field '{name}' requires {b.__name__}, got {type(value).__name__}")
+
+
+def check_list_items(value: list[Any], name: str, inner: Any) -> None:
+    """Raise TypeError when any list element violates the generic item type."""
+    item_args = get_args(inner)
+    if not item_args:
+        return
+    item_b = bare_type(item_args[0])
+    if item_b not in PRIMITIVE_TYPES:
+        return
+    for idx, elem in enumerate(value):
+        if not isinstance(elem, item_b):
+            raise TypeError(f"Field '{name}' element {idx} requires {item_b.__name__}, got {type(elem).__name__}")
+
+
+def check_type(value: Any, name: str, inner: Any, *, strict: bool) -> None:
+    """Dispatch type validation for *value* against *inner* (already unwrapped)."""
+    origin = get_origin(inner)
+    b = bare_type(inner)
+
+    # bool is an int subclass - reject it for non-bool hints before numeric dispatch.
+    if isinstance(value, bool) and b is not bool:
+        raise TypeError(f"Field '{name}' requires {b.__name__}, got bool")
+
+    if origin is Literal:
+        allowed = get_args(inner)
+        if value not in allowed:
+            raise ValueError(f"Field '{name}' must be one of {list(allowed)!r}, got {value!r}")
+        return
+
+    check_scalar(value, name, b, strict)
+
+    if origin is list and isinstance(value, list):
+        check_list_items(value, name, inner)
 
 
 class MissingSentinel:
@@ -39,42 +102,10 @@ class FieldInfo:
 
     def validate(self, value: Any, name: str, hint: Any) -> None:
         """Validate *value* against this FieldInfo's constraints, raising if invalid."""
-        # Unwrap Annotated to reach the real type annotation.
-        inner = get_args(hint)[0] if get_origin(hint) is typing.Annotated else hint
-        # Unwrap Optional / Union to find the base type.
-        inner_origin = get_origin(inner)
-        is_optional = False
-        if inner_origin is types.UnionType or inner_origin is typing.Union:
-            inner_args = get_args(inner)
-            non_none = [a for a in inner_args if a is not type(None)]
-            is_optional = len(non_none) < len(inner_args)
-            if len(non_none) == 1:
-                inner = non_none[0]
-                inner_origin = get_origin(inner)
-
-        # None is valid for Optional fields; no further checks needed.
+        inner, is_optional = unwrap_hint(hint)
         if value is None and is_optional:
             return
-
-        # Literal: value must be one of the declared constants.
-        if inner_origin is Literal:
-            allowed = get_args(inner)
-            if value not in allowed:
-                raise ValueError(f"Field '{name}' must be one of {list(allowed)!r}, got {value!r}")
-        elif self.strict:
-            b = bare_type(hint)
-            if not isinstance(value, b):
-                raise TypeError(f"Field '{name}' requires {b.__name__}, got {type(value).__name__}")
-        else:
-            # Non-strict: isinstance check for known primitive types.
-            # None is accepted for Optional fields (handled above).
-            # int is accepted for float (JSON "number" covers both).
-            b = bare_type(hint)
-            if b is float and isinstance(value, int):
-                pass  # valid JSON number
-            elif b in _PRIMITIVE_TYPES and value is not None and not isinstance(value, b):
-                raise TypeError(f"Field '{name}' requires {b.__name__}, got {type(value).__name__}")
-
+        check_type(value, name, inner, strict=self.strict)
         if self.ge is not None and value < self.ge:
             raise ValueError(f"Field '{name}' must be >= {self.ge}")
         if self.le is not None and value > self.le:

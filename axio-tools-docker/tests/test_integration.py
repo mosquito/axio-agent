@@ -410,3 +410,51 @@ async def test_dns() -> None:
         result = await sb.exec("cat /etc/resolv.conf")
     assert "1.2.3.4" in result
     assert "5.6.7.8" in result
+
+
+@docker_available
+async def test_named_volume_persists_across_containers() -> None:
+    """Data written to a named volume survives container removal and is visible in a new container."""
+    vol_name = f"axio-test-vol-{__import__('uuid').uuid4().hex[:8]}"
+    try:
+        async with DockerSandbox(
+            DOCKER_URL,
+            image=IMAGE,
+            workdir="/workspace",
+            named_volumes={"/data": vol_name},
+        ) as sb:
+            await sb.write_file("/data/hello.txt", "persistent-content")
+
+        async with DockerSandbox(
+            DOCKER_URL,
+            image=IMAGE,
+            workdir="/workspace",
+            named_volumes={"/data": vol_name},
+            volumes_remove=True,
+        ) as sb2:
+            raw = await sb2.read_file_bytes("/data/hello.txt")
+
+        assert raw == b"persistent-content"
+    finally:
+        async with aiodocker.Docker(url=DOCKER_URL) as client:
+            with contextlib.suppress(Exception):
+                vol = await client.volumes.get(vol_name)  # type: ignore[no-untyped-call]
+                await vol.delete()
+
+
+@docker_available
+async def test_volumes_remove_cleans_up() -> None:
+    """volumes_remove=True deletes the named volume on exit."""
+    vol_name = f"axio-test-vol-{__import__('uuid').uuid4().hex[:8]}"
+    async with DockerSandbox(
+        DOCKER_URL,
+        image=IMAGE,
+        workdir="/workspace",
+        named_volumes={"/data": vol_name},
+        volumes_remove=True,
+    ) as sb:
+        await sb.exec("echo hello > /data/x.txt")
+
+    async with aiodocker.Docker(url=DOCKER_URL) as client:
+        with pytest.raises(aiodocker.exceptions.DockerError):
+            await client.volumes.get(vol_name)  # type: ignore[no-untyped-call]
