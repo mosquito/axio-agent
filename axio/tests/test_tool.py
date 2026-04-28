@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from types import MappingProxyType
 from typing import Annotated, Any
@@ -191,6 +192,44 @@ class TestToolCall:
         result = await t(n=21)
         assert result == "42"
         assert isinstance(result, str)
+
+    async def test_concurrent_tools_get_isolated_context(self) -> None:
+        """100 concurrent tool calls each see their own context, even across yields."""
+
+        async def handler() -> str:
+            before = CONTEXT.get()
+            await asyncio.sleep(0)  # yield — let other coroutines interleave
+            after = CONTEXT.get()
+            assert before == after, f"context changed during yield: {before!r} → {after!r}"
+            return str(before)
+
+        tools = [Tool(name=f"t{i}", handler=handler, context=i) for i in range(100)]
+        results = await asyncio.gather(*[t() for t in tools])
+        assert results == [str(i) for i in range(100)]
+
+    async def test_context_reset_after_call(self) -> None:
+        """CONTEXT must be restored to its previous value after a tool call completes.
+
+        Without token/reset, sequential calls in the same coroutine would leak
+        the tool's context value to subsequent code.
+        """
+        sentinel = object()
+        outer_token = CONTEXT.set(sentinel)
+        try:
+
+            async def handler() -> str:
+                return str(CONTEXT.get())
+
+            tool_a: Tool[str] = Tool(name="a", handler=handler, context="ctx_a")
+            tool_b: Tool[str] = Tool(name="b", handler=handler, context="ctx_b")
+
+            assert await tool_a() == "ctx_a"
+            assert CONTEXT.get() is sentinel, "tool_a leaked context to caller"
+
+            assert await tool_b() == "ctx_b"
+            assert CONTEXT.get() is sentinel, "tool_b leaked context to caller"
+        finally:
+            CONTEXT.reset(outer_token)
 
 
 class TestToolValidation:
