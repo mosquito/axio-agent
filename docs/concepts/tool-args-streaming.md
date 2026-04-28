@@ -128,7 +128,7 @@ class ToolFieldEnd:
 For `{"path": "/tmp/file"}` arriving as chunks `'{"pat'`, `'h":"/tm'`, `'p/file"}'`:
 
 1. Chunk `'{"pat'`: No events yet (incomplete key)
-2. Chunk `'h":"/tm'`: 
+2. Chunk `'h":"/tm'`:
    - `ToolFieldStart(key="path")`
    - `ToolFieldDelta(text="/tm")`
 3. Chunk `'p/file"}'`:

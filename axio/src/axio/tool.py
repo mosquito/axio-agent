@@ -80,13 +80,7 @@ class Tool[T]:
 
     async def __call__(self, **kwargs: Any) -> Any:
         async with self._acquire():
-            for guard in self.guards:
-                try:
-                    kwargs = await guard(self, **kwargs)
-                except GuardError:
-                    raise
-                except Exception as exc:
-                    raise GuardError(str(exc)) from exc
+            # 1. Inject defaults and validate - guards see fully materialised kwargs.
             try:
                 for name, (hint, fi) in self._fields.items():
                     if name not in kwargs:
@@ -99,7 +93,22 @@ class Tool[T]:
                 missing = [name for name in required if name not in kwargs]
                 if missing:
                     raise HandlerError(f"Missing required field(s): {', '.join(missing)}")
+            except HandlerError:
+                raise
+            except Exception as exc:
+                raise HandlerError(str(exc)) from exc
 
+            # 2. Guards run sequentially on materialised kwargs.
+            for guard in self.guards:
+                try:
+                    kwargs = await guard(self, **kwargs)
+                except GuardError:
+                    raise
+                except Exception as exc:
+                    raise GuardError(str(exc)) from exc
+
+            # 3. Execute handler.
+            try:
                 token = CONTEXT.set(self.context)
                 try:
                     return str(await self.handler(**kwargs))
