@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 
-from axio.field import FieldInfo
+from axio.field import MISSING, FieldInfo
 from mcp.types import TextContent
 
 from .session import MCPSession
@@ -36,7 +36,7 @@ def _build_fields(
         if prop_name in required:
             fields[prop_name] = (py_type, FieldInfo(description=description))
         else:
-            default = prop_schema.get("default")
+            default = prop_schema.get("default", MISSING)
             fields[prop_name] = (
                 py_type | None,
                 FieldInfo(description=description, default=default),

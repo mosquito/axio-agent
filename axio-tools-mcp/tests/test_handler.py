@@ -117,3 +117,27 @@ def test_type_mapping() -> None:
     assert props["i"] == {"type": "integer"}
     assert props["n"] == {"type": "number"}
     assert props["b"] == {"type": "boolean"}
+
+
+def test_optional_param_without_schema_default_has_no_default_key() -> None:
+    """Optional MCP params with no schema default must not emit 'default: null'."""
+    from axio.schema import build_tool_schema
+
+    session = _make_mock_session()
+    schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "required_field": {"type": "string"},
+            "optional_no_default": {"type": "string"},
+            "optional_with_default": {"type": "string", "default": "hello"},
+        },
+        "required": ["required_field"],
+    }
+    handler = build_handler("test__defaults", "defaults", "Default test", schema, session)
+    json_schema = build_tool_schema(handler)
+    props: dict[str, Any] = json_schema["properties"]
+
+    # optional param with no default in schema must not have 'default' key
+    assert "default" not in props["optional_no_default"]
+    # optional param with an explicit default must surface it
+    assert props["optional_with_default"].get("default") == "hello"
