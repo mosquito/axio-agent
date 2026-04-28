@@ -6,7 +6,7 @@
 
 Minimal, streaming-first, protocol-driven foundation for LLM-powered agents.
 
-One dependency (`pydantic`). Three protocols. An agent loop that just works.
+No dependencies. Three protocols. An agent loop that just works.
 
 ## Features
 

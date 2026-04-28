@@ -1,4 +1,4 @@
-"""Tests for axon.permission: guards."""
+"""Tests for axio.permission: guards."""
 
 from __future__ import annotations
 

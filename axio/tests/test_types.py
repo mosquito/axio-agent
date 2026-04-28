@@ -1,4 +1,4 @@
-"""Tests for axon.types: Usage, StopReason, ToolName, ToolCallID."""
+"""Tests for axio.types: Usage, StopReason, ToolName, ToolCallID."""
 
 import pytest
 

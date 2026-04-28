@@ -1,4 +1,4 @@
-"""Tests for axon.exceptions: hierarchy verification."""
+"""Tests for axio.exceptions: hierarchy verification."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from axio.exceptions import AxioError, GuardError, HandlerError, StreamError, To
 
 
 class TestHierarchy:
-    def test_tool_error_is_axon_error(self) -> None:
+    def test_tool_error_is_axio_error(self) -> None:
         assert issubclass(ToolError, AxioError)
 
     def test_guard_error_is_tool_error(self) -> None:
@@ -17,7 +17,7 @@ class TestHierarchy:
     def test_handler_error_is_tool_error(self) -> None:
         assert issubclass(HandlerError, ToolError)
 
-    def test_stream_error_is_axon_error(self) -> None:
+    def test_stream_error_is_axio_error(self) -> None:
         assert issubclass(StreamError, AxioError)
 
     def test_stream_error_not_tool_error(self) -> None:
@@ -37,7 +37,7 @@ class TestInstantiation:
         exc = StreamError("no data")
         assert str(exc) == "no data"
 
-    def test_catch_axon_error_catches_guard(self) -> None:
+    def test_catch_axio_error_catches_guard(self) -> None:
         with pytest.raises(AxioError):
             raise GuardError("test")
 
