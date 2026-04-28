@@ -74,9 +74,18 @@ The container is created on `__aenter__` and removed on `__aexit__` (`docker rm 
 Cleanup runs even when the body raises an exception:
 
 ```python
+from axio_tools_docker import DockerSandbox
+from axio import Agent
+
 async def run(ctx):
+    agent = Agent(
+        system="You are a coding assistant. Use the sandbox tools to run code safely.",
+        tools=ctx.sandbox.tools,
+    )
+
     async with DockerSandbox(image="alpine:latest") as sandbox:
         await agent.run("...", ctx)
+
     # container removed here (unless remove=False)
 ```
 
