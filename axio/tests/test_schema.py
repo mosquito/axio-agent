@@ -54,25 +54,38 @@ class TestPropertySchemaCollections:
     def test_dict_parameterised(self) -> None:
         assert property_schema(dict[str, Any]) == {"type": "object"}
 
+    def test_list_of_optional_str(self) -> None:
+        # list[str | None] — items are nullable strings, emitted as anyOf
+        assert property_schema(list[str | None]) == {
+            "type": "array",
+            "items": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        }
+
+    def test_list_of_literal(self) -> None:
+        assert property_schema(list[Literal["a", "b"]]) == {
+            "type": "array",
+            "items": {"enum": ["a", "b"]},
+        }
+
 
 class TestPropertySchemaOptional:
     def test_optional_str(self) -> None:
-        assert property_schema(str | None) == {"type": "string"}
+        assert property_schema(str | None) == {"anyOf": [{"type": "string"}, {"type": "null"}]}
 
     def test_optional_int(self) -> None:
-        assert property_schema(int | None) == {"type": "integer"}
+        assert property_schema(int | None) == {"anyOf": [{"type": "integer"}, {"type": "null"}]}
 
     def test_typing_optional(self) -> None:
-        assert property_schema(Optional[str]) == {"type": "string"}  # noqa: UP045
+        assert property_schema(Optional[str]) == {"anyOf": [{"type": "string"}, {"type": "null"}]}  # noqa: UP045
 
     def test_union_multiple_non_none(self) -> None:
         result = property_schema(str | int)
         assert result == {"anyOf": [{"type": "string"}, {"type": "integer"}]}
 
     def test_union_none_first(self) -> None:
-        # None | str should still resolve to string
+        # None | str — None is filtered out; str + null emitted as anyOf
         result = property_schema(None | str)
-        assert result == {"type": "string"}
+        assert result == {"anyOf": [{"type": "string"}, {"type": "null"}]}
 
 
 class TestPropertySchemaLiteral:
@@ -111,11 +124,23 @@ class TestPropertySchemaAnnotated:
 
     def test_annotated_optional(self) -> None:
         result = property_schema(Annotated[str | None, Field(description="optional")])
-        assert result == {"type": "string", "description": "optional"}
+        assert result == {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "optional"}
 
     def test_annotated_list(self) -> None:
         result = property_schema(Annotated[list[int], Field(description="ids")])
         assert result == {"type": "array", "items": {"type": "integer"}, "description": "ids"}
+
+    def test_annotated_optional_list(self) -> None:
+        # Annotated[list[str] | None, Field(...)] — optional list with metadata; null variant preserved
+        result = property_schema(Annotated[list[str] | None, Field(description="tags")])
+        assert result == {
+            "anyOf": [{"type": "array", "items": {"type": "string"}}, {"type": "null"}],
+            "description": "tags",
+        }
+
+    def test_annotated_with_bounds_on_optional_int(self) -> None:
+        result = property_schema(Annotated[int | None, Field(ge=0, le=100)])
+        assert result == {"anyOf": [{"type": "integer"}, {"type": "null"}], "minimum": 0, "maximum": 100}
 
     def test_non_fieldinfo_annotation_ignored(self) -> None:
         # Annotated with a non-FieldInfo metadata item - should not crash
@@ -306,11 +331,11 @@ class TestBuildToolSchemaTypeMapping:
 
         assert build_tool_schema(f)["properties"]["data"] == {"type": "object"}
 
-    def test_optional_field_unwrapped(self) -> None:
+    def test_optional_field_nullable(self) -> None:
         async def f(value: str | None) -> str:
             return str(value)
 
-        assert build_tool_schema(f)["properties"]["value"] == {"type": "string"}
+        assert build_tool_schema(f)["properties"]["value"] == {"anyOf": [{"type": "string"}, {"type": "null"}]}
 
     def test_literal_field(self) -> None:
         async def f(direction: Literal["left", "right"]) -> str:
@@ -346,3 +371,24 @@ class TestBuildToolSchemaTypeMapping:
         hints = {"x": int}  # deliberately wrong to prove hints= is used
         schema = build_tool_schema(f, hints=hints)
         assert schema["properties"]["x"] == {"type": "integer"}
+
+    def test_py_default_emitted_in_schema(self) -> None:
+        async def f(limit: int = 10) -> str:
+            return str(limit)
+
+        prop = build_tool_schema(f)["properties"]["limit"]
+        assert prop.get("default") == 10
+
+    def test_field_default_emitted_in_schema(self) -> None:
+        async def f(limit: Annotated[int, Field(default=20)]) -> str:
+            return str(limit)
+
+        prop = build_tool_schema(f)["properties"]["limit"]
+        assert prop.get("default") == 20
+
+    def test_no_default_key_when_no_default(self) -> None:
+        async def f(query: str) -> str:
+            return query
+
+        prop = build_tool_schema(f)["properties"]["query"]
+        assert "default" not in prop

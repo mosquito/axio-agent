@@ -26,7 +26,6 @@ def make_orchestrator(roster: str, sandbox_context: str = "") -> Agent:
     """Return the Orchestrator agent with *roster* embedded in its system prompt."""
     preamble = f"{sandbox_context}\n\n---\n\n" if sandbox_context else ""
     return Agent(
-        max_iterations=200,
         system=f"""\
 {preamble}You are a tech lead managing a team of specialist agents.
 Take the user's task and deliver a complete, high-quality result by coordinating

@@ -414,7 +414,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--image", default="python:3.12-slim", help="Docker image for the sandbox")
     parser.add_argument("--memory", default="512m", help="Container memory limit (default: 512m)")
     parser.add_argument("--cpus", type=float, default=2.0, help="Container CPU limit (default: 2.0)")
-    parser.add_argument("--network", action="store_true", help="Enable network access inside the container")
+    parser.add_argument("--no-network", action="store_true", help="Disable network access inside the container")
     return parser.parse_args()
 
 
@@ -466,7 +466,7 @@ async def main() -> None:
                 image=args.image,
                 memory=args.memory,
                 cpus=str(args.cpus),
-                network=args.network,
+                network=not args.no_network,
                 volumes={"/workspace": str(workspace)},
                 workdir="/workspace",
                 name=sandbox_name,

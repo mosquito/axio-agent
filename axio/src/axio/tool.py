@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
@@ -42,6 +43,10 @@ class Tool[T]:
     )
 
     def __post_init__(self) -> None:
+        if not inspect.iscoroutinefunction(self.handler):
+            raise TypeError(
+                f"Tool {self.name!r} handler {self.handler!r} must be an async function (coroutinefunction)."
+            )
         if not self.description:
             object.__setattr__(self, "description", self.handler.__doc__ or "")
         hints = get_type_hints(self.handler, include_extras=True)

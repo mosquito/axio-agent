@@ -40,14 +40,23 @@ def property_schema(annotation: Any) -> dict[str, Any]:
                 schema["minimum"] = field_info.ge
             if field_info.le is not None:
                 schema["maximum"] = field_info.le
+            if field_info.default is not MISSING:
+                schema["default"] = field_info.default
         return schema
 
     # X | None  or  Optional[X]  (both UnionType and Union)
     if origin is types.UnionType or origin is typing.Union:
         non_none = [a for a in args if a is not type(None)]
+        has_none = len(non_none) < len(args)
         if len(non_none) == 1:
-            return property_schema(non_none[0])
-        return {"anyOf": [property_schema(a) for a in non_none]}
+            base = property_schema(non_none[0])
+            if has_none:
+                return {"anyOf": [base, {"type": "null"}]}
+            return base
+        parts = [property_schema(a) for a in non_none]
+        if has_none:
+            parts.append({"type": "null"})
+        return {"anyOf": parts}
 
     # Literal["a", "b", ...]
     if origin is Literal:
@@ -111,7 +120,7 @@ def build_tool_schema(
         if sig is not None and name in sig.parameters and sig.parameters[name].kind in VAR_KINDS:
             continue
 
-        properties[name] = property_schema(hint)
+        prop = property_schema(hint)
 
         fi = get_field_info(hint)
         has_fi_default = fi is not None and fi.default is not MISSING
@@ -119,6 +128,14 @@ def build_tool_schema(
             sig is not None and name in sig.parameters and sig.parameters[name].default is not inspect.Parameter.empty
         )
         has_class_default = isinstance(fn, type) and name in fn.__dict__
+
+        # Emit default from signature when not already set by FieldInfo
+        if has_sig_default and "default" not in prop:
+            sig_default = sig.parameters[name].default  # type: ignore[union-attr]
+            prop["default"] = sig_default
+
+        properties[name] = prop
+
         if not has_fi_default and not has_sig_default and not has_class_default:
             required.append(name)
 

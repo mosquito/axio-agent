@@ -50,7 +50,12 @@ the host is /workspace - all project reads and writes happen there.
 Paths inside the container differ from host paths; do not assume they match.
 You have full root access inside this sandbox: install any packages, compilers,
 or CLI tools you need via shell (apt, pip, npm, cargo, …). Modify system files
-freely. This container is yours - treat it that way."""
+freely. This container is yours - treat it that way.
+
+Tool discipline
+---------------
+Only call tools that are declared in your tool definitions.
+Never guess or invent a tool name. If a tool is not in your list, it does not exist."""
 
 # ---------------------------------------------------------------------------
 # Read-only analyst prototype
@@ -121,9 +126,9 @@ async def analyze(
     analyst_transport = transport_for("analyst", context["transport"], context["role_models"])
     tb = context["toolbox"]
     read_tools = [tb[k] for k in ("list_files", "read_file") if k in tb]
-    analyst_system = f"{SANDBOX_CONTEXT}\n\n---\n\n{ANALYST.system}"
+    analyst_system = f"Workspace root: {WORKDIR}\n\n---\n\n{ANALYST.system}"
     analyst = ANALYST.copy(transport=analyst_transport, tools=read_tools, max_iterations=10, system=analyst_system)
-    stream = analyst.run_stream(f"Workspace: {WORKDIR}\n\n{task}", MemoryContextStore())
+    stream = analyst.run_stream(task, MemoryContextStore())
     parts: list[str] = []
     async for event in stream:
         await context["on_event"](agent_id, event)

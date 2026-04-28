@@ -59,6 +59,13 @@ class TestBuildSchema:
 
 
 class TestTool:
+    def test_sync_handler_raises_type_error(self) -> None:
+        def sync_fn() -> str:
+            return "sync"
+
+        with pytest.raises(TypeError, match="async"):
+            Tool(name="t", description="t", handler=sync_fn)  # type: ignore[arg-type]
+
     def test_no_guards(self) -> None:
         t: Tool[Any] = Tool(name="echo", description="test", handler=_empty)
         assert t.guards == ()
@@ -85,6 +92,23 @@ class TestTool:
     def test_concurrency_default_none(self) -> None:
         t: Tool[Any] = Tool(name="c", description="concurrent", handler=_empty)
         assert t.concurrency is None
+
+    async def test_concurrency_limits_parallel_calls(self) -> None:
+        """concurrency=N must prevent more than N simultaneous handler executions."""
+        running = 0
+        max_running = 0
+
+        async def handler() -> str:
+            nonlocal running, max_running
+            running += 1
+            max_running = max(max_running, running)
+            await asyncio.sleep(0)
+            running -= 1
+            return "ok"
+
+        t: Tool[Any] = Tool(name="t", handler=handler, concurrency=3)
+        await asyncio.gather(*[t() for _ in range(10)])
+        assert max_running <= 3
 
     def test_frozen(self) -> None:
         t: Tool[Any] = Tool(name="t", description="t", handler=_empty)
