@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextvars
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
@@ -96,12 +95,11 @@ class Tool[T]:
                 if missing:
                     raise HandlerError(f"Missing required field(s): {', '.join(missing)}")
 
-                async def _run() -> str:
-                    CONTEXT.set(self.context)
+                token = CONTEXT.set(self.context)
+                try:
                     return str(await self.handler(**kwargs))
-
-                ctx = contextvars.copy_context()
-                return await ctx.run(_run)
+                finally:
+                    CONTEXT.reset(token)
             except HandlerError:
                 raise
             except Exception as exc:
