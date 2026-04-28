@@ -118,7 +118,18 @@ class Tool[T]:
             except Exception as exc:
                 raise HandlerError(str(exc)) from exc
 
-            # 2. Guards run sequentially on materialised kwargs.
+            # 2. Strip caller-supplied extras before guards so they only see
+            #    what the handler will actually receive.
+            if not self._accepts_var_kwargs:
+                kwargs = {k: v for k, v in kwargs.items() if k in self._fields}
+            elif self.schema:
+                # **kwargs handlers with an explicit schema (e.g. MCP tools):
+                # filter to declared properties so unknown extras are not forwarded.
+                schema_props = self.schema.get("properties")
+                if schema_props:
+                    kwargs = {k: v for k, v in kwargs.items() if k in schema_props}
+
+            # 3. Guards run sequentially on stripped kwargs.
             for guard in self.guards:
                 try:
                     kwargs = await guard(self, **kwargs)
@@ -127,7 +138,7 @@ class Tool[T]:
                 except Exception as exc:
                     raise GuardError(str(exc)) from exc
 
-            # 3. Execute handler - strip stray kwargs unless handler accepts **kwargs.
+            # 4. Execute handler - strip any guard-injected stray kwargs.
             try:
                 if not self._accepts_var_kwargs:
                     kwargs = {k: v for k, v in kwargs.items() if k in self._fields}

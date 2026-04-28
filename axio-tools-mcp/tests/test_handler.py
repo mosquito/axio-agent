@@ -80,6 +80,37 @@ def test_handler_metadata() -> None:
     assert handler.__doc__ == "Does stuff"
 
 
+async def test_unknown_extras_filtered_by_schema() -> None:
+    """Unknown kwargs are filtered to schema properties before reaching the MCP server.
+
+    Tool.__call__ filters **kwargs handlers to declared schema properties before
+    guards and before execution, so unknown extras are not forwarded.
+    """
+    session = _make_mock_session()
+    cast(AsyncMock, session.call_tool).return_value = CallToolResult(
+        content=[TextContent(type="text", text="ok")],
+        isError=False,
+    )
+
+    mcp_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {"path": {"type": "string"}},
+        "required": ["path"],
+    }
+    handler = build_handler("fs__read", "read", "Read file", session)
+    tool: Tool[Any] = Tool(
+        name="fs__read",
+        description="Read file",
+        handler=handler,
+        schema=MappingProxyType(mcp_schema),
+    )
+
+    await tool(path="/tmp/file.txt", _unknown_extra="should-be-dropped")
+
+    # Only the declared schema property must reach the MCP server.
+    cast(AsyncMock, session.call_tool).assert_awaited_once_with("read", {"path": "/tmp/file.txt"})
+
+
 def test_mcp_schema_passed_through_to_tool() -> None:
     """Tool.input_schema is the original MCP schema - not re-derived from annotations.
 

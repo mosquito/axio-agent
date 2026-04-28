@@ -187,3 +187,54 @@ class TestBareType:
 
     def test_non_type_returns_object(self) -> None:
         assert bare_type(42) is object
+
+    def test_generic_list(self) -> None:
+        assert bare_type(list[int]) is list
+
+    def test_generic_dict(self) -> None:
+        assert bare_type(dict[str, int]) is dict
+
+    def test_generic_optional_list(self) -> None:
+        assert bare_type(list[str] | None) is list
+
+
+class TestValidateExtended:
+    def test_list_type_accepts_list(self) -> None:
+        fi = FieldInfo()
+        fi.validate([1, 2, 3], "items", list[int])
+
+    def test_list_type_rejects_non_list(self) -> None:
+        fi = FieldInfo()
+        with pytest.raises(TypeError, match="requires list"):
+            fi.validate("not a list", "items", list[int])
+
+    def test_float_accepts_int(self) -> None:
+        fi = FieldInfo()
+        fi.validate(1, "value", float)  # int is a valid JSON "number"
+
+    def test_float_accepts_float(self) -> None:
+        fi = FieldInfo()
+        fi.validate(1.5, "value", float)
+
+    def test_strict_float_rejects_int(self) -> None:
+        fi = FieldInfo(strict=True)
+        with pytest.raises(TypeError, match="requires float"):
+            fi.validate(1, "value", float)
+
+    def test_optional_literal_accepts_none(self) -> None:
+        fi = FieldInfo()
+        fi.validate(None, "status", Literal["active", "inactive"] | None)
+
+    def test_optional_literal_accepts_valid_value(self) -> None:
+        fi = FieldInfo()
+        fi.validate("active", "status", Literal["active", "inactive"] | None)
+
+    def test_optional_literal_rejects_invalid_value(self) -> None:
+        fi = FieldInfo()
+        with pytest.raises(ValueError, match="must be one of"):
+            fi.validate("deleted", "status", Literal["active", "inactive"] | None)
+
+    def test_non_optional_literal_rejects_none(self) -> None:
+        fi = FieldInfo()
+        with pytest.raises(ValueError, match="must be one of"):
+            fi.validate(None, "status", Literal["active", "inactive"])

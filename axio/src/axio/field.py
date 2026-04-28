@@ -41,13 +41,20 @@ class FieldInfo:
         """Validate *value* against this FieldInfo's constraints, raising if invalid."""
         # Unwrap Annotated to reach the real type annotation.
         inner = get_args(hint)[0] if get_origin(hint) is typing.Annotated else hint
-        # Unwrap Optional / Union to find the base type (None is allowed, not type-checked).
+        # Unwrap Optional / Union to find the base type.
         inner_origin = get_origin(inner)
+        is_optional = False
         if inner_origin is types.UnionType or inner_origin is typing.Union:
-            non_none = [a for a in get_args(inner) if a is not type(None)]
+            inner_args = get_args(inner)
+            non_none = [a for a in inner_args if a is not type(None)]
+            is_optional = len(non_none) < len(inner_args)
             if len(non_none) == 1:
                 inner = non_none[0]
                 inner_origin = get_origin(inner)
+
+        # None is valid for Optional fields; no further checks needed.
+        if value is None and is_optional:
+            return
 
         # Literal: value must be one of the declared constants.
         if inner_origin is Literal:
@@ -60,9 +67,12 @@ class FieldInfo:
                 raise TypeError(f"Field '{name}' requires {b.__name__}, got {type(value).__name__}")
         else:
             # Non-strict: isinstance check for known primitive types.
-            # None is accepted for Optional fields without a further check.
+            # None is accepted for Optional fields (handled above).
+            # int is accepted for float (JSON "number" covers both).
             b = bare_type(hint)
-            if b in _PRIMITIVE_TYPES and value is not None and not isinstance(value, b):
+            if b is float and isinstance(value, int):
+                pass  # valid JSON number
+            elif b in _PRIMITIVE_TYPES and value is not None and not isinstance(value, b):
                 raise TypeError(f"Field '{name}' requires {b.__name__}, got {type(value).__name__}")
 
         if self.ge is not None and value < self.ge:
@@ -108,7 +118,7 @@ def get_field_info(annotation: Any) -> FieldInfo | None:
 
 
 def bare_type(hint: Any) -> type:
-    """Return the base Python type, stripping ``Annotated`` and ``Optional`` wrappers."""
+    """Return the base Python type, stripping ``Annotated``, ``Optional``, and generic wrappers."""
     origin = get_origin(hint)
     args = get_args(hint)
     if origin is typing.Annotated:
@@ -116,4 +126,7 @@ def bare_type(hint: Any) -> type:
     if origin is types.UnionType or origin is typing.Union:
         non_none = [a for a in args if a is not type(None)]
         return bare_type(non_none[0]) if len(non_none) == 1 else object
+    if origin is not None:
+        # Generic alias: list[int] → list, dict[str, Any] → dict, etc.
+        return origin if isinstance(origin, type) else object
     return hint if isinstance(hint, type) else object

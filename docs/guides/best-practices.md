@@ -40,11 +40,11 @@ async def geo_locate(ip: str = "auto") -> str:
     return '{"city": "NYC", "country": "US"}'
 ```
 
-### Validate inputs with Pydantic
+### Validate inputs with Field
 
 Use `Annotated` + `Field` from `axio.field` for validation:
 
-<!-- name: test_pydantic_validation -->
+<!-- name: test_field_validation -->
 ```python
 from typing import Annotated
 from axio import Tool, Field
@@ -60,16 +60,17 @@ async def fetch_url(
     return f"fetched {url}"
 ```
 
-### Return structured data when appropriate
+### Return structured data as JSON
 
-Don't force everything to string - return dicts for structured results:
+Tool results are always coerced to `str`. Return `json.dumps(...)` for machine-readable output:
 
 <!-- name: test_structured_result -->
 ```python
+import json
 from axio import Tool
 
 
-async def calculate(a: float, b: float, operation: str) -> dict:
+async def calculate(a: float, b: float, operation: str) -> str:
     """Perform calculations."""
     ops = {
         "add": lambda a, b: a + b,
@@ -78,7 +79,7 @@ async def calculate(a: float, b: float, operation: str) -> dict:
         "divide": lambda a, b: a / b if b != 0 else 0,
     }
     result = ops[operation](a, b)
-    return {"result": result, "operation": operation}
+    return json.dumps({"result": result, "operation": operation})
 ```
 
 ## Error Handling

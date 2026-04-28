@@ -88,6 +88,35 @@ class TestPathGuard:
         assert result == {"command": "ls", "cwd": "/tmp/project"}
         assert "/tmp/project" in guard.allowed
 
+    async def test_bypass_via_decoy_kwarg_is_prevented(self) -> None:
+        """PathGuard is always prompted about the real handler kwarg, not a decoy extra.
+
+        Without the pre-guard strip, a caller could pass file_path="/tmp/safe" alongside
+        filename="/secret/x" - PathGuard checks "file_path" first (it appears earlier in
+        PATH_FIELDS than "filename"), approves /tmp/safe, and the handler then runs with
+        filename="/secret/x" unchecked. The pre-guard strip closes this gap.
+        """
+        seen_paths: list[str] = []
+
+        async def capture(msg: str) -> str:
+            seen_paths.append(msg)
+            return "y"  # allow whatever the guard asks about
+
+        guard = PathGuard(prompt_fn=capture)
+        tool_with_guard: Tool[Any] = Tool(
+            name="read_file",
+            handler=fake_read_file,
+            guards=(guard,),
+        )
+        # file_path is not a parameter of fake_read_file; it must be stripped before
+        # the guard runs so PathGuard cannot be fooled by the decoy.
+        await tool_with_guard(filename="/secret/file.txt", file_path="/tmp/decoy")
+
+        # Guard must have been prompted about the real kwarg only.
+        assert len(seen_paths) == 1
+        assert "/secret/file.txt" in seen_paths[0]
+        assert "/tmp/decoy" not in seen_paths[0]
+
     async def test_subdirectory_auto_allowed(self) -> None:
         guard = PathGuard(prompt_fn=self._allow)
         await guard.check(_write_tool, file_path="/home/user/project/src/main.py", content="x")

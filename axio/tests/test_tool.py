@@ -223,6 +223,30 @@ class TestToolCall:
         await t(query="ls")
         assert received == [{"query": "ls", "cwd": "."}]
 
+    async def test_stray_caller_kwargs_stripped_before_guards(self) -> None:
+        """Caller-supplied kwargs not in _fields must be stripped before guards run.
+
+        Guards must not see caller extras that will be discarded; otherwise a guard
+        that inspects the first matching field could approve a decoy kwarg while the
+        real kwarg (in _fields) bypasses inspection.
+        """
+        seen_by_guard: list[dict[str, Any]] = []
+
+        class _Spy(PermissionGuard):
+            async def check(self, tool: Tool[Any], **kwargs: Any) -> dict[str, Any]:
+                seen_by_guard.append(dict(kwargs))
+                return kwargs
+
+        async def f(filename: str) -> str:
+            return filename
+
+        t: Tool[Any] = Tool(name="f", handler=f, guards=(_Spy(),))
+        # Pass a decoy kwarg (file_path) that is NOT in _fields alongside the real one.
+        result = await t(filename="/real/path", file_path="/decoy")
+        assert result == "/real/path"
+        # Guard must only have seen the kwarg the handler actually accepts.
+        assert seen_by_guard == [{"filename": "/real/path"}]
+
     async def test_stray_kwargs_filtered_before_handler(self) -> None:
         """Unknown kwargs added by a guard must not reach a handler that doesn't accept **kwargs."""
         received: list[dict[str, Any]] = []
