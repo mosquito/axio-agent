@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 import pytest
 
@@ -77,6 +77,38 @@ class TestFieldInfo:
         fi = FieldInfo(description="x")
         with pytest.raises(Exception):
             fi.description = "y"  # type: ignore[misc]
+
+    def test_literal_valid(self) -> None:
+        fi = FieldInfo()
+        fi.validate("left", "dir", Literal["left", "right"])
+
+    def test_literal_invalid(self) -> None:
+        fi = FieldInfo()
+        with pytest.raises(ValueError, match="must be one of"):
+            fi.validate("up", "dir", Literal["left", "right"])
+
+    def test_literal_in_annotated(self) -> None:
+        fi = FieldInfo(description="direction")
+        with pytest.raises(ValueError):
+            fi.validate("up", "dir", Annotated[Literal["left", "right"], fi])
+
+    def test_nonstrict_type_check_rejects_wrong_type(self) -> None:
+        fi = FieldInfo()
+        with pytest.raises(TypeError, match="requires int"):
+            fi.validate("oops", "count", int)
+
+    def test_nonstrict_type_check_accepts_correct_type(self) -> None:
+        fi = FieldInfo()
+        fi.validate(42, "count", int)
+
+    def test_nonstrict_none_allowed_for_optional(self) -> None:
+        fi = FieldInfo()
+        fi.validate(None, "value", str | None)  # None is valid for Optional
+
+    def test_nonstrict_wrong_type_for_optional(self) -> None:
+        fi = FieldInfo()
+        with pytest.raises(TypeError, match="requires str"):
+            fi.validate(42, "value", str | None)
 
 
 class TestField:

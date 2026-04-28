@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from types import MappingProxyType
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import pytest
 
@@ -206,6 +206,55 @@ class TestToolCall:
         t: Tool[Any] = Tool(name="f", handler=f, guards=(_Spy(),))
         await t(query="ls")
         assert received == [{"query": "ls", "cwd": "."}]
+
+    async def test_guard_sees_strictstr_with_sig_default(self) -> None:
+        """Guards see sig defaults even when the param has an existing FieldInfo (e.g. StrictStr)."""
+        received: list[dict[str, Any]] = []
+
+        class _Spy(PermissionGuard):
+            async def check(self, tool: Tool[Any], **kwargs: Any) -> dict[str, Any]:
+                received.append(dict(kwargs))
+                return kwargs
+
+        async def f(query: str, cwd: StrictStr = ".") -> str:
+            return f"{query}@{cwd}"
+
+        t: Tool[Any] = Tool(name="f", handler=f, guards=(_Spy(),))
+        await t(query="ls")
+        assert received == [{"query": "ls", "cwd": "."}]
+
+    async def test_stray_kwargs_filtered_before_handler(self) -> None:
+        """Unknown kwargs added by a guard must not reach a handler that doesn't accept **kwargs."""
+        received: list[dict[str, Any]] = []
+
+        class _Inject(PermissionGuard):
+            async def check(self, tool: Tool[Any], **kwargs: Any) -> dict[str, Any]:
+                return {**kwargs, "_stray": "injected"}
+
+        async def f(msg: str) -> str:
+            received.append({"msg": msg})
+            return msg
+
+        t: Tool[Any] = Tool(name="f", handler=f, guards=(_Inject(),))
+        result = await t(msg="hello")
+        assert result == "hello"
+        assert received == [{"msg": "hello"}]
+
+    async def test_stray_kwargs_passed_through_for_var_kwargs_handler(self) -> None:
+        """Handlers that accept **kwargs receive all guard-injected fields."""
+        received: list[dict[str, Any]] = []
+
+        class _Inject(PermissionGuard):
+            async def check(self, tool: Tool[Any], **kwargs: Any) -> dict[str, Any]:
+                return {**kwargs, "_extra": "yes"}
+
+        async def f(**kwargs: Any) -> str:
+            received.append(dict(kwargs))
+            return "ok"
+
+        t: Tool[Any] = Tool(name="f", handler=f, guards=(_Inject(),))
+        await t(msg="hello")
+        assert received == [{"msg": "hello", "_extra": "yes"}]
 
     async def test_handler_error_wrapping(self) -> None:
         async def _fail() -> str:
@@ -421,3 +470,58 @@ class TestToolCustomSchema:
         t: Tool[Any] = Tool(name="t", handler=_empty, schema=MappingProxyType(custom))
         assert "title" not in t.input_schema
         assert "title" not in t.input_schema["properties"].get("q", {})
+
+    def test_input_schema_deep_copy_prevents_mutation(self) -> None:
+        """Mutating input_schema must not affect the stored tool schema."""
+        t: Tool[Any] = Tool(name="t", handler=_msg)
+        schema_a = t.input_schema
+        schema_a["properties"]["msg"]["type"] = "mutated"
+        schema_b = t.input_schema
+        assert schema_b["properties"]["msg"]["type"] == "string"
+
+
+class TestToolTypeValidation:
+    async def test_wrong_scalar_type_raises(self) -> None:
+        async def f(count: int) -> str:
+            return str(count)
+
+        t: Tool[Any] = Tool(name="f", handler=f)
+        with pytest.raises(HandlerError, match="requires int"):
+            await t(count="oops")
+
+    async def test_correct_scalar_type_passes(self) -> None:
+        async def f(count: int) -> str:
+            return str(count)
+
+        t: Tool[Any] = Tool(name="f", handler=f)
+        assert await t(count=5) == "5"
+
+    async def test_literal_wrong_value_raises(self) -> None:
+        async def f(direction: Literal["left", "right"]) -> str:
+            return direction
+
+        t: Tool[Any] = Tool(name="f", handler=f)
+        with pytest.raises(HandlerError, match="must be one of"):
+            await t(direction="up")
+
+    async def test_literal_valid_value_passes(self) -> None:
+        async def f(direction: Literal["left", "right"]) -> str:
+            return direction
+
+        t: Tool[Any] = Tool(name="f", handler=f)
+        assert await t(direction="left") == "left"
+
+    async def test_none_allowed_for_optional(self) -> None:
+        async def f(value: str | None) -> str:
+            return str(value)
+
+        t: Tool[Any] = Tool(name="f", handler=f)
+        assert await t(value=None) == "None"
+
+    async def test_wrong_type_for_optional_raises(self) -> None:
+        async def f(value: str | None) -> str:
+            return str(value)
+
+        t: Tool[Any] = Tool(name="f", handler=f)
+        with pytest.raises(HandlerError, match="requires str"):
+            await t(value=42)

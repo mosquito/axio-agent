@@ -698,6 +698,7 @@ class AgentApp(App[None]):
                 name=t.name,
                 description=t.description,
                 handler=t.handler,
+                guards=t.guards,
                 schema=t.schema,
                 context=t.context,
                 concurrency=t.concurrency,

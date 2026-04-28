@@ -150,21 +150,23 @@ sequenceDiagram
 
     Agent->>Tool: __call__(**kwargs)
     Tool->>Tool: Acquire semaphore (if set)
+    Tool->>Tool: Inject defaults + validate types/bounds
     loop For each guard
         Tool->>Guard: check(tool, **kwargs)
         Guard-->>Tool: kwargs (or raise GuardError)
     end
-    Tool->>Handler: validate kwargs then call handler(**kwargs)
+    Tool->>Handler: handler(**kwargs)
     Handler-->>Tool: result string
     Tool-->>Agent: result
 ```
 
 1. The agent calls `tool(**kwargs)` with the input the model provided.
 2. If the tool has a concurrency limit, it acquires the semaphore.
-3. Each guard in the `guards` tuple is called sequentially with the `Tool` object and kwargs.
-4. Guards return a (possibly modified) kwargs dict to allow, or raise `GuardError` to deny.
-5. The handler is called with the validated kwargs.
-6. Any exception from the handler is wrapped in `HandlerError`.
+3. Missing fields with defaults are injected; provided fields are validated (type, Literal, bounds).
+4. Each guard in the `guards` tuple is called sequentially with the fully materialised kwargs.
+5. Guards return a (possibly modified) kwargs dict to allow, or raise `GuardError` to deny.
+6. The handler is called with the materialised kwargs (stray keys stripped unless handler accepts `**kwargs`).
+7. Any exception from the handler is wrapped in `HandlerError`.
 
 ## Exception hierarchy
 

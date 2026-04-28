@@ -5,7 +5,10 @@ from __future__ import annotations
 import types
 import typing
 from dataclasses import dataclass
-from typing import Annotated, Any, Final, get_args, get_origin
+from typing import Annotated, Any, Final, Literal, get_args, get_origin
+
+# Types for which basic isinstance checks are applied in non-strict mode.
+_PRIMITIVE_TYPES: frozenset[type] = frozenset({str, int, float, bool, list, dict})
 
 
 class MissingSentinel:
@@ -36,10 +39,32 @@ class FieldInfo:
 
     def validate(self, value: Any, name: str, hint: Any) -> None:
         """Validate *value* against this FieldInfo's constraints, raising if invalid."""
-        if self.strict:
+        # Unwrap Annotated to reach the real type annotation.
+        inner = get_args(hint)[0] if get_origin(hint) is typing.Annotated else hint
+        # Unwrap Optional / Union to find the base type (None is allowed, not type-checked).
+        inner_origin = get_origin(inner)
+        if inner_origin is types.UnionType or inner_origin is typing.Union:
+            non_none = [a for a in get_args(inner) if a is not type(None)]
+            if len(non_none) == 1:
+                inner = non_none[0]
+                inner_origin = get_origin(inner)
+
+        # Literal: value must be one of the declared constants.
+        if inner_origin is Literal:
+            allowed = get_args(inner)
+            if value not in allowed:
+                raise ValueError(f"Field '{name}' must be one of {list(allowed)!r}, got {value!r}")
+        elif self.strict:
             b = bare_type(hint)
             if not isinstance(value, b):
                 raise TypeError(f"Field '{name}' requires {b.__name__}, got {type(value).__name__}")
+        else:
+            # Non-strict: isinstance check for known primitive types.
+            # None is accepted for Optional fields without a further check.
+            b = bare_type(hint)
+            if b in _PRIMITIVE_TYPES and value is not None and not isinstance(value, b):
+                raise TypeError(f"Field '{name}' requires {b.__name__}, got {type(value).__name__}")
+
         if self.ge is not None and value < self.ge:
             raise ValueError(f"Field '{name}' must be >= {self.ge}")
         if self.le is not None and value > self.le:

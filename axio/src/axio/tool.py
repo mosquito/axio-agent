@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import inspect
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from dataclasses import replace as dc_replace
 from types import MappingProxyType
 from typing import Any, get_type_hints
 
@@ -38,9 +40,10 @@ class Tool[T]:
     context: T = field(default=MappingProxyType({}), compare=False)  # type: ignore[assignment]
     schema: MappingProxyType[str, Any] = field(default=MappingProxyType({}), repr=False, compare=False)
     _semaphore: asyncio.Semaphore | None = field(init=False, default=None, repr=False, compare=False)
-    _fields: Mapping[str, tuple[Any, FieldInfo | None]] = field(
+    _fields: Mapping[str, tuple[Any, FieldInfo]] = field(
         init=False, repr=False, compare=False, default_factory=lambda: MappingProxyType({})
     )
+    _accepts_var_kwargs: bool = field(init=False, default=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not inspect.iscoroutinefunction(self.handler):
@@ -63,18 +66,23 @@ class Tool[T]:
             sig = inspect.signature(self.handler)
         except (ValueError, TypeError):
             sig = None
-        fields: dict[str, tuple[Any, FieldInfo | None]] = {}
+        fields: dict[str, tuple[Any, FieldInfo]] = {}
         for name, hint in param_hints.items():
-            fi = get_field_info(hint)
-            if fi is None and sig is not None and name in sig.parameters:
+            fi = get_field_info(hint) or FieldInfo()
+            if sig is not None and name in sig.parameters:
                 param = sig.parameters[name]
-                if param.default is not inspect.Parameter.empty:
-                    fi = FieldInfo(default=param.default)
+                if param.default is not inspect.Parameter.empty and fi.default is MISSING:
+                    # Merge sig default into FieldInfo (covers StrictStr and plain defaults).
+                    fi = dc_replace(fi, default=param.default)
             fields[name] = (hint, fi)
         param_fields = MappingProxyType(fields)
+        accepts_var_kwargs = sig is not None and any(
+            p.kind is inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        )
         if not self.schema:
             object.__setattr__(self, "schema", MappingProxyType(build_tool_schema(self.handler, hints=param_hints)))
         object.__setattr__(self, "_fields", param_fields)
+        object.__setattr__(self, "_accepts_var_kwargs", accepts_var_kwargs)
         if self.concurrency is not None:
             object.__setattr__(self, "_semaphore", asyncio.Semaphore(self.concurrency))
 
@@ -88,7 +96,7 @@ class Tool[T]:
 
     @property
     def input_schema(self) -> JSONSchema:
-        return dict(self.schema)
+        return copy.deepcopy(dict(self.schema))
 
     async def __call__(self, **kwargs: Any) -> Any:
         async with self._acquire():
@@ -96,9 +104,9 @@ class Tool[T]:
             try:
                 for name, (hint, fi) in self._fields.items():
                     if name not in kwargs:
-                        if fi is not None and fi.default is not MISSING:
+                        if fi.default is not MISSING:
                             kwargs[name] = fi.default
-                    elif fi is not None:
+                    else:
                         fi.validate(kwargs[name], name, hint)
 
                 required = self.schema.get("required", [])
@@ -119,8 +127,10 @@ class Tool[T]:
                 except Exception as exc:
                     raise GuardError(str(exc)) from exc
 
-            # 3. Execute handler.
+            # 3. Execute handler - strip stray kwargs unless handler accepts **kwargs.
             try:
+                if not self._accepts_var_kwargs:
+                    kwargs = {k: v for k, v in kwargs.items() if k in self._fields}
                 token = CONTEXT.set(self.context)
                 try:
                     return str(await self.handler(**kwargs))
