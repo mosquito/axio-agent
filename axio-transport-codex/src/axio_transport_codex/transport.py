@@ -166,7 +166,7 @@ class CodexTransport(CompletionTransport):
     expires_at: str = ""
     account_id: str = ""
     base_url: str = CODEX_BASE_URL
-    model: ModelSpec = field(default_factory=lambda: CODEX_MODELS["gpt-4.1"])
+    model: ModelSpec = field(default_factory=lambda: CODEX_MODELS["o4-mini"])
     models: ModelRegistry = field(default_factory=lambda: ModelRegistry(CODEX_MODELS.values()))
     session: aiohttp.ClientSession | None = field(default=None, repr=False, compare=False)
     on_auth_refresh: Callable[[dict[str, str]], Awaitable[None]] | None = field(
@@ -488,10 +488,22 @@ class CodexTransport(CompletionTransport):
             model_id = item.get("id", item.get("slug", ""))
             if not model_id:
                 continue
-            # Use known spec if available, otherwise create a basic one
+            # Use known spec if available, otherwise build one from API data.
             if model_id in CODEX_MODELS:
                 specs.append(CODEX_MODELS[model_id])
             else:
-                specs.append(ModelSpec(id=model_id, capabilities=_TT))
+                specs.append(
+                    ModelSpec(
+                        id=model_id,
+                        capabilities=_TT,
+                        context_window=item.get("context_window", 128_000),
+                        max_output_tokens=item.get("max_output_tokens", 8_192),
+                    )
+                )
 
         self.models = ModelRegistry(specs) if specs else ModelRegistry(CODEX_MODELS.values())
+
+        # If the currently selected model was dropped from the API list, switch to
+        # the first available one so the transport stays usable out of the box.
+        if self.model.id not in self.models:
+            self.model = self.models.first()

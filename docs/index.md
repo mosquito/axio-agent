@@ -297,6 +297,22 @@ Axio's philosophy is thin abstraction over the prompt-completion loop,
 not a full framework with opinions about how you should structure your application.
 If that aligns with your needs - welcome.
 
+## Examples
+
+The [`examples/`](https://github.com/mosquito/axio-agent/tree/master/examples)
+directory contains runnable examples:
+
+- [`minimal.py`](https://github.com/mosquito/axio-agent/blob/master/examples/minimal.py) -
+  core agent loop with `StubTransport`; no API key needed
+- [`stream_tool_args.py`](https://github.com/mosquito/axio-agent/blob/master/examples/stream_tool_args.py) -
+  incremental streaming of tool call arguments with partial JSON decoding
+- [`codex_chat.py`](https://github.com/mosquito/axio-agent/blob/master/examples/codex_chat.py) -
+  CLI chat loop backed by a ChatGPT subscription via OAuth PKCE (no API key required)
+- [`agent_swarm/`](https://github.com/mosquito/axio-agent/tree/master/examples/agent_swarm) -
+  team of role-specialised agents; see the {doc}`guides/agent-swarm` guide
+- [`gas_town/`](https://github.com/mosquito/axio-agent/tree/master/examples/gas_town) -
+  multi-agent convoy following the Gas Town methodology; see the {doc}`guides/gas-town` guide
+
 ```{toctree}
 :maxdepth: 2
 :hidden:
