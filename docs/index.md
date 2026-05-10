@@ -16,18 +16,18 @@ tools, and permission guards.
 ::::{grid} 1 1 2 3
 :gutter: 3
 
-:::{grid-item-card} Quick Start
-:link: quick-start
-:link-type: doc
-
-Install the TUI and start chatting with an LLM agent in under a minute.
-:::
-
 :::{grid-item-card} Getting Started
 :link: getting-started
 :link-type: doc
 
-Write a minimal agent from scratch with the core library.
+Install the TUI or coding assistant and start chatting in under a minute.
+:::
+
+:::{grid-item-card} Quick Start
+:link: quick-start
+:link-type: doc
+
+Write your first agent in code with the core library.
 :::
 
 :::{grid-item-card} Core Concepts
@@ -257,41 +257,40 @@ Here's how Axio compares to other popular Python agent frameworks:
 | **Architecture** | Minimal core + protocols | Pydantic-native, validation-centric | Heavy abstraction layer | Multi-agent orchestration |
 | **Streaming** | All events typed, full tool visibility | Text streaming works; tool calls and final answer can't stream simultaneously | Added later, inconsistent | Limited |
 | **Tool definition** | Plain async function | Decorator + function signature → auto JSON schema | Functions + decorators | Class-based agents |
-| **Transport** | Pluggable protocol; you bring the client | Built-in 20+ providers, trivial to swap | Built-in, harder to swap | Azure OpenAI focused |
+| **Transport** | Pluggable protocol; OpenAI (+ any OpenAI-compatible endpoint), Anthropic, Google Gemini, Codex, or custom | Built-in 20+ providers, trivial to swap | Built-in, harder to swap | Azure OpenAI focused |
+| **Realtime / voice** | First-class via `RealtimeTransport` + `axio-audio` (Gemini Live, Vertex Live) | None | None | None |
+| **Multimodal** | text, vision, audio, video input; image + video generation | text + vision | text + vision | text + vision |
 | **Multi-agent** | Built-in (`subagent` tool, shared context stores) | Agent-as-tool pattern; not the primary focus | Via LangGraph | Native |
 | **Learning curve** | Low - ~100 lines for an agent | Low for Pydantic/FastAPI users; moderate otherwise | Medium - many abstractions | High - complex configs |
-| **Scope** | Agent loop + extensions | Agent + structured outputs; no RAG, no built-in memory | Full stack (RAG, chains, etc.) | Multi-agent scenarios |
-| **API stability** | Stable | Beta (v0.x, breaking changes possible) | Stable | Stable |
+| **Scope** | Agent loop + extensions + voice | Agent + structured outputs; no RAG, no built-in memory | Full stack (RAG, chains, etc.) | Multi-agent scenarios |
+| **API stability** | Beta (v0.x, breaking changes possible) | Beta (v0.x, breaking changes possible) | Stable | Stable |
 
 ### When to choose each
 
 **Choose Axio if:**
 - You want full control over every step of the agent cycle - no hidden magic, no framework opinions baked in
-- You care about a lean dependency tree: every component is a separate PyPI package - install only what you need, fewer dependencies means fewer supply-chain attack risks; `aiohttp` is enough to wire up a transport for any HTTP-compatible LLM endpoint
-- You prefer explicit protocols over decorator-driven conventions
-- You need custom tooling and sandboxed execution - first-class from day one, with isolated Docker containers out of the box via [`axio-tools-docker`](guides/docker-sandbox.md)
-- You're embedding an agent into a larger system and need to own the event loop, the streaming pipeline, and the permission model
+- You care about a lean dependency tree: every component is a separate PyPI package - install only what you need, fewer dependencies means fewer supply-chain attack risks
+- You need multimodal input - text, images, audio, and video are first-class content blocks throughout the whole stack
+- You're building a realtime voice agent - `axio-audio` + `GeminiLiveTransport` give you sample-aligned duplex audio with production-grade echo cancellation, tool dispatch that doesn't block the audio stream, and graceful interruption handling
+- You need image or video generation as part of the agent loop - Gemini Nano Banana and Veo are available as ordinary tools
+- You need multi-agent orchestration - sub-agents, shared context stores, and composable permission chains are built in
+- You need custom sandboxed execution - isolated Docker containers out of the box via [`axio-tools-docker`](guides/docker-sandbox.md)
+- You want a ready-made terminal coding assistant - `axio-repl` ships with file/shell tools, streaming output, vision, and transport auto-detection
+- You prefer explicit protocols over decorator-driven conventions and need to own the event loop, streaming pipeline, and permission model
 
 **Choose pydantic-ai if:**
 - You already use Pydantic/FastAPI and want the same patterns for agents
 - Your agent must return strongly typed, validated structured outputs
 - You need trivial provider swapping across 20+ LLM backends
-- You're okay with beta-stage API stability
 
 **Choose LangChain if:**
-- You need RAG, text splitters, and other built-in utilities
-- You want batteries-included with less wiring code
+- You need RAG, text splitters, and other built-in data utilities
+- You want batteries-included with minimal wiring code
 - You're prototyping quickly and can accept abstraction overhead
 
 **Choose AutoGen if:**
-- You're building complex multi-agent scenarios with conversation flows
-- You need built-in support for human-in-the-loop
-- You're okay with Azure OpenAI as the primary backend
-
-**Actually - Axio also supports multi-agent:**
-- Sub-agents via the built-in `subagent` tool
-- Shared context stores for agent-to-agent communication
-- Composable workflows without external dependencies
+- You're building complex multi-agent conversation flows with a heavy Azure OpenAI focus
+- You need built-in support for human-in-the-loop at the framework level
 
 Axio's philosophy is thin abstraction over the prompt-completion loop,
 not a full framework with opinions about how you should structure your application.

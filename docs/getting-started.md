@@ -1,144 +1,45 @@
 # Getting Started
 
-**Axio** (*Asynchronous eXtensible Intelligent Orchestration*) gives you a minimal
-but complete foundation for building LLM-powered agents - see [Why Axio?](index.md#why-axio)
-for the story behind the name.
+Get a working agent running in under a minute - no code required.
 
-## Installation
+## Install
 
-Install Axio from PyPI:
+**Terminal UI** - full chat interface with plugin discovery and session persistence:
 
 ```bash
-pip install axio
+uv tool install "axio-tui[all]"
 ```
 
-To install the terminal UI with extras:
+**Coding assistant** - terminal REPL with file/shell tools and streaming output:
 
 ```bash
-pip install "axio-tui[all]"
-# or with uv (global tool install):
-uv tool install "axio-tui[anthropic,openai,codex,local,mcp,guards]"
+uv tool install axio-repl
 ```
 
 Available TUI extras: `anthropic`, `openai`, `codex`, `local`, `mcp`, `guards`, `all`.
 
-### From source (development)
-
-If you want to work on Axio itself, clone the monorepo and sync dependencies:
-
+:::{dropdown} From source (development)
 ```bash
 git clone https://github.com/mosquito/axio-agent
 cd axio-agent
 uv sync --all-packages
 ```
+:::
 
-### Prerequisites
+**Prerequisites:** Python 3.12+, [uv](https://docs.astral.sh/uv/) recommended.
 
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) - for workspace management and tool installation
-## Minimal Agent
-
-The smallest possible agent needs three things: a **transport** to talk to an LLM,
-a **context store** to hold conversation history, and an **Agent** to tie them together.
-
-<!-- name: test_minimal_agent -->
-```python
-import asyncio
-from axio import Agent, MemoryContextStore
-from axio.testing import StubTransport, make_text_response
-
-async def main() -> None:
-    transport = StubTransport([
-        make_text_response("Hello! I'm a stub agent."),
-    ])
-    context = MemoryContextStore()
-    agent = Agent(
-        system="You are a helpful assistant.",
-        tools=[],
-        transport=transport,
-    )
-    reply = await agent.run("Hi there!", context)
-    return reply
-
-assert asyncio.run(main()) == "Hello! I'm a stub agent."
-```
-
-Replace `StubTransport` with real transport like `OpenAITransport` to connect to
-a live LLM. The agent loop, tool dispatch, and streaming all work the same way
-regardless of which transport you use - that's the power of the protocol-driven
-design.
-
-## Adding Tools
-
-Tools are plain `async def` functions. Define parameters as arguments and return
-a string:
-
-<!--
-name: test_adding_tools
--->
-<!-- name: test_adding_tools -->
-```python
-from axio import Agent, MemoryContextStore, Tool
-from axio.testing import StubTransport, make_text_response
-
-# Use real transport in real code; StubTransport is just for example
-transport = StubTransport([make_text_response("ok")])
-context = MemoryContextStore()
-
-
-async def greet(name: str) -> str:
-    """Greet someone by name."""
-    return f"Hello, {name}!"
-
-
-agent = Agent(
-    system="You are a helpful assistant.",
-    tools=[Tool(name="greet", handler=greet)],
-    transport=transport,
-)
-```
-
-## Streaming Events
-
-`run_stream()` returns an `AgentStream` that yields `StreamEvent` objects as the
-agent runs. This lets you react to text tokens, tool calls, and session-end
-signals as they arrive rather than waiting for the full response.
-
-<!-- name: test_streaming_example -->
-```python
-import asyncio
-from axio import Agent, MemoryContextStore, TextDelta
-from axio.testing import StubTransport, make_text_response
-from axio.events import SessionEndEvent
-
-async def main() -> None:
-    transport = StubTransport([
-        make_text_response("Streaming works!"),
-    ])
-    context = MemoryContextStore()
-    agent = Agent(
-        system="You are a helpful assistant.",
-        tools=[],
-        transport=transport,
-    )
-    collected = []
-    async for event in agent.run_stream("Hello!", context):
-        if isinstance(event, TextDelta):
-            collected.append(event.delta)
-        elif isinstance(event, SessionEndEvent):
-            break
-    return "".join(collected)
-
-assert asyncio.run(main()) == "Streaming works!"
-```
-
-## Running the TUI
-
-The `axio-tui` package provides a terminal UI built with Textual:
+## Set your API key
 
 ```bash
-uv tool install "axio-tui[all]"
-uv tool run axio
+export GEMINI_API_KEY="..."       # Google Gemini
+export ANTHROPIC_API_KEY="..."    # Anthropic Claude
+export OPENAI_API_KEY="..."       # OpenAI
+```
+
+## Launch the TUI
+
+```bash
+axio
 ```
 
 ```{image} _static/tui-screenshot.svg
@@ -146,11 +47,62 @@ uv tool run axio
 :width: 100%
 ```
 
-The TUI discovers available transports, tools, and guards automatically
-via the [plugin system](concepts/plugins.md).
+The TUI discovers all installed transports, tools, and guards automatically
+via the [plugin system](concepts/plugins.md). Select a model, start a
+conversation, and watch the agent call tools in real time.
 
-## Next Steps
+Key features:
 
-- Read [Core Concepts](concepts/index.md) to understand the architecture
-- Follow the [Writing Tools](guides/writing-tools.md) guide to create your own
-- See [Packages](packages.md) for an overview of all available packages
+- **Model selection** - switch between any discovered transport and model
+- **Session persistence** - conversations are stored in SQLite and survive restarts
+- **Tool visibility** - every tool call is shown with its input and output
+- **Permission guards** - guards prompt for approval before executing sensitive operations
+- **Sub-agents** - spawn child agents for parallel tasks
+
+## Web mode
+
+Serve the TUI over HTTP for remote access:
+
+```bash
+axio --serve
+```
+
+Opens on `localhost:8086` by default.
+
+## Launch the coding assistant
+
+```bash
+axio-repl
+```
+
+`axio-repl` auto-detects the transport from your environment variables and
+gives the agent file and shell tools. Pass a prompt as an argument for
+non-interactive use:
+
+```bash
+axio-repl "list the files in this project"
+axio-repl --transport anthropic --model claude-opus-4-6
+```
+
+See the {doc}`guides/axio-repl` guide for the full command reference.
+
+## What's next?
+
+::::{grid} 1 1 2 2
+:gutter: 3
+
+:::{grid-item-card} Quick Start
+:link: quick-start
+:link-type: doc
+
+Write your first agent in code with the core library.
+:::
+
+:::{grid-item-card} Core Concepts
+:link: concepts/index
+:link-type: doc
+
+Understand protocols, tools, events, and the plugin system.
+:::
+
+::::

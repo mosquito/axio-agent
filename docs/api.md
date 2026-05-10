@@ -9,6 +9,7 @@ Auto-generated documentation from source docstrings.
    :members:
    :undoc-members:
    :show-inheritance:
+   :noindex:
 ```
 
 ```{eval-rst}
