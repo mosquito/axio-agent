@@ -324,6 +324,9 @@ class DockerSandbox:
         if self.name:
             try:
                 self._container = await self._client.containers.get(self.name)
+                info = await self._container.show()
+                if not info.get("State", {}).get("Running", False):
+                    await self._container.start()
                 self._attached = True
                 logger.info("Attached to existing container (name=%s)", self.name)
             except aiodocker.exceptions.DockerError:

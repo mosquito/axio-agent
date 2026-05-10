@@ -8,7 +8,14 @@ from typing import Any
 from axio.events import StreamEvent
 from axio.messages import Message
 from axio.tool import Tool
-from axio.transport import CompletionTransport, ImageGenTransport, STTTransport, TTSTransport
+from axio.transport import (
+    AudioGenTransport,
+    CompletionTransport,
+    ImageGenTransport,
+    STTTransport,
+    TTSTransport,
+    VideoGenTransport,
+)
 
 
 class _MockCompletion:
@@ -19,7 +26,17 @@ class _MockCompletion:
 
 
 class _MockImageGen:
-    async def generate(self, prompt: str, *, size: tuple[int, int] | None = None, n: int = 1) -> list[bytes]:
+    async def generate_images(self, prompt: str, *, model: str | None = None, n: int = 1) -> list[bytes]:
+        return [b""]
+
+
+class _MockVideoGen:
+    async def generate_videos(self, prompt: str, *, model: str | None = None, n: int = 1) -> list[bytes]:
+        return [b""]
+
+
+class _MockAudioGen:
+    async def generate_audios(self, prompt: str, *, model: str | None = None, n: int = 1) -> list[bytes]:
         return [b""]
 
 
@@ -40,8 +57,19 @@ class TestProtocolConformance:
     def test_image_gen_transport(self) -> None:
         assert isinstance(_MockImageGen(), ImageGenTransport)
 
+    def test_video_gen_transport(self) -> None:
+        assert isinstance(_MockVideoGen(), VideoGenTransport)
+
+    def test_audio_gen_transport(self) -> None:
+        assert isinstance(_MockAudioGen(), AudioGenTransport)
+
     def test_tts_transport(self) -> None:
         assert isinstance(_MockTTS(), TTSTransport)
 
     def test_stt_transport(self) -> None:
         assert isinstance(_MockSTT(), STTTransport)
+
+    def test_image_and_video_distinct(self) -> None:
+        """Image-only mock must not satisfy VideoGen, and vice versa."""
+        assert not isinstance(_MockImageGen(), VideoGenTransport)
+        assert not isinstance(_MockVideoGen(), ImageGenTransport)

@@ -17,17 +17,22 @@ jobs:
       matrix:
         package:
           - axio
+          - axio-audio
           - axio-context-sqlite
+          - axio-repl
           - axio-tools-docker
           - axio-tools-local
           - axio-tools-mcp
           - axio-transport-anthropic
           - axio-transport-codex
+          - axio-transport-google
           - axio-transport-openai
           - axio-tui
           - axio-tui-guards
           - examples/agent_swarm
           - examples/gas_town
+          - examples/realtime_smoke
+          - examples/realtime_chat
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -44,17 +49,22 @@ jobs:
       matrix:
         package:
           - axio
+          - axio-audio
           - axio-context-sqlite
+          - axio-repl
           - axio-tools-docker
           - axio-tools-local
           - axio-tools-mcp
           - axio-transport-anthropic
           - axio-transport-codex
+          - axio-transport-google
           - axio-transport-openai
           - axio-tui
           - axio-tui-guards
           - examples/agent_swarm
           - examples/gas_town
+          - examples/realtime_smoke
+          - examples/realtime_chat
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -70,19 +80,27 @@ jobs:
         python: ["3.12", "3.13", "3.14"]
         package:
           - { name: axio,                   cov: axio }
+          - { name: axio-audio,             cov: axio_audio }
           - { name: axio-context-sqlite,    cov: axio_context_sqlite }
+          - { name: axio-repl,              cov: axio_repl }
           - { name: axio-tools-docker,      cov: axio_tools_docker }
           - { name: axio-tools-local,       cov: axio_tools_local }
           - { name: axio-tools-mcp,         cov: axio_tools_mcp }
           - { name: axio-transport-anthropic, cov: axio_transport_anthropic }
           - { name: axio-transport-codex,   cov: axio_transport_codex }
+          - { name: axio-transport-google,  cov: axio_transport_google }
           - { name: axio-transport-openai,  cov: axio_transport_openai }
           - { name: axio-tui,               cov: axio_tui }
           - { name: axio-tui-guards,        cov: axio_tui_guards }
           - { name: examples/agent_swarm,   cov: agent_swarm }
           - { name: examples/gas_town,       cov: gas_town }
+          - { name: examples/realtime_smoke, cov: smoke }
+          - { name: examples/realtime_chat,  cov: chat }
     steps:
       - uses: actions/checkout@v4
+      - name: Install PortAudio runtime
+        if: contains(fromJSON('["axio-audio", "examples/realtime_chat"]'), matrix.package.name)
+        run: sudo apt-get update && sudo apt-get install -y libportaudio2
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python }}

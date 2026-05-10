@@ -115,18 +115,14 @@ class TestTool:
         with pytest.raises(AttributeError):
             t.name = "other"  # type: ignore[misc]
 
-    def test_non_str_return_annotation_warns(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_non_str_return_annotation_no_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Non-str return annotations are allowed (multimodal blocks etc.)."""
+
         async def f() -> int:
             return 42
 
         with caplog.at_level(logging.WARNING, logger="axio.tool"):
-            Tool(name="t", description="t", handler=f)  # type: ignore[arg-type]
-
-        assert any("expected str" in r.message for r in caplog.records)
-
-    def test_str_return_annotation_no_warning(self, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.WARNING, logger="axio.tool"):
-            Tool(name="t", description="t", handler=_empty)
+            Tool(name="t", description="t", handler=f)
 
         assert not any("expected str" in r.message for r in caplog.records)
 

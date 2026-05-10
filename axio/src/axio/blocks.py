@@ -1,4 +1,4 @@
-"""Content blocks: TextBlock, ImageBlock, ToolUseBlock, ToolResultBlock."""
+"""Content blocks: TextBlock, ImageBlock, AudioBlock, ToolUseBlock, ToolResultBlock."""
 
 from __future__ import annotations
 
@@ -8,6 +8,32 @@ from functools import singledispatch
 from typing import Any, Literal
 
 from .types import ToolCallID, ToolName
+
+type ImageMediaType = Literal["image/jpeg", "image/png", "image/gif", "image/webp"]
+type AudioMediaType = Literal[
+    "audio/x-aac",
+    "audio/flac",
+    "audio/mp3",
+    "audio/m4a",
+    "audio/mpeg",
+    "audio/mpga",
+    "audio/mp4",
+    "audio/ogg",
+    "audio/pcm",
+    "audio/wav",
+    "audio/webm",
+]
+type VideoMediaType = Literal[
+    "video/mp4",
+    "video/mpeg",
+    "video/mov",
+    "video/avi",
+    "video/x-flv",
+    "video/mpg",
+    "video/webm",
+    "video/wmv",
+    "video/3gpp",
+]
 
 
 class ContentBlock:
@@ -23,7 +49,19 @@ class TextBlock(ContentBlock):
 
 @dataclass(frozen=True, slots=True)
 class ImageBlock(ContentBlock):
-    media_type: Literal["image/jpeg", "image/png", "image/gif", "image/webp"]
+    media_type: ImageMediaType
+    data: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class AudioBlock(ContentBlock):
+    media_type: AudioMediaType
+    data: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class VideoBlock(ContentBlock):
+    media_type: VideoMediaType
     data: bytes
 
 
@@ -37,7 +75,7 @@ class ToolUseBlock(ContentBlock):
 @dataclass(frozen=True, slots=True)
 class ToolResultBlock(ContentBlock):
     tool_use_id: ToolCallID
-    content: str | list[TextBlock | ImageBlock]
+    content: str | list[TextBlock | ImageBlock | AudioBlock | VideoBlock]
     is_error: bool = False
 
 
@@ -56,6 +94,16 @@ def _text_to_dict(block: TextBlock) -> dict[str, Any]:
 @to_dict.register(ImageBlock)
 def _image_to_dict(block: ImageBlock) -> dict[str, Any]:
     return {"type": "image", "media_type": block.media_type, "data": base64.b64encode(block.data).decode()}
+
+
+@to_dict.register(AudioBlock)
+def _audio_to_dict(block: AudioBlock) -> dict[str, Any]:
+    return {"type": "audio", "media_type": block.media_type, "data": base64.b64encode(block.data).decode()}
+
+
+@to_dict.register(VideoBlock)
+def _video_to_dict(block: VideoBlock) -> dict[str, Any]:
+    return {"type": "video", "media_type": block.media_type, "data": base64.b64encode(block.data).decode()}
 
 
 @to_dict.register(ToolUseBlock)
@@ -84,12 +132,16 @@ def from_dict(data: dict[str, Any]) -> ContentBlock:
             return TextBlock(text=data["text"])
         case "image":
             return ImageBlock(media_type=data["media_type"], data=base64.b64decode(data["data"]))
+        case "audio":
+            return AudioBlock(media_type=data["media_type"], data=base64.b64decode(data["data"]))
+        case "video":
+            return VideoBlock(media_type=data["media_type"], data=base64.b64decode(data["data"]))
         case "tool_use":
             return ToolUseBlock(id=data["id"], name=data["name"], input=data["input"])
         case "tool_result":
             raw = data["content"]
             if isinstance(raw, str):
-                content: str | list[TextBlock | ImageBlock] = raw
+                content: str | list[TextBlock | ImageBlock | AudioBlock | VideoBlock] = raw
             else:
                 content = [from_dict(b) for b in raw]  # type: ignore[misc]
             return ToolResultBlock(tool_use_id=data["tool_use_id"], content=content, is_error=data["is_error"])

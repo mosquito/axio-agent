@@ -283,8 +283,9 @@ class ContextStore(ABC):
     async def get_history(self) -> list[Message]: ...
 
     @abstractmethod
-    async def compact(self, summary: str) -> None: ...
+    async def compact(self, summary: str) -> None:
         """Replace history with a summary message."""
+        ...
 ```
 
 **Implementations**:

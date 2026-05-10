@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from axio.agent import Agent
@@ -13,6 +14,7 @@ from axio.events import (
     SessionEndEvent,
     StreamEvent,
     ToolInputDelta,
+    ToolOutputDelta,
     ToolResult,
     ToolUseStart,
 )
@@ -253,3 +255,96 @@ class TestStopReasonOverride:
         session_ends = [e for e in events if isinstance(e, SessionEndEvent)]
         assert len(session_ends) == 1
         assert session_ends[0].stop_reason == StopReason.end_turn
+
+
+class TestStreamingToolDispatch:
+    async def test_streaming_handler_emits_keyed_output_deltas(self) -> None:
+        """A tool with .stream attribute emits ToolOutputDelta events with key per field."""
+
+        async def _stream(msg: str) -> AsyncGenerator[tuple[str, str], None]:
+            yield ("stdout", "line1\n")
+            yield ("stderr", "warn\n")
+
+        async def streaming_handler(msg: str) -> str:
+            parts = []
+            async for _, t in _stream(msg):
+                parts.append(t)
+            return "".join(parts)
+
+        streaming_handler.stream = _stream  # type: ignore[attr-defined]
+
+        tool: Tool[object] = Tool(name="streamer", description="streams", handler=streaming_handler)
+        transport = StubTransport(
+            [make_tool_use_response("streamer", "c1", {"msg": "hi"}), make_text_response("Done")]
+        )
+        agent = Agent(system="test", tools=[tool], transport=transport)
+        events: list[StreamEvent] = []
+        async for e in agent.run_stream("go", MemoryContextStore()):
+            events.append(e)
+
+        deltas = [e for e in events if isinstance(e, ToolOutputDelta)]
+        assert len(deltas) == 2
+        assert deltas[0].key == "stdout"
+        assert deltas[0].delta == "line1\n"
+        assert deltas[1].key == "stderr"
+        assert deltas[1].delta == "warn\n"
+        assert deltas[0].name == "streamer"
+
+        results = [e for e in events if isinstance(e, ToolResult)]
+        assert len(results) == 1
+        assert results[0].content == "line1\nwarn\n"
+        assert not results[0].is_error
+
+    async def test_non_streaming_tool_no_output_deltas(self) -> None:
+        """A normal tool (no .stream) produces no ToolOutputDelta events."""
+        tool: Tool[object] = Tool(name="echo", description="echo", handler=_tracking)
+        transport = StubTransport([make_tool_use_response("echo", "c1", {"msg": "hi"}), make_text_response("Done")])
+        agent = Agent(system="test", tools=[tool], transport=transport)
+        events: list[StreamEvent] = []
+        async for e in agent.run_stream("go", MemoryContextStore()):
+            events.append(e)
+
+        deltas = [e for e in events if isinstance(e, ToolOutputDelta)]
+        assert len(deltas) == 0
+
+    async def test_mixed_streaming_and_non_streaming(self) -> None:
+        """Parallel dispatch: one streaming, one normal."""
+
+        async def _stream(msg: str) -> AsyncGenerator[tuple[str, str], None]:
+            yield ("output", "s1")
+            yield ("output", "s2")
+
+        async def streaming_handler(msg: str) -> str:
+            parts = []
+            async for _, t in _stream(msg):
+                parts.append(t)
+            return "".join(parts)
+
+        streaming_handler.stream = _stream  # type: ignore[attr-defined]
+
+        stream_tool: Tool[object] = Tool(name="streamer", description="streams", handler=streaming_handler)
+        normal_tool: Tool[object] = Tool(name="echo", description="echo", handler=_tracking)
+
+        transport = StubTransport(
+            [
+                [
+                    ToolUseStart(0, "c1", "streamer"),
+                    ToolInputDelta(0, "c1", json.dumps({"msg": "hi"})),
+                    ToolUseStart(1, "c2", "echo"),
+                    ToolInputDelta(1, "c2", json.dumps({"msg": "world"})),
+                    IterationEnd(1, StopReason.tool_use, Usage(10, 5)),
+                ],
+                make_text_response("Done"),
+            ]
+        )
+        agent = Agent(system="test", tools=[stream_tool, normal_tool], transport=transport)
+        events: list[StreamEvent] = []
+        async for e in agent.run_stream("go", MemoryContextStore()):
+            events.append(e)
+
+        deltas = [e for e in events if isinstance(e, ToolOutputDelta)]
+        assert len(deltas) == 2
+        assert all(d.name == "streamer" for d in deltas)
+
+        results = [e for e in events if isinstance(e, ToolResult)]
+        assert len(results) == 2

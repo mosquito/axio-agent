@@ -21,6 +21,8 @@ from axio.tool import Tool
 from axio.transport import CompletionTransport, EmbeddingTransport
 from axio.types import StopReason, Usage
 
+from .realtime import OpenAIRealtimeSession, OpenAIRealtimeTransport  # noqa: F401
+
 logger = logging.getLogger(__name__)
 
 
@@ -162,7 +164,45 @@ _STOP_REASON_MAP: dict[str, StopReason] = {
     "stop": StopReason.end_turn,
     "tool_calls": StopReason.tool_use,
     "length": StopReason.max_tokens,
+    "error": StopReason.error,
 }
+
+
+def _strip_title(schema: dict[str, Any]) -> dict[str, Any]:
+    """Remove pydantic 'title' keys from a JSON schema recursively."""
+    out: dict[str, Any] = {}
+    for key, value in schema.items():
+        if key == "title":
+            continue
+        if isinstance(value, dict):
+            out[key] = _strip_title(value)
+        elif isinstance(value, list):
+            out[key] = [_strip_title(item) if isinstance(item, dict) else item for item in value]
+        else:
+            out[key] = value
+    return out
+
+
+def _extract_tool_result_text(tr: ToolResultBlock) -> str:
+    """Extract text content from a ToolResultBlock (for APIs that don't support images in tool results)."""
+    if isinstance(tr.content, str):
+        return tr.content
+    return "\n".join(b.text for b in tr.content if isinstance(b, TextBlock))
+
+
+def _collect_tool_result_images(tool_results: list[ToolResultBlock]) -> list[dict[str, Any]]:
+    """Collect image parts from tool results to inject as a follow-up user message."""
+    parts: list[dict[str, Any]] = []
+    for tr in tool_results:
+        if isinstance(tr.content, list):
+            images = [b for b in tr.content if isinstance(b, ImageBlock)]
+            if images:
+                parts.append({"type": "text", "text": f"[Image from tool call {tr.tool_use_id}]"})
+                for img in images:
+                    encoded = base64.b64encode(img.data).decode("ascii")
+                    data_uri = f"data:{img.media_type};base64,{encoded}"
+                    parts.append({"type": "image_url", "image_url": {"url": data_uri}})
+    return parts
 
 
 def _convert_messages(messages: list[Message], system: str) -> list[dict[str, Any]]:
@@ -176,8 +216,18 @@ def _convert_messages(messages: list[Message], system: str) -> list[dict[str, An
             tool_results = [b for b in msg.content if isinstance(b, ToolResultBlock)]
             if tool_results and len(tool_results) == len(msg.content):
                 for tr in tool_results:
-                    content = tr.content if isinstance(tr.content, str) else json.dumps(tr.content)
-                    result.append({"role": "tool", "tool_call_id": tr.tool_use_id, "content": content})
+                    result.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tr.tool_use_id,
+                            "content": _extract_tool_result_text(tr),
+                        }
+                    )
+                # Chat Completions API doesn't support images in tool messages,
+                # so inject them as a follow-up user message.
+                image_parts = _collect_tool_result_images(tool_results)
+                if image_parts:
+                    result.append({"role": "user", "content": image_parts})
             else:
                 has_images = any(isinstance(b, ImageBlock) for b in msg.content)
                 if has_images:
@@ -341,6 +391,7 @@ class OpenAITransport(CompletionTransport, EmbeddingTransport):
         tool_index_to_id: dict[int, str] = {}
         usage = Usage(0, 0)
         finish_reason: str | None = None
+        error_message: str | None = None
         think_parser = ThinkTagParser()
 
         buffer = b""
@@ -353,6 +404,10 @@ class OpenAITransport(CompletionTransport, EmbeddingTransport):
                     continue
 
                 data: dict[str, Any] = json.loads(line[6:])
+
+                if "error" in data and data["error"] is not None:
+                    err = data["error"]
+                    error_message = err.get("message") or str(err) if isinstance(err, dict) else str(err)
 
                 if "usage" in data and data["usage"] is not None:
                     u: dict[str, int] = data["usage"]
@@ -449,6 +504,9 @@ class OpenAITransport(CompletionTransport, EmbeddingTransport):
             usage.input_tokens,
             usage.output_tokens,
         )
+        if stop == StopReason.error:
+            msg = error_message or f"finish_reason={finish_reason!r}"
+            raise StreamError(f"Provider error during streaming: {msg}")
         yield IterationEnd(iteration=0, stop_reason=stop, usage=usage)
 
     def stream(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> AsyncIterator[StreamEvent]:

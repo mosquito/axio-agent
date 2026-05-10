@@ -1,4 +1,4 @@
-"""Anthropic Claude CompletionTransport via aiohttp."""
+"""Anthropic Claude CompletionTransport via aiohttp (direct API and Vertex AI)."""
 
 from __future__ import annotations
 
@@ -9,10 +9,10 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any, Self
+from typing import Any, Protocol, Self, cast
 
 import aiohttp
-from axio.blocks import ImageBlock, TextBlock, ToolResultBlock, ToolUseBlock
+from axio.blocks import ImageBlock, TextBlock, ToolResultBlock, ToolUseBlock, VideoBlock
 from axio.events import IterationEnd, ReasoningDelta, StreamEvent, TextDelta, ToolInputDelta, ToolUseStart
 from axio.exceptions import StreamError
 from axio.messages import Message
@@ -23,9 +23,18 @@ from axio.types import StopReason, Usage
 
 logger = logging.getLogger(__name__)
 
+ANTHROPIC_API_VERSION = "2023-06-01"
+VERTEX_ANTHROPIC_VERSION = "vertex-2023-10-16"
 
 _VT = frozenset({Capability.text, Capability.vision, Capability.tool_use})
 _RT = frozenset({Capability.text, Capability.vision, Capability.reasoning, Capability.tool_use})
+
+
+class _RefreshableCredentials(Protocol):
+    token: str | None
+
+    def refresh(self, request: object) -> None: ...
+
 
 ANTHROPIC_MODELS: ModelRegistry = ModelRegistry(
     {
@@ -44,6 +53,14 @@ ANTHROPIC_MODELS: ModelRegistry = ModelRegistry(
             capabilities=_RT,
             input_cost=3.0,
             output_cost=15.0,
+        ),
+        ModelSpec(
+            id="claude-haiku-4-5",
+            context_window=200_000,
+            max_output_tokens=64_000,
+            capabilities=_RT,
+            input_cost=1.0,
+            output_cost=5.0,
         ),
         ModelSpec(
             id="claude-haiku-4-5-20251001",
@@ -74,9 +91,25 @@ ANTHROPIC_MODELS: ModelRegistry = ModelRegistry(
 
 _STOP_REASON_MAP: dict[str, StopReason] = {
     "end_turn": StopReason.end_turn,
+    "stop_sequence": StopReason.end_turn,
     "tool_use": StopReason.tool_use,
     "max_tokens": StopReason.max_tokens,
 }
+
+
+def _strip_title(schema: dict[str, Any]) -> dict[str, Any]:
+    """Remove pydantic 'title' keys from a JSON schema recursively."""
+    out: dict[str, Any] = {}
+    for key, value in schema.items():
+        if key == "title":
+            continue
+        if isinstance(value, dict):
+            out[key] = _strip_title(value)
+        elif isinstance(value, list):
+            out[key] = [_strip_title(item) if isinstance(item, dict) else item for item in value]
+        else:
+            out[key] = value
+    return out
 
 
 def _convert_messages(messages: list[Message]) -> list[dict[str, Any]]:
@@ -90,7 +123,7 @@ def _convert_messages(messages: list[Message]) -> list[dict[str, Any]]:
             for b in msg.content:
                 if isinstance(b, TextBlock):
                     content_parts.append({"type": "text", "text": b.text})
-                elif isinstance(b, ImageBlock):
+                elif isinstance(b, (ImageBlock, VideoBlock)):
                     encoded = base64.b64encode(b.data).decode("ascii")
                     content_parts.append(
                         {
@@ -143,10 +176,25 @@ def _convert_tools(tools: list[Tool[Any]]) -> list[dict[str, Any]]:
         {
             "name": tool.name,
             "description": tool.description,
-            "input_schema": tool.input_schema,
+            "input_schema": _strip_title(tool.input_schema),
+            # Stream tool input deltas as they're generated instead of buffering.
+            # May produce truncated JSON if max_tokens is reached mid-call.
+            "eager_input_streaming": True,
         }
         for tool in tools
     ]
+
+
+def _get_vertex_access_token() -> str:
+    import google.auth
+    import google.auth.transport.requests
+
+    creds_obj, _project = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    creds = cast(_RefreshableCredentials, creds_obj)
+    creds.refresh(google.auth.transport.requests.Request())
+    if not creds.token:
+        raise RuntimeError("Google credentials did not return an access token")
+    return creds.token
 
 
 @dataclass(slots=True)
@@ -154,11 +202,52 @@ class AnthropicTransport(CompletionTransport):
     name: str = "Anthropic"
     base_url: str = field(default_factory=lambda: os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1"))
     api_key: str = field(default_factory=lambda: os.environ.get("ANTHROPIC_API_KEY", ""))
+    vertexai: bool | None = None
+    project: str = ""
+    location: str = ""
     model: ModelSpec = field(default_factory=lambda: ANTHROPIC_MODELS["claude-sonnet-4-6"])
     models: ModelRegistry = field(default_factory=lambda: ModelRegistry(ANTHROPIC_MODELS.values()))
     session: aiohttp.ClientSession | None = field(default=None, repr=False, compare=False)
+    temperature: float | None = None
+    top_p: float | None = None
+    top_k: int | None = None
+    thinking_budget: int | None = None
     max_retries: int = 10
     retry_base_delay: float = 5.0
+
+    def __post_init__(self) -> None:
+        if isinstance(self.vertexai, str):
+            self.vertexai = self.vertexai.lower() in ("true", "1")
+        if self.vertexai is None:
+            self.vertexai = os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "").lower() in ("true", "1")
+
+    def _build_url(self) -> str:
+        if self.vertexai:
+            project = self.project or os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+            location = self.location or os.environ.get("GOOGLE_CLOUD_LOCATION", "") or "global"
+            if not project:
+                raise StreamError(
+                    "Anthropic on Vertex AI requires a project. "
+                    "Set GOOGLE_CLOUD_PROJECT or configure it in transport settings."
+                )
+            host = "aiplatform.googleapis.com" if location == "global" else f"{location}-aiplatform.googleapis.com"
+            bare = self.model.id.removeprefix("anthropic/")
+            return (
+                f"https://{host}/v1/"
+                f"projects/{project}/locations/{location}/"
+                f"publishers/anthropic/models/{bare}:streamRawPredict"
+            )
+        return f"{self.base_url.rstrip('/')}/messages"
+
+    def _build_headers(self) -> dict[str, str]:
+        headers: dict[str, str] = {"content-type": "application/json"}
+        if self.vertexai:
+            token = _get_vertex_access_token()
+            headers["Authorization"] = f"Bearer {token}"
+        else:
+            headers["x-api-key"] = self.api_key
+            headers["anthropic-version"] = ANTHROPIC_API_VERSION
+        return headers
 
     def _get_retry_delay(self, resp: aiohttp.ClientResponse | None, attempt: int) -> float:
         """Return delay in seconds: prefer Retry-After header, fall back to exponential backoff."""
@@ -174,6 +263,17 @@ class AnthropicTransport(CompletionTransport):
     def build_payload(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> dict[str, Any]:
         converted_messages = _convert_messages(messages)
 
+        payload: dict[str, Any] = {
+            "messages": converted_messages,
+            "stream": True,
+            "max_tokens": self.model.max_output_tokens,
+        }
+
+        if self.vertexai:
+            payload["anthropic_version"] = VERTEX_ANTHROPIC_VERSION
+        else:
+            payload["model"] = self.model.id
+
         system_blocks: list[dict[str, Any]] = []
         if system:
             system_blocks.append({"type": "text", "text": system, "cache_control": {"type": "ephemeral"}})
@@ -182,14 +282,6 @@ class AnthropicTransport(CompletionTransport):
                 text = "".join(b.text for b in msg.content if isinstance(b, TextBlock))
                 if text:
                     system_blocks.append({"type": "text", "text": text})
-
-        payload: dict[str, Any] = {
-            "model": self.model.id,
-            "messages": converted_messages,
-            "stream": True,
-            "max_tokens": self.model.max_output_tokens,
-        }
-
         if system_blocks:
             payload["system"] = system_blocks
 
@@ -198,13 +290,21 @@ class AnthropicTransport(CompletionTransport):
             converted[-1]["cache_control"] = {"type": "ephemeral"}
             payload["tools"] = converted
 
+        if self.temperature is not None:
+            payload["temperature"] = self.temperature
+        if self.top_p is not None:
+            payload["top_p"] = self.top_p
+        if self.top_k is not None:
+            payload["top_k"] = self.top_k
+        if self.thinking_budget is not None:
+            payload["thinking"] = {"type": "enabled", "budget_tokens": self.thinking_budget}
+
         return payload
 
     async def _parse_sse(self, resp: aiohttp.ClientResponse) -> AsyncIterator[StreamEvent]:
         input_tokens = 0
         output_tokens = 0
         stop_reason: str | None = None
-        # Track tool_use_id per content block index for ToolInputDelta
         index_to_tool_use_id: dict[int, str] = {}
 
         buffer = b""
@@ -258,6 +358,10 @@ class AnthropicTransport(CompletionTransport):
                     usage = data.get("usage", {})
                     output_tokens = usage.get("output_tokens", output_tokens)
 
+                elif event_type == "error":
+                    err = data.get("error", {})
+                    raise StreamError(f"Anthropic error: {err.get('type', 'unknown')}: {err.get('message', '')}")
+
         usage_obj = Usage(input_tokens=input_tokens, output_tokens=output_tokens)
         stop = _STOP_REASON_MAP.get(stop_reason or "", StopReason.error)
         if stop_reason and stop_reason not in _STOP_REASON_MAP:
@@ -277,12 +381,8 @@ class AnthropicTransport(CompletionTransport):
         self, messages: list[Message], tools: list[Tool[Any]], system: str
     ) -> AsyncIterator[StreamEvent]:
         assert self.session is not None, "session is required for streaming"
-        url = f"{self.base_url.rstrip('/')}/messages"
-        headers = {
-            "x-api-key": self.api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        }
+        url = self._build_url()
+        headers = self._build_headers()
         payload = self.build_payload(messages, tools, system)
 
         logger.info(
@@ -338,7 +438,7 @@ class AnthropicTransport(CompletionTransport):
         self.models = ANTHROPIC_MODELS
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "name": self.name,
             "base_url": self.base_url,
             "api_key": self.api_key,
@@ -354,6 +454,13 @@ class AnthropicTransport(CompletionTransport):
                 for m in self.models.values()
             ],
         }
+        if self.vertexai:
+            d["vertexai"] = True
+            if self.project:
+                d["project"] = self.project
+            if self.location:
+                d["location"] = self.location
+        return d
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], *, session: aiohttp.ClientSession | None = None) -> Self:
@@ -377,6 +484,13 @@ class AnthropicTransport(CompletionTransport):
             base_url=str(data.get("base_url", ""))
             or os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1"),
             api_key=str(data.get("api_key", "")) or os.environ.get("ANTHROPIC_API_KEY", ""),
+            vertexai=bool(data.get("vertexai", False)),
+            project=str(data.get("project", "")),
+            location=str(data.get("location", "")),
+            temperature=float(data["temperature"]) if data.get("temperature") is not None else None,
+            top_p=float(data["top_p"]) if data.get("top_p") is not None else None,
+            top_k=int(data["top_k"]) if data.get("top_k") is not None else None,
+            thinking_budget=int(data["thinking_budget"]) if data.get("thinking_budget") is not None else None,
             models=models,
             session=session,
         )

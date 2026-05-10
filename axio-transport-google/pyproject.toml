@@ -1,0 +1,68 @@
+[project]
+name = "axio-transport-google"
+version = "0.1.0"
+description = "Google GenAI (Gemini) transport for Axio with image and video support"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+keywords = ["llm", "agent", "ai", "google", "gemini", "genai", "transport"]
+dependencies = [
+    "axio",
+    "axio-transport-anthropic[vertexai]",
+    "google-auth[urllib3]>=2.0",
+]
+
+[project.optional-dependencies]
+tui = ["textual>=2.1.0"]
+
+[project.entry-points."axio.transport"]
+google = "axio_transport_google:GoogleTransport"
+google-vertex = "axio_transport_google:VertexAITransport"
+
+[project.entry-points."axio.transport.realtime"]
+gemini = "axio_transport_google.realtime:GeminiLiveTransport"
+vertex = "axio_transport_google.realtime:VertexLiveTransport"
+
+[project.entry-points."axio.transport.settings"]
+google = "axio_transport_google.tui:GoogleSettingsScreen"
+google-vertex = "axio_transport_google.tui:VertexSettingsScreen"
+
+[project.entry-points."axio.tools"]
+generate_image = "axio_transport_google.tools:generate_image"
+generate_video = "axio_transport_google.tools:generate_video"
+
+[project.urls]
+Homepage = "https://github.com/mosquito/axio-agent"
+Repository = "https://github.com/mosquito/axio-agent"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/axio_transport_google"]
+sources = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 119
+output-format = "concise"
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "mypy>=1.14",
+    "ruff>=0.9",
+    "pytest-cov>=7.1.0",
+]

@@ -406,7 +406,6 @@ async def test_multiple_tool_calls(fake_server: tuple[FakeOpenAIServer, str], tr
         ("stop", StopReason.end_turn),
         ("tool_calls", StopReason.tool_use),
         ("length", StopReason.max_tokens),
-        ("content_filter", StopReason.error),
     ],
 )
 async def test_stop_reason_mapping(
@@ -422,6 +421,20 @@ async def test_stop_reason_mapping(
 
     ends = [e for e in events if isinstance(e, IterationEnd)]
     assert ends[0].stop_reason == expected
+
+
+async def test_content_filter_raises_stream_error(
+    fake_server: tuple[FakeOpenAIServer, str],
+    transport: OpenAITransport,
+) -> None:
+    """Provider-side errors (content_filter, etc.) surface as StreamError."""
+    from axio.exceptions import StreamError
+
+    server, _ = fake_server
+    server.responses.append(_text_chunks("x", finish_reason="content_filter"))
+
+    with pytest.raises(StreamError):
+        await _collect(transport.stream([], [], ""))
 
 
 # ---------------------------------------------------------------------------
@@ -485,6 +498,55 @@ def test_build_payload_tool_results() -> None:
     assert msg["role"] == "tool"
     assert msg["tool_call_id"] == "call_1"
     assert msg["content"] == "22C"
+
+
+def test_build_payload_tool_result_with_image() -> None:
+    """Tool results containing ImageBlocks should inject a follow-up user message with image_url parts."""
+    t = OpenAITransport(model=OPENAI_MODELS["gpt-4.1-mini"])
+    img_data = b"\x89PNG\r\n\x1a\nfake"
+    messages = [
+        Message(
+            role="user",
+            content=[
+                ToolResultBlock(
+                    tool_use_id="call_img",
+                    content=[
+                        TextBlock(text="Image file: photo.png"),
+                        ImageBlock(media_type="image/png", data=img_data),
+                    ],
+                ),
+            ],
+        ),
+    ]
+    payload = t.build_payload(messages, [], "")
+    msgs = payload["messages"]
+    # First: the tool message with text only
+    assert msgs[0]["role"] == "tool"
+    assert msgs[0]["tool_call_id"] == "call_img"
+    assert msgs[0]["content"] == "Image file: photo.png"
+    # Second: a user message with the injected image
+    assert msgs[1]["role"] == "user"
+    parts = msgs[1]["content"]
+    assert len(parts) == 2
+    assert parts[0]["type"] == "text"
+    assert "call_img" in parts[0]["text"]
+    assert parts[1]["type"] == "image_url"
+    assert parts[1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_build_payload_tool_result_no_image_no_injection() -> None:
+    """Text-only tool results should NOT inject a user message."""
+    t = OpenAITransport(model=OPENAI_MODELS["gpt-4.1-mini"])
+    messages = [
+        Message(
+            role="user",
+            content=[ToolResultBlock(tool_use_id="call_1", content="plain text")],
+        ),
+    ]
+    payload = t.build_payload(messages, [], "")
+    msgs = payload["messages"]
+    assert len(msgs) == 1
+    assert msgs[0]["role"] == "tool"
 
 
 def test_build_payload_tool_schema() -> None:
