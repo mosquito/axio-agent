@@ -33,6 +33,7 @@ transport of its own; install the one that matches your model provider:
 | `axio-transport-anthropic` | Anthropic Claude |
 | `axio-transport-openai` | OpenAI and any OpenAI-compatible API |
 | `axio-transport-codex` | ChatGPT via OAuth |
+| `axio-transport-google` | Google Gemini (Developer API and Vertex AI) |
 
 Because a transport is just a protocol, you can implement your own with nothing
 more than `aiohttp` - no SDK required.

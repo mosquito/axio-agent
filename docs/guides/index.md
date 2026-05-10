@@ -5,6 +5,9 @@ Practical, step-by-step guides for extending Axio with your own components.
 ```{toctree}
 :maxdepth: 1
 
+axio-repl
+google-transport
+realtime-audio
 writing-tools
 writing-transports
 writing-guards

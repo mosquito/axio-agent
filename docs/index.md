@@ -312,6 +312,10 @@ directory contains runnable examples:
   team of role-specialised agents; see the {doc}`guides/agent-swarm` guide
 - [`gas_town/`](https://github.com/mosquito/axio-agent/tree/master/examples/gas_town) -
   multi-agent convoy following the Gas Town methodology; see the {doc}`guides/gas-town` guide
+- [`realtime_smoke/`](https://github.com/mosquito/axio-agent/tree/master/examples/realtime_smoke) -
+  minimal Gemini Live smoke test: send text, receive and play audio
+- [`realtime_chat/`](https://github.com/mosquito/axio-agent/tree/master/examples/realtime_chat) -
+  full-featured voice chat with echo cancellation, volume metering, and interruption handling
 
 ```{toctree}
 :maxdepth: 2

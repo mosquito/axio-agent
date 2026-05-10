@@ -34,14 +34,35 @@ from enum import StrEnum
 
 
 class Capability(StrEnum):
+    # Input modalities
     text = "text"
     vision = "vision"
+    video = "video"
+    audio = "audio"
+    # Output modalities
+    image_generation = "image_generation"
+    video_generation = "video_generation"
+    # Processing capabilities
     reasoning = "reasoning"
     tool_use = "tool_use"
     json_mode = "json_mode"
     structured_outputs = "structured_outputs"
     embedding = "embedding"
 ```
+
+| Capability | Meaning |
+|---|---|
+| `text` | Accepts text input |
+| `vision` | Accepts image input |
+| `video` | Accepts video input |
+| `audio` | Accepts audio input |
+| `image_generation` | Can generate images |
+| `video_generation` | Can generate videos |
+| `reasoning` | Supports extended thinking / chain-of-thought |
+| `tool_use` | Supports function / tool calling |
+| `json_mode` | Can be forced to output JSON |
+| `structured_outputs` | Supports schema-constrained structured outputs |
+| `embedding` | Can produce embedding vectors |
 
 ## ModelRegistry
 
@@ -115,3 +136,19 @@ model = (
 )
 assert model == "gpt-4o"
 ```
+
+## Agent capability checking
+
+The agent reads `Capability.tool_use` from the active model before each
+iteration. If the model lacks this capability, no tools are passed to the
+transport:
+
+```python
+model = getattr(transport, "model", None)
+model_caps = getattr(model, "capabilities", None)
+if model_caps is not None and Capability.tool_use not in model_caps:
+    active_tools = []   # embedding or image-gen models: no tools
+```
+
+This means you can safely point an `Agent` at an embedding or image-generation
+model - it will not try to send tool definitions that the API would reject.

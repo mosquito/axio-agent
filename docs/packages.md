@@ -1,6 +1,6 @@
 # Packages
 
-The Axio monorepo contains 10 packages, each with a focused responsibility.
+The Axio monorepo contains 13 packages, each with a focused responsibility.
 Each package is a top-level directory in the monorepo root (e.g., `axio/`, `axio-tui/`)
 and all are managed as a uv workspace.
 
@@ -13,11 +13,14 @@ and all are managed as a uv workspace.
 | `axio-transport-anthropic` | Anthropic Claude transport | `axio.transport`, `axio.transport.settings` |
 | `axio-transport-openai` | OpenAI-compatible transport (OpenAI, Nebius, OpenRouter, custom) | `axio.transport`, `axio.transport.settings` |
 | `axio-transport-codex` | ChatGPT (Codex) OAuth transport | `axio.transport`, `axio.transport.settings` |
+| `axio-transport-google` | Google Gemini transport + Gemini Live realtime | `axio.transport`, `axio.transport.realtime`, `axio.transport.settings`, `axio.tools` |
+| `axio-audio` | Microphone and speaker helpers for realtime agents | - |
 | `axio-tools-local` | Filesystem & shell tools | `axio.tools` |
 | `axio-tools-mcp` | MCP tool loader | `axio.tools.settings` |
 | `axio-tools-docker` | Docker sandbox tools | - |
 | `axio-tui` | Textual-based TUI app | `axio.tools` |
 | `axio-tui-guards` | Permission guard plugins | `axio.guards` |
+| `axio-repl` | Interactive terminal coding assistant | - |
 
 ## Core
 
@@ -86,6 +89,34 @@ Entry points:
 
 Dependencies: `axio`, `aiohttp>=3.11`
 
+### axio-transport-google
+
+Google GenAI (Gemini) transport for the Developer API and Vertex AI. Supports
+standard completion and Gemini Live realtime sessions. Also registers image and
+video generation tools when installed.
+
+Entry points:
+- `axio.transport` → `GoogleTransport`, `VertexAITransport`
+- `axio.transport.realtime` → `GeminiLiveTransport`, `VertexLiveTransport`
+- `axio.transport.settings` → `GoogleSettingsScreen`, `VertexSettingsScreen`
+- `axio.tools` → `generate_image`, `generate_video`
+
+See the {doc}`guides/google-transport` guide.
+
+Dependencies: `axio`, `axio-transport-anthropic[vertexai]`, `google-auth[urllib3]>=2.0`, `aiohttp>=3.11`
+
+## Audio
+
+### axio-audio
+
+Microphone capture and speaker playback for realtime voice agents.
+Provides `Microphone`, `Speaker`, and `DuplexAudio` (single-clock duplex
+stream for production-grade echo cancellation).
+
+See the {doc}`guides/realtime-audio` guide.
+
+Dependencies: `axio`, `sounddevice>=0.5`, `numpy>=2`
+
 ## Tools
 
 ### axio-tools-local
@@ -151,3 +182,18 @@ Guards registered under `axio.guards`:
 - `llm` - `LLMGuard` - Uses LLM to assess tool call safety
 
 Dependencies: `axio`, `axio-tui`
+
+## REPL
+
+### axio-repl
+
+Terminal coding assistant. Runs an agent loop with file/shell tools, streams
+every token and tool call to the terminal, and auto-detects the transport from
+environment variables. Supports model switching, streaming tool arguments and
+output, vision, and workspace-level `AGENTS.md` instructions.
+
+Console script: `axio-repl = "axio_repl:main_sync"`
+
+See the {doc}`guides/axio-repl` guide.
+
+Dependencies: `axio`, `axio-tools-local`, `axio-transport-openai`, `aiohttp>=3.11`
