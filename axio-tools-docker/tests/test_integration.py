@@ -360,7 +360,7 @@ async def test_named_volume_persists_across_containers(docker: str, image: str) 
     finally:
         async with aiodocker.Docker(url=docker) as client:
             with contextlib.suppress(Exception):
-                vol = await client.volumes.get(vol_name)  # type: ignore[no-untyped-call]
+                vol = await client.volumes.get(vol_name)
                 await vol.delete()
 
 
@@ -378,4 +378,4 @@ async def test_volumes_remove_cleans_up(docker: str, image: str) -> None:
 
     async with aiodocker.Docker(url=docker) as client:
         with pytest.raises(aiodocker.exceptions.DockerError):
-            await client.volumes.get(vol_name)  # type: ignore[no-untyped-call]
+            await client.volumes.get(vol_name)

@@ -34,6 +34,10 @@ select = ["E", "F", "I", "UP"]
 strict = true
 python_version = "3.12"
 
+[[tool.mypy.overrides]]
+module = "aiodocker.*"
+follow_imports = "skip"
+
 [dependency-groups]
 dev = [
     "pytest>=8",

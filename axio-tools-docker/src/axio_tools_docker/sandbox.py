@@ -12,7 +12,7 @@ import stat as stat_module
 import tarfile
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 import aiodocker
 from axio.tool import CONTEXT, Tool
@@ -423,7 +423,7 @@ class DockerSandbox:
             if self.named_volumes and self.volumes_remove and not was_attached:
                 for vol_name in self.named_volumes.values():
                     with contextlib.suppress(Exception):
-                        vol = await self._client.volumes.get(vol_name)  # type: ignore[no-untyped-call]
+                        vol = await self._client.volumes.get(vol_name)
                         await vol.delete()
                 logger.info("Removed %d named volume(s)", len(self.named_volumes))
             await self._client.close()
@@ -442,7 +442,7 @@ class DockerSandbox:
         """Return the ID of the running container. Only valid inside `async with`."""
         if self._container is None:
             raise RuntimeError("DockerSandbox must be used as an async context manager")
-        return self._container.id
+        return str(self._container.id)
 
     async def _ensure_image(self) -> None:
         """Pull the image if it is not present locally."""
@@ -517,7 +517,7 @@ class DockerSandbox:
             tar.addfile(info, io.BytesIO(data))
         parent = os.path.dirname(path) or "/"
         await self.exec(f"mkdir -p {shlex.quote(parent)}")
-        await self._container.put_archive(  # type: ignore[no-untyped-call]
+        await self._container.put_archive(
             path=parent,
             data=buf.getvalue(),
         )
@@ -526,7 +526,7 @@ class DockerSandbox:
     async def get_archive(self, path: str) -> tarfile.TarFile:
         """Fetch a path from the container as a TarFile object."""
         assert self._container is not None
-        return await self._container.get_archive(path=path)
+        return cast(tarfile.TarFile, await self._container.get_archive(path=path))
 
     async def read_file_bytes(self, path: str) -> bytes:
         """Read a file from inside the container and return raw bytes."""

@@ -109,7 +109,7 @@ class _MonokaiFence(MarkdownFence):
     """MarkdownFence with Monokai highlighting."""
 
     @classmethod
-    def highlight(cls, code: str, language: str) -> Content:
+    def highlight(cls, code: str, language: str, ansi: bool = False, dark: bool = False) -> Content:
         return hl_highlight(code, language=language or None, theme=_MonokaiTheme)
 
 
