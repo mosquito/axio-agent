@@ -28,6 +28,7 @@ testpaths = ["tests", "README.md"]
 
 [tool.ruff]
 line-length = 119
+output-format = "concise"
 target-version = "py312"
 
 [tool.ruff.lint]
@@ -47,4 +48,3 @@ dev = [
     "markdown-pytest>=0.6.0",
     "textual>=2.1.0",
 ]
-

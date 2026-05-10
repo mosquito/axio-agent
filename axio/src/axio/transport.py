@@ -14,9 +14,11 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any, Protocol, runtime_checkable
 
+from .blocks import ContentBlock
 from .events import StreamEvent
 from .messages import Message
 from .tool import Tool
+from .types import ToolCallID, ToolName
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +30,88 @@ class CompletionTransport(Protocol):
 
 @runtime_checkable
 class ImageGenTransport(Protocol):
-    async def generate(self, prompt: str, *, size: tuple[int, int] | None = None, n: int = 1) -> list[bytes]: ...
+    """Generate ``n`` image samples for a text prompt.  Returns raw image bytes
+    (PNG / JPEG / WebP — provider-defined)."""
+
+    async def generate_images(self, prompt: str, *, model: str | None = None, n: int = 1) -> list[bytes]: ...
+
+
+@runtime_checkable
+class VideoGenTransport(Protocol):
+    """Generate ``n`` video samples for a text prompt.  Returns raw video bytes
+    (MP4 / WebM — provider-defined).  Provider-specific knobs (duration,
+    aspect ratio, seed image, etc.) live as extra kwargs on the implementation."""
+
+    async def generate_videos(
+        self,
+        prompt: str,
+        *,
+        model: str | None = None,
+        n: int = 1,
+        image: bytes | None = None,
+        duration_seconds: int | None = None,
+        aspect_ratio: str | None = None,
+    ) -> list[bytes]: ...
+
+
+@runtime_checkable
+class AudioGenTransport(Protocol):
+    """Generate ``n`` non-speech audio samples for a text prompt — music,
+    sound effects, ambient.  Returns raw audio bytes (MP3 / WAV / OGG —
+    provider-defined).  Distinct from :class:`TTSTransport`, which is
+    text-to-speech."""
+
+    async def generate_audios(self, prompt: str, *, model: str | None = None, n: int = 1) -> list[bytes]: ...
+
+
+@runtime_checkable
+class RealtimeSession(Protocol):
+    """Active duplex realtime session — bidirectional audio / text / tools.
+
+    Returned by :meth:`RealtimeTransport.connect`.  Events from the provider
+    arrive on :meth:`events`; user input is pushed via :meth:`send`.
+    """
+
+    async def send(self, content: ContentBlock | list[ContentBlock]) -> None:
+        """Append user content (audio chunk, text, image) to the input buffer."""
+
+    async def commit(self) -> None:
+        """Signal end-of-utterance for manual VAD; no-op with server VAD."""
+
+    async def interrupt(self) -> None:
+        """Abort in-flight assistant generation (e.g. user interrupted)."""
+
+    async def send_tool_result(
+        self, tool_use_id: ToolCallID, name: ToolName, content: str | list[ContentBlock]
+    ) -> None:
+        """Deliver a tool's result to the provider so generation can resume.
+
+        ``name`` is included because some providers (e.g. Gemini Live) require
+        the tool name alongside the call id; OpenAI realtime can ignore it.
+        """
+
+    def events(self) -> AsyncIterator[StreamEvent]:
+        """Async iterator over server events for the lifetime of this session."""
+
+    async def close(self) -> None:
+        """Tear down the session and release resources."""
+
+
+@runtime_checkable
+class RealtimeTransport(Protocol):
+    """Provider that supports duplex realtime sessions (e.g. OpenAI Realtime,
+    Gemini Live).  Distinct from :class:`CompletionTransport` because the
+    interaction is bidirectional, not request/response."""
+
+    async def connect(
+        self,
+        *,
+        system: str,
+        tools: list[Tool[Any]],
+        voice: str | None = None,
+        input_audio_format: str = "audio/pcm;rate=16000",
+        output_audio_format: str = "audio/pcm;rate=24000",
+    ) -> RealtimeSession: ...
 
 
 @runtime_checkable
@@ -85,7 +168,28 @@ class DummyCompletionTransport(DummyTransport, CompletionTransport):
 
 
 class DummyImageGenTransport(DummyTransport, ImageGenTransport):
-    async def generate(self, prompt: str, *, size: tuple[int, int] | None = None, n: int = 1) -> list[bytes]:
+    async def generate_images(self, prompt: str, *, model: str | None = None, n: int = 1) -> list[bytes]:
+        self._do_fail()
+        raise AssertionError("unreachable")
+
+
+class DummyVideoGenTransport(DummyTransport, VideoGenTransport):
+    async def generate_videos(
+        self,
+        prompt: str,
+        *,
+        model: str | None = None,
+        n: int = 1,
+        image: bytes | None = None,
+        duration_seconds: int | None = None,
+        aspect_ratio: str | None = None,
+    ) -> list[bytes]:
+        self._do_fail()
+        raise AssertionError("unreachable")
+
+
+class DummyAudioGenTransport(DummyTransport, AudioGenTransport):
+    async def generate_audios(self, prompt: str, *, model: str | None = None, n: int = 1) -> list[bytes]:
         self._do_fail()
         raise AssertionError("unreachable")
 

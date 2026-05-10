@@ -8,8 +8,15 @@ from enum import StrEnum
 
 
 class Capability(StrEnum):
+    # Input modalities
     text = "text"
     vision = "vision"
+    video = "video"
+    audio = "audio"
+    # Output modalities
+    image_generation = "image_generation"
+    video_generation = "video_generation"
+    # Processing capabilities
     reasoning = "reasoning"
     tool_use = "tool_use"
     json_mode = "json_mode"
@@ -81,6 +88,8 @@ class ModelRegistry(MutableMapping[str, ModelSpec]):
 
     def search(self, *q: str) -> ModelRegistry:
         """search by parts of id"""
+        if len(q) == 1 and q[0] in self._models:
+            return ModelRegistry([self._models[q[0]]])
         return ModelRegistry(v for k, v in self._models.items() if all(part in k for part in q))
 
     def by_cost(self, *, output: bool = False, desc: bool = False) -> ModelRegistry:

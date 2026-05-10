@@ -72,6 +72,7 @@ class ToolArgStream:
         "_esc_key",
         "_esc_ret",
         "_events",
+        "_done",
     )
 
     def __init__(self, tool_use_id: str, index: int = 0) -> None:
@@ -89,11 +90,17 @@ class ToolArgStream:
         self._esc_key = False
         self._esc_ret = State.KEY
         self._events: list[ToolFieldEvent] = []
+        self._done = False
 
     @property
     def current_key(self) -> str:
         """The field currently being streamed, or ``""``."""
         return self._key
+
+    @property
+    def done(self) -> bool:
+        """Whether the top-level JSON object has been fully parsed."""
+        return self._done
 
     def feed(self, chunk: str) -> list[ToolFieldEvent]:
         """Process a partial JSON chunk and return any field events produced."""
@@ -127,6 +134,7 @@ class ToolArgStream:
                     self._key_chars.clear()
                     self._st = State.KEY
                 elif ch == "}":
+                    self._done = True
                     self._st = State.INIT
 
             case State.KEY:
@@ -208,6 +216,7 @@ class ToolArgStream:
                 if ch == ",":
                     self._st = State.OBJ
                 elif ch == "}":
+                    self._done = True
                     self._st = State.INIT
 
             case State.ESC:

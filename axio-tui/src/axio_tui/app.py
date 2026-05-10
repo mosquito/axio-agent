@@ -533,6 +533,10 @@ class AgentApp(App[None]):
                 vb = self._role_bindings[ModelRole.VISION]
                 _tools.vision_transport = self._transports.make_transport(vb.transport, vb.model)
 
+            # Wire Google transport into image/video generation tools
+            if "google" in self._transports.available:
+                self._wire_google_gen_tools(self._transports.get_transport("google"))
+
             self._chat_transport = chat_transport
 
             # Discover tools and guards via entry points
@@ -676,6 +680,7 @@ class AgentApp(App[None]):
         _tools.status_line_callback = None
         _tools.subagent_factory = None
         _tools.vision_transport = None
+        self._wire_google_gen_tools(None)
         for plugin in self._tools_plugins.values():
             try:
                 await plugin.close()
@@ -693,13 +698,17 @@ class AgentApp(App[None]):
     async def _make_subagent(self) -> tuple[Agent, ContextStore]:
         context = await MemoryContextStore.from_context(self._chat_context)
         assert self._agent is not None
+        # Don't forward `schema=t.schema` — it would flip the rebuilt Tool into
+        # explicit-schema mode and synthesise _fields from JSON Schema only,
+        # losing Field bounds and Literal/Annotated constraints. Letting
+        # __post_init__ rebuild the schema from the handler keeps validation
+        # parity with the parent agent.
         sub_tools: list[Tool[Any]] = [
             Tool(
                 name=t.name,
                 description=t.description,
                 handler=t.handler,
                 guards=t.guards,
-                schema=t.schema,
                 context=t.context,
                 concurrency=t.concurrency,
             )
@@ -821,6 +830,16 @@ class AgentApp(App[None]):
                 return str(result)
             except ImportError:
                 return "y"
+
+    @staticmethod
+    def _wire_google_gen_tools(transport: Any) -> None:
+        """Set/clear transport on image/video generation tools if available."""
+        try:
+            import axio_transport_google.tools as _gen_tools
+
+            _gen_tools.transport = transport
+        except ImportError:
+            pass
 
     def _instantiate_guard(self, name: str, cls: type[PermissionGuard]) -> PermissionGuard | None:
         match name:
@@ -1142,6 +1161,9 @@ class AgentApp(App[None]):
         if ModelRole.VISION in self._role_bindings and self._role_bindings[ModelRole.VISION].transport == name:
             vb = self._role_bindings[ModelRole.VISION]
             _tools.vision_transport = self._transports.make_transport(name, vb.model)
+
+        if name == "google":
+            self._wire_google_gen_tools(self._transports.get_transport("google"))
 
         label = self._transports.get_transport(name).name
         await self._write_meta(f"[green]{label} activated[/]")

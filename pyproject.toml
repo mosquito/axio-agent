@@ -1,33 +1,44 @@
 [tool.uv.workspace]
 members = [
     "axio",
+    "axio-audio",
     "axio-context-sqlite",
+    "axio-repl",
     "axio-tools-docker",
     "axio-tools-local",
     "axio-tools-mcp",
     "axio-transport-anthropic",
     "axio-transport-codex",
+    "axio-transport-google",
     "axio-transport-openai",
     "axio-tui",
     "axio-tui-guards",
     "docs",
     "examples/agent_swarm",
     "examples/gas_town",
+    "examples/realtime_smoke",
+    "examples/realtime_chat",
 ]
 
 [tool.uv.sources]
-axio                       = { workspace = true }
-axio-context-sqlite        = { workspace = true }
-axio-tools-docker          = { workspace = true }
-axio-tools-local           = { workspace = true }
-axio-tools-mcp             = { workspace = true }
-axio-transport-anthropic   = { workspace = true }
-axio-transport-codex       = { workspace = true }
-axio-transport-openai      = { workspace = true }
-axio-tui                   = { workspace = true }
-axio-tui-guards            = { workspace = true }
-agent-swarm-example        = { workspace = true }
-gas-town-example           = { workspace = true }
+axio                     = { workspace = true }
+axio-audio               = { workspace = true }
+axio-context-sqlite      = { workspace = true }
+axio-repl                = { workspace = true }
+axio-tools-docker        = { workspace = true }
+axio-tools-local         = { workspace = true }
+axio-tools-mcp           = { workspace = true }
+axio-transport-anthropic = { workspace = true }
+axio-transport-codex     = { workspace = true }
+axio-transport-google    = { workspace = true }
+axio-transport-openai    = { workspace = true }
+axio-tui                 = { workspace = true }
+axio-tui-guards          = { workspace = true }
+agent-swarm-example      = { workspace = true }
+gas-town-example         = { workspace = true }
+realtime-smoke-example   = { workspace = true }
+realtime-chat-example    = { workspace = true }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+addopts = "--import-mode=importlib"

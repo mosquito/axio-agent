@@ -101,9 +101,10 @@ The running container's ID is available as `sandbox.container_id` inside the
 
 ## Named containers and reuse
 
-Pass `name=` to give the container a fixed name. If a running container with
-that name already exists, the sandbox attaches to it instead of creating a new
-one, and never removes it on exit - regardless of `remove`:
+Pass `name=` to give the container a fixed name. If a container with that name
+already exists, the sandbox starts it if needed and attaches instead of creating
+a new one. Attached containers are never removed on exit - regardless of
+`remove`:
 
 ```python
 import asyncio

@@ -1,0 +1,27 @@
+[project]
+name = "realtime-smoke-example"
+version = "0.1.0"
+description = "Realtime audio smoke test: tool calls + interrupt against a real provider"
+requires-python = ">=3.12"
+
+dependencies = [
+    "axio",
+    "axio-transport-openai",
+    "axio-transport-google",
+    "axio-audio",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["smoke.py"]
+
+[tool.ruff]
+line-length = 119
+output-format = "concise"
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]

@@ -7,17 +7,18 @@
 Anthropic Claude transport for [axio](https://github.com/mosquito/axio-agent).
 
 Streams Claude responses over the Anthropic Messages API using `aiohttp` and
-SSE parsing. Supports prompt caching, extended thinking, and automatic retry
-on rate-limit and overload errors.
+SSE parsing. Supports direct API, Vertex AI, prompt caching, extended thinking,
+and automatic retry on rate-limit and overload errors.
 
 ## Features
 
-- **All Claude models** - Opus, Sonnet, Haiku; configurable via `ANTHROPIC_MODELS`
-- **Prompt caching** - `cache_control: ephemeral` applied automatically to the
+- **All Claude models** — Opus, Sonnet, Haiku; configurable via `ANTHROPIC_MODELS`
+- **Vertex AI** — use Claude via Google Cloud with ADC authentication
+- **Prompt caching** — `cache_control: ephemeral` applied automatically to the
   system prompt and the last tool definition
-- **Extended thinking** - `ReasoningDelta` events emitted for thinking blocks
-- **Retry logic** - automatic backoff on 429 and all 5xx errors; honours `Retry-After` header
-- **TUI integration** - settings screen for API key and model selection
+- **Extended thinking** — `ReasoningDelta` events emitted for thinking blocks
+- **Retry logic** — automatic backoff on 429 / 529; honours `Retry-After` header
+- **TUI integration** — settings screen for API key and model selection
 
 ## Installation
 
@@ -31,18 +32,18 @@ With the TUI settings screen:
 pip install "axio-transport-anthropic[tui]"
 ```
 
-Or as part of the full TUI bundle:
+With Vertex AI support:
 
 ```bash
-pip install "axio-tui[anthropic]"
+pip install "axio-transport-anthropic[vertexai]"
 ```
 
 ## Usage
 
-<!-- name: test_readme_usage -->
 ```python
+import asyncio
 import aiohttp
-from axio.agent import Agent
+from axio import Agent
 from axio.context import MemoryContextStore
 from axio_transport_anthropic import AnthropicTransport, ANTHROPIC_MODELS
 
@@ -56,6 +57,8 @@ async def main() -> None:
         agent = Agent(system="You are helpful.", tools=[], transport=transport)
         ctx = MemoryContextStore()
         print(await agent.run("Hello!", ctx))
+
+asyncio.run(main())
 ```
 
 Set the API key via environment variable instead of passing it directly:
@@ -64,10 +67,16 @@ Set the API key via environment variable instead of passing it directly:
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-Override the base URL (e.g. for a proxy or private endpoint):
+### Vertex AI
 
-```bash
-export ANTHROPIC_BASE_URL="https://your-proxy.example.com/v1"
+```python
+transport = AnthropicTransport(
+    vertexai=True,
+    project="my-gcp-project",
+    location="us-east5",
+    session=session,
+)
+# Uses Application Default Credentials (gcloud auth application-default login)
 ```
 
 ## Models
@@ -77,8 +86,8 @@ export ANTHROPIC_BASE_URL="https://your-proxy.example.com/v1"
 | `claude-opus-4-6` | 1 M | 128 k | Most capable |
 | `claude-sonnet-4-6` | 1 M | 64 k | Balanced (default) |
 | `claude-haiku-4-5-20251001` | 200 k | 64 k | Fastest / cheapest |
-| `claude-opus-4-5` | 200 k | 64 k | - |
-| `claude-sonnet-4-5` | 200 k | 64 k | - |
+| `claude-opus-4-5` | 200 k | 64 k | — |
+| `claude-sonnet-4-5` | 200 k | 64 k | — |
 
 ## Configuration
 
@@ -87,30 +96,11 @@ export ANTHROPIC_BASE_URL="https://your-proxy.example.com/v1"
 | `api_key` | `""` | Anthropic API key |
 | `model` | `claude-sonnet-4-6` | Active model |
 | `base_url` | `https://api.anthropic.com/v1` | API base URL |
-| `max_retries` | `10` | Max retry attempts on 429 and 5xx errors |
+| `vertexai` | `False` | Use Vertex AI backend |
+| `project` | `""` | GCP project ID (Vertex AI) |
+| `location` | `""` | GCP region, e.g. `us-east5` (Vertex AI) |
+| `max_retries` | `10` | Max retry attempts on 429/529 |
 | `retry_base_delay` | `5.0` | Base delay (seconds) for exponential backoff |
-
-## `fetch_models()`
-
-`await transport.fetch_models()` resets `transport.models` to the built-in `ANTHROPIC_MODELS` registry. It does not make a network request. Override `model` directly to switch the active model.
-
-## Serialisation
-
-`AnthropicTransport` supports JSON round-trip for storing and restoring configuration:
-
-```python
-# Serialise
-data = transport.to_dict()   # -> {"name": ..., "base_url": ..., "api_key": ..., "models": [...]}
-
-# Restore
-transport = AnthropicTransport.from_dict(data, session=session)
-```
-
-`from_dict` falls back to `ANTHROPIC_API_KEY` and `ANTHROPIC_BASE_URL` environment variables if the stored values are empty.
-
-## Part of the axio ecosystem
-
-[axio](https://github.com/mosquito/axio-agent) · [axio-tui](https://github.com/mosquito/axio-agent) · [axio-transport-openai](https://github.com/mosquito/axio-agent) · [axio-transport-codex](https://github.com/mosquito/axio-agent)
 
 ## License
 

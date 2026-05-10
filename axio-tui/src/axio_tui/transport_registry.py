@@ -163,11 +163,12 @@ class TransportRegistry:
         cls = self._classes[name]
         kwargs: dict[str, Any] = {
             "api_key": src.api_key,
-            "base_url": src.base_url,
             "model": model,
             "models": src.models,
             "session": src.session,
         }
+        if hasattr(src, "base_url"):
+            kwargs["base_url"] = src.base_url
         # Apply saved settings that aren't already set
         for k, v in self._saved.get(name, {}).items():
             if k not in kwargs and v:

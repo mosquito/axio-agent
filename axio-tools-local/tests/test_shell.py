@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from axio_tools_local.shell import shell
 
 
 async def sh(command: str, **kwargs: Any) -> str:
     return await shell(command=command, **kwargs)
+
+
+def shell_stream(**kwargs: Any) -> AsyncGenerator[tuple[str, str], None]:
+    stream = cast(Callable[..., AsyncGenerator[tuple[str, str], None]], getattr(shell, "stream"))
+    return stream(**kwargs)
 
 
 class TestShellBasic:
@@ -75,3 +81,55 @@ class TestShellTimeout:
     async def test_fast_command_not_timed_out(self) -> None:
         result = await sh("echo quick", timeout=5)
         assert "quick" in result
+
+
+class TestShellStreaming:
+    async def test_stream_yields_keyed_lines(self) -> None:
+        chunks: list[tuple[str, str]] = []
+        async for chunk in shell_stream(command="printf 'a\\nb\\nc\\n'"):
+            chunks.append(chunk)
+        assert len(chunks) == 3
+        assert all(k == "stdout" for k, _ in chunks)
+        assert chunks[0] == ("stdout", "a\n")
+        assert chunks[1] == ("stdout", "b\n")
+        assert chunks[2] == ("stdout", "c\n")
+
+    async def test_stream_stderr_separate_key(self) -> None:
+        chunks: list[tuple[str, str]] = []
+        async for chunk in shell_stream(command="echo out; echo err >&2"):
+            chunks.append(chunk)
+        stdout = [t for k, t in chunks if k == "stdout"]
+        stderr = [t for k, t in chunks if k == "stderr"]
+        assert any("out" in t for t in stdout)
+        assert any("err" in t for t in stderr)
+
+    async def test_stream_exit_code_on_stderr_key(self) -> None:
+        chunks: list[tuple[str, str]] = []
+        async for chunk in shell_stream(command="echo out; exit 1"):
+            chunks.append(chunk)
+        stdout = [t for k, t in chunks if k == "stdout"]
+        stderr = [t for k, t in chunks if k == "stderr"]
+        assert any("out" in t for t in stdout)
+        assert any("exit code: 1" in t for t in stderr)
+
+    async def test_stream_timeout(self) -> None:
+        chunks: list[tuple[str, str]] = []
+        async for chunk in shell_stream(command="sleep 10", timeout=1):
+            chunks.append(chunk)
+        all_text = "".join(t for _, t in chunks)
+        assert "timeout" in all_text
+        assert "1s" in all_text
+
+    async def test_stream_no_output(self) -> None:
+        chunks: list[tuple[str, str]] = []
+        async for chunk in shell_stream(command="true"):
+            chunks.append(chunk)
+        assert chunks == []
+
+    async def test_call_structured_log_records(self) -> None:
+        """shell() produces timestamped log records with stream keys."""
+        result = await shell(command="echo out; echo err >&2")
+        assert "stdout]" in result
+        assert "stderr]" in result
+        assert "out" in result
+        assert "err" in result

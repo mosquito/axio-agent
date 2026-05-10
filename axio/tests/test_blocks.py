@@ -2,7 +2,16 @@
 
 import pytest
 
-from axio.blocks import ContentBlock, ImageBlock, TextBlock, ToolResultBlock, ToolUseBlock, from_dict, to_dict
+from axio.blocks import (
+    ContentBlock,
+    ImageBlock,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    VideoBlock,
+    from_dict,
+    to_dict,
+)
 from axio.messages import Message
 
 
@@ -35,6 +44,22 @@ class TestImageBlock:
 
     def test_hashable(self) -> None:
         b = ImageBlock(media_type="image/png", data=b"\x00")
+        assert hash(b) is not None
+
+
+class TestVideoBlock:
+    @pytest.mark.parametrize("media_type", ["video/mp4", "video/webm", "video/mov", "video/avi"])
+    def test_media_types(self, media_type: str) -> None:
+        b = VideoBlock(media_type=media_type, data=b"\x00")  # type: ignore[arg-type]
+        assert b.media_type == media_type
+
+    def test_frozen(self) -> None:
+        b = VideoBlock(media_type="video/mp4", data=b"\x00")
+        with pytest.raises(AttributeError):
+            b.data = b"\x01"  # type: ignore[misc]
+
+    def test_hashable(self) -> None:
+        b = VideoBlock(media_type="video/mp4", data=b"\x00")
         assert hash(b) is not None
 
 
@@ -75,6 +100,7 @@ class TestContentBlockBase:
         blocks: list[ContentBlock] = [
             TextBlock(text="hi"),
             ImageBlock(media_type="image/png", data=b""),
+            VideoBlock(media_type="video/mp4", data=b""),
             ToolUseBlock(id="c1", name="t", input={}),
             ToolResultBlock(tool_use_id="c1", content="ok"),
         ]
@@ -90,6 +116,12 @@ class TestToDict:
         d = to_dict(ImageBlock(media_type="image/png", data=b"\x89PNG"))
         assert d["type"] == "image"
         assert d["media_type"] == "image/png"
+        assert isinstance(d["data"], str)  # base64 encoded
+
+    def test_video(self) -> None:
+        d = to_dict(VideoBlock(media_type="video/mp4", data=b"\x00\x01"))
+        assert d["type"] == "video"
+        assert d["media_type"] == "video/mp4"
         assert isinstance(d["data"], str)  # base64 encoded
 
     def test_tool_use(self) -> None:
@@ -121,6 +153,10 @@ class TestFromDict:
 
     def test_image(self) -> None:
         block = ImageBlock(media_type="image/png", data=b"\x89PNG")
+        assert from_dict(to_dict(block)) == block
+
+    def test_video(self) -> None:
+        block = VideoBlock(media_type="video/mp4", data=b"\x00\x01")
         assert from_dict(to_dict(block)) == block
 
     def test_tool_use(self) -> None:

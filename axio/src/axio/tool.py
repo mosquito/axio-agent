@@ -55,10 +55,15 @@ def hint_from_json_schema(prop_schema: dict[str, Any]) -> Any:
 CONTEXT: ContextVar[Any] = ContextVar("CONTEXT")
 
 
+def _default_format_stream_result(chunks: list[tuple[float, str, str]]) -> str:
+    """Default streaming-aggregator: join all text, discard keys/timestamps."""
+    return "".join(text for _, _, text in chunks)
+
+
 @dataclass(frozen=True, slots=True)
 class Tool[T]:
     name: ToolName
-    handler: Callable[..., Awaitable[str]]
+    handler: Callable[..., Awaitable[Any]]
     description: str = ""
     guards: tuple[PermissionGuard, ...] = ()
     concurrency: int | None = None
@@ -80,14 +85,6 @@ class Tool[T]:
         if not self.description:
             object.__setattr__(self, "description", self.handler.__doc__ or "")
         hints = get_type_hints(self.handler, include_extras=True)
-        return_hint = hints.get("return")
-        if return_hint is not None and return_hint is not str:
-            logger.warning(
-                "Tool %r handler %r has return annotation %r, expected str. Non-str values will be coerced via str().",
-                self.name,
-                getattr(self.handler, "__qualname__", self.handler),
-                return_hint,
-            )
         param_hints = {k: v for k, v in hints.items() if k != "return"}
         try:
             sig = inspect.signature(self.handler)
@@ -138,40 +135,52 @@ class Tool[T]:
     def input_schema(self) -> JSONSchema:
         return copy.deepcopy(dict(self.schema))
 
+    @property
+    def supports_streaming(self) -> bool:
+        """Handler supports streaming if it exposes a ``.stream`` async-generator attribute."""
+        return callable(getattr(self.handler, "stream", None))
+
+    def format_stream_result(self, chunks: list[tuple[float, str, str]]) -> str:
+        """Aggregate streamed chunks into the final tool result string.
+
+        Handlers may attach a ``format_stream_result`` callable for structured
+        output (e.g. shell log records). Defaults to text concatenation.
+        """
+        fn = getattr(self.handler, "format_stream_result", None)
+        if callable(fn):
+            result = fn(chunks)
+            return result if isinstance(result, str) else str(result)
+        return _default_format_stream_result(chunks)
+
+    def _prepare_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Inject defaults, validate types, and strip extras per schema."""
+        required_set: set[str] = set(self.schema.get("required", []))
+        for name, (hint, fi) in self._fields.items():
+            if name not in kwargs:
+                if fi.default is not MISSING and name not in required_set:
+                    kwargs[name] = fi.default
+            else:
+                fi.validate(kwargs[name], name, hint)
+        missing = [name for name in required_set if name not in kwargs]
+        if missing:
+            raise HandlerError(f"Missing required field(s): {', '.join(missing)}")
+        if self._schema_explicit:
+            schema_props = self.schema.get("properties")
+            if schema_props is not None:
+                kwargs = {k: v for k, v in kwargs.items() if k in schema_props}
+        elif not self._accepts_var_kwargs:
+            kwargs = {k: v for k, v in kwargs.items() if k in self._fields}
+        return kwargs
+
     async def __call__(self, **kwargs: Any) -> Any:
         async with self._acquire():
-            # 1. Inject defaults and validate - guards see fully materialised kwargs.
             try:
-                required_set: set[str] = set(self.schema.get("required", []))
-                for name, (hint, fi) in self._fields.items():
-                    if name not in kwargs:
-                        # Required fields must be supplied by the caller even if the schema
-                        # carries a default; only inject defaults for optional fields.
-                        if fi.default is not MISSING and name not in required_set:
-                            kwargs[name] = fi.default
-                    else:
-                        fi.validate(kwargs[name], name, hint)
-
-                missing = [name for name in required_set if name not in kwargs]
-                if missing:
-                    raise HandlerError(f"Missing required field(s): {', '.join(missing)}")
+                kwargs = self._prepare_kwargs(kwargs)
             except HandlerError:
                 raise
             except Exception as exc:
                 raise HandlerError(str(exc)) from exc
 
-            # 2. Strip caller-supplied extras before guards so they only see
-            #    what the handler will actually receive.
-            if self._schema_explicit:
-                # Explicit schema is the contract - filter to its declared properties.
-                # Applies to both **kwargs (MCP) and regular handlers with custom schemas.
-                schema_props = self.schema.get("properties")
-                if schema_props is not None:
-                    kwargs = {k: v for k, v in kwargs.items() if k in schema_props}
-            elif not self._accepts_var_kwargs:
-                kwargs = {k: v for k, v in kwargs.items() if k in self._fields}
-
-            # 3. Guards run sequentially on stripped kwargs.
             for guard in self.guards:
                 try:
                     kwargs = await guard(self, **kwargs)
@@ -180,7 +189,6 @@ class Tool[T]:
                 except Exception as exc:
                     raise GuardError(str(exc)) from exc
 
-            # 4. Execute handler - strip any guard-injected stray kwargs.
             try:
                 if self._schema_explicit:
                     schema_props = self.schema.get("properties")
@@ -190,10 +198,59 @@ class Tool[T]:
                     kwargs = {k: v for k, v in kwargs.items() if k in self._fields}
                 token = CONTEXT.set(self.context)
                 try:
-                    return str(await self.handler(**kwargs))
+                    return await self.handler(**kwargs)
                 finally:
                     CONTEXT.reset(token)
             except HandlerError:
                 raise
             except Exception as exc:
                 raise HandlerError(str(exc)) from exc
+
+    async def call_streaming(self, **kwargs: Any) -> AsyncGenerator[tuple[str, str], None]:
+        """Execute handler, yielding ``(key, text)`` chunks for streaming output.
+
+        Uses ``handler.stream(**kwargs)`` if the handler exposes one. Otherwise
+        falls back to ``__call__()`` and yields the full result as a single
+        ``("output", ...)`` chunk. Semaphore is held for the entire iteration.
+        """
+        async with self._acquire():
+            try:
+                kwargs = self._prepare_kwargs(kwargs)
+            except HandlerError:
+                raise
+            except Exception as exc:
+                raise HandlerError(str(exc)) from exc
+
+            for guard in self.guards:
+                try:
+                    kwargs = await guard(self, **kwargs)
+                except GuardError:
+                    raise
+                except Exception as exc:
+                    raise GuardError(str(exc)) from exc
+
+            if self._schema_explicit:
+                schema_props = self.schema.get("properties")
+                if schema_props is not None:
+                    kwargs = {k: v for k, v in kwargs.items() if k in schema_props}
+            elif not self._accepts_var_kwargs:
+                kwargs = {k: v for k, v in kwargs.items() if k in self._fields}
+
+            stream_fn = getattr(self.handler, "stream", None)
+            token = CONTEXT.set(self.context)
+            try:
+                if callable(stream_fn):
+                    async for chunk in stream_fn(**kwargs):
+                        yield chunk
+                else:
+                    result = await self.handler(**kwargs)
+                    if isinstance(result, str):
+                        yield ("output", result)
+                    else:
+                        yield ("output", str(result))
+            except HandlerError:
+                raise
+            except Exception as exc:
+                raise HandlerError(str(exc)) from exc
+            finally:
+                CONTEXT.reset(token)

@@ -63,6 +63,7 @@ def mock_docker_factory(
     mock_container.start = AsyncMock()
     mock_container.delete = AsyncMock()
     mock_container.exec = AsyncMock(return_value=mock_exec)
+    mock_container.show = AsyncMock(return_value={"State": {"Running": True}})
     mock_container.put_archive = AsyncMock()
     mock_container.get_archive = AsyncMock(
         return_value=archive_content if archive_content is not None else make_tar_file("file.txt", b"content")
@@ -164,6 +165,16 @@ async def test_named_existing_container_attaches() -> None:
             pass
     client.containers.get.assert_awaited_once_with("my-sandbox")
     container.start.assert_not_awaited()
+
+
+async def test_named_existing_stopped_container_starts_before_attach() -> None:
+    cls, client, container = mock_docker_factory()
+    client.containers.get = AsyncMock(return_value=container)
+    container.show = AsyncMock(return_value={"State": {"Running": False}})
+    with patch("axio_tools_docker.sandbox.aiodocker.Docker", cls):
+        async with DockerSandbox(name="my-sandbox"):
+            pass
+    container.start.assert_awaited_once()
 
 
 async def test_named_existing_container_not_deleted() -> None:

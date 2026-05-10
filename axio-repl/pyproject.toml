@@ -1,0 +1,48 @@
+[project]
+name = "axio-repl"
+version = "0.2.3"
+description = "Interactive REPL coding assistant for Axio"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+keywords = ["llm", "agent", "ai", "repl", "coding-assistant"]
+dependencies = [
+    "axio",
+    "axio-tools-local",
+    "axio-transport-openai",
+    "aiohttp>=3.11",
+]
+
+[project.scripts]
+axio-repl = "axio_repl:main_sync"
+
+[project.urls]
+Homepage = "https://github.com/mosquito/axio-agent"
+Repository = "https://github.com/mosquito/axio-agent"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/axio_repl"]
+
+[tool.ruff]
+line-length = 119
+output-format = "concise"
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "mypy>=1.14",
+    "ruff>=0.9",
+]

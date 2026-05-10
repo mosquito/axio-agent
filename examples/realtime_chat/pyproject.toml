@@ -1,0 +1,35 @@
+[project]
+name = "realtime-chat-example"
+version = "0.1.0"
+description = "Interactive realtime voice chat: mic → realtime model → speaker"
+requires-python = ">=3.12"
+
+dependencies = [
+    "axio",
+    "axio-audio",
+    "axio-tools-local",
+    "axio-transport-openai",
+    "axio-transport-google",
+    "rich>=13",
+    "webrtcvad-wheels>=2.0.14",
+]
+
+[build-system]
+# setuptools + pybind11 — needed because the example ships a C++
+# extension (webrtc_apm) wrapping libwebrtc-audio-processing-1 for
+# AEC3-grade echo cancellation.  Hatchling doesn't compile C/C++.
+requires = ["setuptools>=68", "pybind11>=2.10", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# Explicit list — without this setuptools tries to auto-discover
+# packages and fails on this flat-layout example tree.
+py-modules = ["chat", "aec", "aec_bench"]
+
+[tool.ruff]
+line-length = 119
+output-format = "concise"
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
