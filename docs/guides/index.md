@@ -8,6 +8,8 @@ Practical, step-by-step guides for extending Axio with your own components.
 axio-repl
 google-transport
 realtime-audio
+mcp-tools
+multimodal
 writing-tools
 writing-transports
 writing-guards
