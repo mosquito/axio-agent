@@ -136,24 +136,24 @@ uv run --directory docs pytest -v guides/best-practices.md
 
 Documentation lives in `docs/` and is tested with [markdown-pytest](https://github.com/mosquito/markdown-pytest). Code blocks in `.md` files are annotated with HTML comments:
 
-```markdown
+````markdown
 <!-- name: test_my_example -->
 ```python
 import asyncio
 # ...
 ```
-```
+````
 
 Hidden setup blocks (stubs that shouldn't appear in the rendered docs):
 
-```markdown
+````markdown
 <!--
 name: test_my_example
 ```python
 # hidden setup code - not visible in rendered docs
 ```
 -->
-```
+````
 
 ### Adding a new package
 
@@ -166,23 +166,17 @@ name: test_my_example
 
 ## Repository layout
 
-```
-axio-agent/
-├── pyproject.toml          # workspace root - members + shared uv.sources
-├── uv.lock                 # single lockfile for the whole workspace
-├── Makefile                # lint / type / test targets
-├── examples/               # runnable example scripts
-├── docs/                   # Sphinx + markdown-pytest documentation
-│   ├── conf.py
-│   ├── pyproject.toml
-│   └── guides/
-├── axio/                   # core library
-├── axio-tui/               # TUI application
-├── axio-transport-*/       # transport implementations
-├── axio-tools-*/           # tool providers
-├── axio-context-sqlite/    # SQLite context store
-└── axio-tui-guards/        # permission guard plugins
-```
+Each top-level directory is either a workspace package or a support directory:
+
+- **`axio/`** - core library; everything else depends on it
+- **`axio-transport-*/`** - LLM transport implementations
+- **`axio-tools-*/`** - tool providers
+- **`axio-audio/`** - microphone / speaker helpers for realtime agents
+- **`axio-context-*/`** - context store implementations
+- **`axio-tui/`** and **`axio-tui-guards/`** - terminal UI and permission plugins
+- **`axio-repl/`** - interactive terminal coding assistant
+- **`examples/`** - runnable end-to-end examples
+- **`docs/`** - Sphinx documentation with markdown-pytest doc tests
 
 ---
 
