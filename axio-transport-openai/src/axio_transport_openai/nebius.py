@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
 from axio.exceptions import StreamError
+from axio.messages import Message
 from axio.models import Capability, ModelSpec
+from axio.tool import Tool
 
 from axio_transport_openai import OpenAITransport
 
 logger = logging.getLogger(__name__)
+
+_UNSET = ModelSpec(id="<not initialized: call fetch_models() first>", context_window=0, max_output_tokens=0)
 
 
 @dataclass(slots=True)
@@ -20,7 +25,12 @@ class NebiusTransport(OpenAITransport):
     name: str = "Nebius AI Studio"
     api_key: str = field(default_factory=lambda: os.environ.get("NEBIUS_API_KEY", ""))
     base_url: str = "https://api.tokenfactory.nebius.com/v1"
-    model: ModelSpec = ModelSpec(id="deepseek-ai/DeepSeek-V3-0324")
+    model: ModelSpec = field(default_factory=lambda: _UNSET)
+
+    def stream(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> AsyncIterator[Any]:
+        if self.model is _UNSET:
+            raise RuntimeError("NebiusTransport: call fetch_models() before streaming")
+        return super().stream(messages, tools, system)
 
     async def fetch_models(self) -> None:
         """Fetch available models from Nebius ``/v1/models?verbose=true``."""
@@ -39,6 +49,12 @@ class NebiusTransport(OpenAITransport):
             self.models[m.id] = m
         logger.info("Loaded %d models from %s", len(self.models), url)
 
+        if self.model.id in self.models:
+            self.model = self.models[self.model.id]
+        elif self.models:
+            candidates = self.models.by_capability(Capability.tool_use).by_cost()
+            self.model = candidates.first() if candidates else self.models.first()
+
     @staticmethod
     def _parse_model(entry: dict[str, Any]) -> ModelSpec:
         caps: set[Capability] = set()
@@ -56,7 +72,6 @@ class NebiusTransport(OpenAITransport):
         if "embedding" in output_modality:
             caps.add(Capability.embedding)
 
-        # Heuristic for known embedding model families
         model_id: str = entry["id"]
         _embed_prefixes = ("BAAI/bge-", "intfloat/e5-", "intfloat/multilingual-e5-")
         if any(model_id.startswith(p) for p in _embed_prefixes) or "/Embedding-" in model_id:

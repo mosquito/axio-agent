@@ -124,9 +124,9 @@ def test_default_base_url() -> None:
     assert t.base_url == "https://api.tokenfactory.nebius.com/v1"
 
 
-def test_default_model() -> None:
+def test_no_default_model_before_fetch() -> None:
     t = NebiusTransport()
-    assert t.model.id == "deepseek-ai/DeepSeek-V3-0324"
+    assert "fetch_models" in t.model.id
 
 
 def test_default_models_inherited() -> None:
@@ -234,21 +234,81 @@ async def test_fetch_models_clears_and_repopulates(
     transport: NebiusTransport,
 ) -> None:
     server, _ = fake_server
-    # Pre-populate with a custom spec
     transport.models["custom/model"] = ModelSpec(id="custom/model", context_window=128_000, max_output_tokens=8_192)
 
     server.models_response = {
         "object": "list",
         "data": [
-            {"id": "deepseek-ai/DeepSeek-V3-0324", "object": "model", "context_length": 65536},
+            {"id": "deepseek-ai/DeepSeek-V3.2", "object": "model", "context_length": 65536},
         ],
     }
 
     await transport.fetch_models()
 
-    # Old entries are cleared, only API results remain
     assert "custom/model" not in transport.models
-    assert "deepseek-ai/DeepSeek-V3-0324" in transport.models
+    assert "deepseek-ai/DeepSeek-V3.2" in transport.models
+
+
+async def test_fetch_models_syncs_self_model(
+    fake_server: tuple[FakeNebiusServer, str],
+    transport: NebiusTransport,
+) -> None:
+    """If current model id is in the registry, self.model is updated with parsed capabilities."""
+    server, _ = fake_server
+    server.models_response = {
+        "object": "list",
+        "data": [
+            {
+                "id": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+                "object": "model",
+                "context_length": 131072,
+                "max_output_tokens": 4096,
+                "supported_features": ["tools", "json_mode"],
+                "pricing": {"prompt": "0.00000002", "completion": "0.00000006"},
+            },
+        ],
+    }
+
+    await transport.fetch_models()
+
+    assert transport.model.id == "meta-llama/Meta-Llama-3.1-8B-Instruct"
+    assert Capability.tool_use in transport.model.capabilities
+
+
+async def test_fetch_models_picks_cheapest_tool_use_when_current_gone(
+    fake_server: tuple[FakeNebiusServer, str],
+    transport: NebiusTransport,
+) -> None:
+    """If current model is gone, self.model is set to the cheapest tool_use model."""
+    server, _ = fake_server
+    server.models_response = {
+        "object": "list",
+        "data": [
+            {
+                "id": "expensive/model",
+                "object": "model",
+                "supported_features": ["tools"],
+                "pricing": {"prompt": "0.001", "completion": "0.003"},
+            },
+            {
+                "id": "cheap/model",
+                "object": "model",
+                "supported_features": ["tools"],
+                "pricing": {"prompt": "0.0001", "completion": "0.0003"},
+            },
+            {
+                "id": "no-tools/model",
+                "object": "model",
+                "supported_features": [],
+                "pricing": {"prompt": "0.00001", "completion": "0.00003"},
+            },
+        ],
+    }
+
+    await transport.fetch_models()
+
+    assert transport.model.id == "cheap/model"
+    assert Capability.tool_use in transport.model.capabilities
 
 
 async def test_fetch_models_empty(
@@ -361,12 +421,19 @@ async def test_text_to_image_no_vision(
 # ---------------------------------------------------------------------------
 
 
+async def test_stream_raises_before_fetch_models(transport: NebiusTransport) -> None:
+    with pytest.raises(RuntimeError, match="fetch_models"):
+        async for _ in transport.stream([], [], ""):
+            pass
+
+
 async def test_text_streaming(
     fake_server: tuple[FakeNebiusServer, str],
     transport: NebiusTransport,
 ) -> None:
     server, _ = fake_server
     server.sse_responses.append(_text_chunks("Hi"))
+    transport.model = ModelSpec(id="test/model", context_window=128_000, max_output_tokens=4_096)
 
     events = await _collect(transport.stream([], [], ""))
 
@@ -387,11 +454,11 @@ def test_default_max_tokens() -> None:
     t = NebiusTransport()
     payload = t.build_payload([], [], "You are helpful.")
     assert payload["max_completion_tokens"] == t.model.max_output_tokens
-    assert payload["model"] == "deepseek-ai/DeepSeek-V3-0324"
+    assert "fetch_models" in payload["model"]
 
 
 def test_max_tokens_when_spec_provided() -> None:
-    spec = ModelSpec(id="deepseek-ai/DeepSeek-V3-0324", context_window=128_000, max_output_tokens=8_192)
+    spec = ModelSpec(id="deepseek-ai/DeepSeek-V3.2", context_window=128_000, max_output_tokens=8_192)
     t = NebiusTransport(
         model=spec,
         models=ModelRegistry([spec]),
