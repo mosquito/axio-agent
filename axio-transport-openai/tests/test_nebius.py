@@ -542,3 +542,98 @@ async def test_embedding_not_from_input_modality(
     await transport.fetch_models()
 
     assert Capability.embedding not in transport.models["some/chat-model"].capabilities
+
+
+# ---------------------------------------------------------------------------
+# ThinkingMixin via NebiusTransport
+# ---------------------------------------------------------------------------
+
+_REASONING_MODEL = ModelSpec(
+    id="qwen-thinking",
+    context_window=128_000,
+    max_output_tokens=8_192,
+    capabilities=frozenset({Capability.text, Capability.reasoning, Capability.tool_use}),
+)
+
+_NON_REASONING_MODEL = ModelSpec(
+    id="plain-model",
+    context_window=128_000,
+    max_output_tokens=8_192,
+    capabilities=frozenset({Capability.text, Capability.tool_use}),
+)
+
+
+async def test_thinking_adds_enable_thinking_for_reasoning_model(
+    fake_server: tuple[FakeNebiusServer, str],
+) -> None:
+    server, base_url = fake_server
+    server.sse_responses.append(_text_chunks("ok"))
+
+    async with aiohttp.ClientSession() as session:
+        t = NebiusTransport(
+            base_url=base_url,
+            api_key="test-key",
+            model=_REASONING_MODEL,
+            session=session,
+            thinking=True,
+        )
+        await _collect(t.stream([], [], ""))
+
+    assert server.received_payloads[0]["enable_thinking"] is True
+
+
+async def test_thinking_skipped_for_non_reasoning_model(
+    fake_server: tuple[FakeNebiusServer, str],
+) -> None:
+    server, base_url = fake_server
+    server.sse_responses.append(_text_chunks("ok"))
+
+    async with aiohttp.ClientSession() as session:
+        t = NebiusTransport(
+            base_url=base_url,
+            api_key="test-key",
+            model=_NON_REASONING_MODEL,
+            session=session,
+            thinking=True,
+        )
+        await _collect(t.stream([], [], ""))
+
+    assert "enable_thinking" not in server.received_payloads[0]
+
+
+async def test_thinking_false_does_not_add_param(
+    fake_server: tuple[FakeNebiusServer, str],
+) -> None:
+    server, base_url = fake_server
+    server.sse_responses.append(_text_chunks("ok"))
+
+    async with aiohttp.ClientSession() as session:
+        t = NebiusTransport(
+            base_url=base_url,
+            api_key="test-key",
+            model=_REASONING_MODEL,
+            session=session,
+            thinking=False,
+        )
+        await _collect(t.stream([], [], ""))
+
+    assert "enable_thinking" not in server.received_payloads[0]
+
+
+def test_thinking_to_dict_round_trip() -> None:
+    t = NebiusTransport(api_key="k", thinking=True)
+    d = t.to_dict()
+    assert d["thinking"] is True
+    t2 = NebiusTransport.from_dict(d)
+    assert t2.thinking is True
+
+
+def test_thinking_extra_params_can_override() -> None:
+    t = NebiusTransport(
+        api_key="k",
+        model=_REASONING_MODEL,
+        thinking=True,
+        extra_params={"enable_thinking": False},
+    )
+    payload = t.build_payload([], [], "")
+    assert payload["enable_thinking"] is False

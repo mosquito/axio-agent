@@ -13,7 +13,7 @@ from axio.messages import Message
 from axio.models import Capability, ModelSpec
 from axio.tool import Tool
 
-from axio_transport_openai import OpenAITransport
+from axio_transport_openai import OpenAITransport, ThinkingMixin
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +21,12 @@ _UNSET = ModelSpec(id="<not initialized: call fetch_models() first>", context_wi
 
 
 @dataclass(slots=True)
-class NebiusTransport(OpenAITransport):
+class NebiusTransport(ThinkingMixin, OpenAITransport):
     name: str = "Nebius AI Studio"
     api_key: str = field(default_factory=lambda: os.environ.get("NEBIUS_API_KEY", ""))
     base_url: str = "https://api.tokenfactory.nebius.com/v1"
     model: ModelSpec = field(default_factory=lambda: _UNSET)
+    thinking: bool = False
 
     def stream(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> AsyncIterator[Any]:
         if self.model is _UNSET:

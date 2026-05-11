@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import AsyncIterator
+from types import MappingProxyType
 from typing import Any
 
 import aiohttp
@@ -1377,3 +1378,81 @@ async def test_sse_buffer_flush(
     assert len(ends) == 1
     assert ends[0].usage == Usage(42, 7)
     assert ends[0].stop_reason == StopReason.end_turn
+
+
+# ---------------------------------------------------------------------------
+# extra_params
+# ---------------------------------------------------------------------------
+
+
+async def test_extra_params_sent_in_payload(
+    fake_server: tuple[FakeOpenAIServer, str],
+) -> None:
+    server, base_url = fake_server
+    server.responses.append(_text_chunks("ok"))
+
+    async with aiohttp.ClientSession() as session:
+        t = OpenAITransport(
+            base_url=base_url,
+            api_key="test-key",
+            model=OPENAI_MODELS["gpt-4.1-mini"],
+            session=session,
+            extra_params={"enable_thinking": True, "thinking_budget": 512},
+        )
+        await _collect(t.stream([], [], ""))
+
+    payload = server.received_payloads[0]
+    assert payload["enable_thinking"] is True
+    assert payload["thinking_budget"] == 512
+
+
+async def test_extra_params_override_payload_field(
+    fake_server: tuple[FakeOpenAIServer, str],
+) -> None:
+    server, base_url = fake_server
+    server.responses.append(_text_chunks("ok"))
+
+    async with aiohttp.ClientSession() as session:
+        t = OpenAITransport(
+            base_url=base_url,
+            api_key="test-key",
+            model=OPENAI_MODELS["gpt-4.1-mini"],
+            session=session,
+            extra_params={"max_completion_tokens": 42},
+        )
+        await _collect(t.stream([], [], ""))
+
+    assert server.received_payloads[0]["max_completion_tokens"] == 42
+
+
+def test_extra_params_default_is_proxy() -> None:
+    t = OpenAITransport(api_key="k")
+    assert isinstance(t.extra_params, MappingProxyType)
+    assert len(t.extra_params) == 0
+
+
+def test_extra_params_dict_converted_to_proxy() -> None:
+    t = OpenAITransport(api_key="k", extra_params={"x": 1})
+    assert isinstance(t.extra_params, MappingProxyType)
+    assert t.extra_params["x"] == 1
+
+
+def test_extra_params_proxy_is_immutable() -> None:
+    t = OpenAITransport(api_key="k", extra_params={"x": 1})
+    with pytest.raises(TypeError):
+        t.extra_params["x"] = 2  # type: ignore[index]
+
+
+def test_extra_params_to_dict_round_trip() -> None:
+    t = OpenAITransport(api_key="k", extra_params={"enable_thinking": True})
+    d = t.to_dict()
+    assert d["extra_params"] == {"enable_thinking": True}
+
+    t2 = OpenAITransport.from_dict(d)
+    assert isinstance(t2.extra_params, MappingProxyType)
+    assert t2.extra_params["enable_thinking"] is True
+
+
+def test_extra_params_empty_omitted_from_dict() -> None:
+    t = OpenAITransport(api_key="k")
+    assert "extra_params" not in t.to_dict()

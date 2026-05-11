@@ -10,17 +10,18 @@ from typing import Any
 from axio.exceptions import StreamError
 from axio.models import Capability, ModelSpec
 
-from axio_transport_openai import OpenAITransport
+from axio_transport_openai import OpenAITransport, ThinkingMixin
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
-class OpenRouterTransport(OpenAITransport):
+class OpenRouterTransport(ThinkingMixin, OpenAITransport):
     name: str = "OpenRouter"
     api_key: str = field(default_factory=lambda: os.environ.get("OPENROUTER_API_KEY", ""))
     base_url: str = "https://openrouter.ai/api/v1"
     model: ModelSpec = ModelSpec(id="google/gemini-2.5-pro-preview")
+    thinking: bool = False
 
     async def fetch_models(self) -> None:
         """Fetch available models from OpenRouter ``/v1/models``."""

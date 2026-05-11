@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import json
 import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, Self
 
 import aiohttp
@@ -361,6 +363,11 @@ class OpenAITransport(CompletionTransport, EmbeddingTransport):
     session: aiohttp.ClientSession | None = field(default=None, repr=False, compare=False)
     max_retries: int = 10
     retry_base_delay: float = 5.0
+    extra_params: Mapping[str, Any] = field(default=MappingProxyType({}), repr=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.extra_params, MappingProxyType):
+            self.extra_params = MappingProxyType(self.extra_params)
 
     def _get_retry_delay(self, resp: aiohttp.ClientResponse | None, attempt: int) -> float:
         """Return delay in seconds: prefer Retry-After header, fall back to exponential backoff."""
@@ -384,6 +391,9 @@ class OpenAITransport(CompletionTransport, EmbeddingTransport):
 
         if tools:
             payload["tools"] = _convert_tools(tools)
+
+        if self.extra_params:
+            payload.update(self.extra_params)
 
         return payload
 
@@ -616,7 +626,7 @@ class OpenAITransport(CompletionTransport, EmbeddingTransport):
         self.models = OPENAI_MODELS
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "name": self.name,
             "base_url": self.base_url,
             "api_key": self.api_key,
@@ -632,6 +642,9 @@ class OpenAITransport(CompletionTransport, EmbeddingTransport):
                 for m in self.models.values()
             ],
         }
+        if self.extra_params:
+            result["extra_params"] = dict(self.extra_params)
+        return result
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], *, session: aiohttp.ClientSession | None = None) -> Self:
@@ -655,5 +668,38 @@ class OpenAITransport(CompletionTransport, EmbeddingTransport):
             base_url=str(data.get("base_url", "")) or os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
             api_key=str(data.get("api_key", "")) or os.environ.get("OPENAI_API_KEY", ""),
             models=models,
+            extra_params=dict(data.get("extra_params") or {}),
             session=session,
         )
+
+
+class ThinkingMixin:
+    """Mixin for OpenAI-compatible transports whose providers support enable_thinking.
+
+    Providers like Nebius (Qwen models) and OpenRouter require an explicit
+    ``enable_thinking: true`` request parameter to activate chain-of-thought
+    reasoning.  Declare ``thinking: bool = False`` in the concrete dataclass
+    and mix this in to get automatic payload injection and to_dict/from_dict
+    round-trip support.
+    """
+
+    __slots__ = ()
+
+    thinking: bool  # declared in the concrete dataclass subclass
+
+    def build_payload(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> dict[str, Any]:
+        payload: dict[str, Any] = super().build_payload(messages, tools, system)  # type: ignore[misc]
+        if self.thinking and Capability.reasoning in self.model.capabilities and "enable_thinking" not in payload:  # type: ignore[attr-defined]
+            payload["enable_thinking"] = True
+        return payload
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = super().to_dict()  # type: ignore[misc]
+        if self.thinking:
+            d["thinking"] = True
+        return d
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any], *, session: aiohttp.ClientSession | None = None) -> Self:
+        obj = super().from_dict(data, session=session)  # type: ignore[misc]
+        return dataclasses.replace(obj, thinking=bool(data.get("thinking", False)))  # type: ignore[no-any-return]
