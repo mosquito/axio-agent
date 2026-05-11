@@ -430,7 +430,7 @@ class OpenAITransport(CompletionTransport, EmbeddingTransport):
                         else:
                             yield TextDelta(index=0, delta=text)
 
-                if "tool_calls" in delta:
+                if "tool_calls" in delta and delta["tool_calls"] is not None:
                     for tc in delta["tool_calls"]:
                         idx: int = tc["index"]
                         if "id" in tc and tc["id"]:
