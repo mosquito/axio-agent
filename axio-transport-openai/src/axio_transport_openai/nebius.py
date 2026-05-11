@@ -30,7 +30,7 @@ class NebiusTransport(OpenAITransport):
     def stream(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> AsyncIterator[Any]:
         if self.model is _UNSET:
             raise RuntimeError("NebiusTransport: call fetch_models() before streaming")
-        return super().stream(messages, tools, system)
+        return OpenAITransport.stream(self, messages, tools, system)
 
     async def fetch_models(self) -> None:
         """Fetch available models from Nebius ``/v1/models?verbose=true``."""
