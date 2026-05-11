@@ -421,7 +421,7 @@ class OpenAITransport(CompletionTransport, EmbeddingTransport):
                     continue
 
                 choice = choices[0]
-                delta: dict[str, Any] = choice.get("delta", {})
+                delta: dict[str, Any] = choice.get("delta") or {}
 
                 if "content" in delta and delta["content"] is not None:
                     for kind, text in think_parser.feed(delta["content"]):
@@ -435,12 +435,14 @@ class OpenAITransport(CompletionTransport, EmbeddingTransport):
                         idx: int = tc["index"]
                         if "id" in tc and tc["id"]:
                             tool_id: str = tc["id"]
-                            tool_name: str = tc["function"]["name"]
+                            fn = tc.get("function") or {}
+                            tool_name: str = fn.get("name", "")
                             tool_index_to_id[idx] = tool_id
                             yield ToolUseStart(index=idx, tool_use_id=tool_id, name=tool_name)
-                        if "function" in tc and "arguments" in tc["function"]:
+                        fn = tc.get("function") or {}
+                        if "arguments" in fn:
                             tid = tool_index_to_id.get(idx, "")
-                            yield ToolInputDelta(index=idx, tool_use_id=tid, partial_json=tc["function"]["arguments"])
+                            yield ToolInputDelta(index=idx, tool_use_id=tid, partial_json=fn["arguments"])
 
                 if "finish_reason" in choice and choice["finish_reason"] is not None:
                     finish_reason = choice["finish_reason"]

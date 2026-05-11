@@ -396,6 +396,73 @@ async def test_multiple_tool_calls(fake_server: tuple[FakeOpenAIServer, str], tr
 
 
 # ---------------------------------------------------------------------------
+# Null-field resilience (DeepSeek-style quirks)
+# ---------------------------------------------------------------------------
+
+
+async def test_tool_calls_null_in_delta(
+    fake_server: tuple[FakeOpenAIServer, str],
+    transport: OpenAITransport,
+) -> None:
+    """delta.tool_calls=null must be ignored, not iterated."""
+    sse = _sse_chunk({"choices": [{"index": 0, "delta": {"tool_calls": None}, "finish_reason": None}]})
+    sse += _sse_chunk({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+    sse += _sse_chunk({"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 1}})
+    sse += _sse_done()
+    fake_server[0].responses.append(sse)
+
+    events = await _collect(transport.stream([], [], ""))
+
+    assert not any(isinstance(e, ToolUseStart) for e in events)
+    ends = [e for e in events if isinstance(e, IterationEnd)]
+    assert ends[0].stop_reason == StopReason.end_turn
+
+
+async def test_delta_null_in_choice(
+    fake_server: tuple[FakeOpenAIServer, str],
+    transport: OpenAITransport,
+) -> None:
+    """choice.delta=null must be treated as empty delta, not raise TypeError."""
+    sse = _sse_chunk({"choices": [{"index": 0, "delta": None, "finish_reason": None}]})
+    sse += _sse_chunk({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+    sse += _sse_chunk({"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 1}})
+    sse += _sse_done()
+    fake_server[0].responses.append(sse)
+
+    events = await _collect(transport.stream([], [], ""))
+
+    ends = [e for e in events if isinstance(e, IterationEnd)]
+    assert ends[0].stop_reason == StopReason.end_turn
+
+
+async def test_tool_call_function_null(
+    fake_server: tuple[FakeOpenAIServer, str],
+    transport: OpenAITransport,
+) -> None:
+    """tc.function=null in a tool_calls delta must be skipped without raising."""
+    sse = _sse_chunk(
+        {
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"tool_calls": [{"index": 0, "id": "call_x", "type": "function", "function": None}]},
+                    "finish_reason": None,
+                }
+            ]
+        }
+    )
+    sse += _sse_chunk({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+    sse += _sse_chunk({"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 1}})
+    sse += _sse_done()
+    fake_server[0].responses.append(sse)
+
+    events = await _collect(transport.stream([], [], ""))
+
+    ends = [e for e in events if isinstance(e, IterationEnd)]
+    assert ends[0].stop_reason == StopReason.end_turn
+
+
+# ---------------------------------------------------------------------------
 # Stop reason mapping
 # ---------------------------------------------------------------------------
 
