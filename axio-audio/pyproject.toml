@@ -8,6 +8,7 @@ keywords = ["llm", "agent", "ai", "audio", "realtime", "sounddevice"]
 dependencies = ["axio", "sounddevice>=0.5", "numpy>=2"]
 
 [project.urls]
+Documentation = "https://docs.axio-agent.com"
 Homepage = "https://github.com/mosquito/axio-agent"
 Repository = "https://github.com/mosquito/axio-agent"
 

@@ -36,6 +36,7 @@ axio = "axio_tui.__main__:main"
 
 
 [project.urls]
+Documentation = "https://docs.axio-agent.com"
 Homepage = "https://github.com/mosquito/axio-agent"
 Repository = "https://github.com/mosquito/axio-agent"
 [build-system]

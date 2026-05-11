@@ -17,6 +17,7 @@ dependencies = [
 axio-repl = "axio_repl:main_sync"
 
 [project.urls]
+Documentation = "https://docs.axio-agent.com"
 Homepage = "https://github.com/mosquito/axio-agent"
 Repository = "https://github.com/mosquito/axio-agent"
 

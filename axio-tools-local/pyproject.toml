@@ -18,6 +18,7 @@ list_files = "axio_tools_local.list_files:list_files"
 
 
 [project.urls]
+Documentation = "https://docs.axio-agent.com"
 Homepage = "https://github.com/mosquito/axio-agent"
 Repository = "https://github.com/mosquito/axio-agent"
 [build-system]

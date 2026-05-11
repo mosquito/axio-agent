@@ -9,6 +9,7 @@ keywords = ["llm", "agent", "ai", "sqlite", "context", "storage"]
 dependencies = ["axio", "aiosqlite>=0.20"]
 
 [project.urls]
+Documentation = "https://docs.axio-agent.com"
 Homepage = "https://github.com/mosquito/axio-agent"
 Repository = "https://github.com/mosquito/axio-agent"
 

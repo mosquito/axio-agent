@@ -18,6 +18,7 @@ codex = "axio_transport_codex:CodexTransport"
 codex = "axio_transport_codex.tui:CodexSettingsScreen"
 
 [project.urls]
+Documentation = "https://docs.axio-agent.com"
 Homepage = "https://github.com/mosquito/axio-agent"
 Repository = "https://github.com/mosquito/axio-agent"
 [build-system]

@@ -32,6 +32,7 @@ generate_image = "axio_transport_google.tools:generate_image"
 generate_video = "axio_transport_google.tools:generate_video"
 
 [project.urls]
+Documentation = "https://docs.axio-agent.com"
 Homepage = "https://github.com/mosquito/axio-agent"
 Repository = "https://github.com/mosquito/axio-agent"
 

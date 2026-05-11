@@ -9,6 +9,7 @@ keywords = ["llm", "agent", "ai", "docker", "sandbox", "tools"]
 dependencies = ["axio", "aiodocker>=0.26"]
 
 [project.urls]
+Documentation = "https://docs.axio-agent.com"
 Homepage = "https://github.com/mosquito/axio-agent"
 Repository = "https://github.com/mosquito/axio-agent"
 [build-system]

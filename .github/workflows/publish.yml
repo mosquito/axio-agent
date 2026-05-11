@@ -15,12 +15,15 @@ jobs:
       matrix:
         package:
           - axio
+          - axio-audio
           - axio-context-sqlite
+          - axio-repl
           - axio-tools-docker
           - axio-tools-local
           - axio-tools-mcp
           - axio-transport-anthropic
           - axio-transport-codex
+          - axio-transport-google
           - axio-transport-openai
           - axio-tui
           - axio-tui-guards
@@ -53,12 +56,15 @@ jobs:
       matrix:
         package:
           - axio
+          - axio-audio
           - axio-context-sqlite
+          - axio-repl
           - axio-tools-docker
           - axio-tools-local
           - axio-tools-mcp
           - axio-transport-anthropic
           - axio-transport-codex
+          - axio-transport-google
           - axio-transport-openai
           - axio-tui
           - axio-tui-guards

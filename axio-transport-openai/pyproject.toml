@@ -29,6 +29,7 @@ openai-custom = "axio_transport_openai.tui:CustomHubScreen"
 
 
 [project.urls]
+Documentation = "https://docs.axio-agent.com"
 Homepage = "https://github.com/mosquito/axio-agent"
 Repository = "https://github.com/mosquito/axio-agent"
 [build-system]
