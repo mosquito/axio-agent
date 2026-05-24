@@ -20,7 +20,7 @@ from collections.abc import Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import aiohttp
 from axio.agent import Agent
@@ -528,6 +528,13 @@ def _show_model(transport: Any) -> None:
     print(f"Available: {', '.join(transport.models.keys())}")
 
 
+def _resolve_model_arg(transport: Any, model_id: str) -> ModelSpec:
+    resolver = getattr(transport, "resolve_model", None)
+    if callable(resolver):
+        return cast(ModelSpec, resolver(model_id))
+    return cast(ModelSpec, transport.models[model_id])
+
+
 @dataclass(slots=True)
 class REPLState:
     """Own the inputs used to synchronize the agent's configuration."""
@@ -557,7 +564,12 @@ class REPLState:
         self.agent.system = build_system_prompt(self.cwd, model, self.agent.get_tools(), "")
 
     def change_model(self, arg: str) -> None:
-        matches = self.transport.models.search(arg)
+        try:
+            model = _resolve_model_arg(self.transport, arg)
+        except KeyError:
+            matches = self.transport.models.search(arg)
+        else:
+            matches = ModelRegistry([model])
         if len(matches) == 1:
             self.transport = _select_model(self.transport, next(iter(matches.values())), self.entry)
         self.sync_agent()
@@ -896,11 +908,13 @@ async def main() -> None:
         except Exception as error:
             raise TransportError(entry.format_error(error)) from error
         if args.model is not None:
-            if args.model not in transport.models:
+            try:
+                model = _resolve_model_arg(transport, args.model)
+            except KeyError:
                 diagnostic = getattr(transport, "model_selection_error", None)
                 detail = diagnostic(args.model) if callable(diagnostic) else f"Unknown model {args.model!r}."
                 parser.error(f"{detail}\n{_model_listing(transport.models)}")
-            transport = _select_model(transport, transport.models[args.model], entry)
+            transport = _select_model(transport, model, entry)
 
         levels_for = getattr(transport, "supported_thinking_levels", None)
         if callable(levels_for):
