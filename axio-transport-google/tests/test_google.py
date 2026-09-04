@@ -25,8 +25,8 @@ from axio.blocks import (
 from axio.events import IterationEnd, Refusal, TextDelta, ToolInputDelta, ToolUseStart
 from axio.exceptions import StreamError
 from axio.messages import Message
-from axio.models import Capability, ModelRegistry, ModelSpec
-from axio.testing import assert_stream_contract
+from axio.models import Capability, ModelSpec
+from axio.testing import assert_static_model_transport_contract, assert_stream_contract
 from axio.tool import Tool
 from axio.types import StopReason
 from axio_sse import Payload
@@ -306,7 +306,7 @@ def test_build_tools_json() -> None:
 
 def test_transport_defaults() -> None:
     t = GoogleTransport()
-    assert t.model.id == "gemini-3.8-flash"
+    assert_static_model_transport_contract(t)
     assert t.name == "Google GenAI"
 
 
@@ -336,27 +336,6 @@ def test_transport_non_vertexai_no_extra_fields(monkeypatch: Any) -> None:
     d = t.to_dict()
     assert "vertexai" not in d
     assert "project" not in d
-
-
-def test_genai_models_registry() -> None:
-    assert isinstance(GENAI_MODELS, ModelRegistry)
-    assert set(GENAI_MODELS.keys()) == {
-        "gemini-3.8-flash",
-        "gemini-3.7-flash",
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-3.1-flash-lite",
-        "gemini-3.1-pro-preview",
-        "gemini-3-flash-preview",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-3.1-flash-image",
-        "gemini-3.1-flash-lite-image",
-        "gemini-3-pro-image",
-        "gemini-2.5-flash-image",
-    }
 
 
 def test_vertexai_rejects_legacy_anthropic_model_without_substitution() -> None:
