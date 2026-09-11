@@ -268,18 +268,27 @@ def _chat_messages(messages: list[Message], system: str) -> list[dict[str, Any]]
     if system:
         result.append({"role": "system", "content": system})
 
+    # Map tool_use id -> tool name. Some strict backends (e.g. Kimi K3) refuse a
+    # `tool` message that carries only a tool_call_id and can't be matched to the
+    # preceding assistant tool_call by order; a `name` lets them resolve it.
+    tool_names = {
+        b.id: b.name for m in messages if m.role == "assistant" for b in m.content if isinstance(b, ToolUseBlock)
+    }
+
     for msg in messages:
         if msg.role == "user":
             tool_results = [b for b in msg.content if isinstance(b, ToolResultBlock)]
             if tool_results:
                 for tr in tool_results:
-                    result.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tr.tool_use_id,
-                            "content": _extract_tool_result_text(tr),
-                        }
-                    )
+                    tool_entry: dict[str, Any] = {
+                        "role": "tool",
+                        "tool_call_id": tr.tool_use_id,
+                        "content": _extract_tool_result_text(tr),
+                    }
+                    name = tool_names.get(tr.tool_use_id)
+                    if name is not None:
+                        tool_entry["name"] = name
+                    result.append(tool_entry)
                 # Chat Completions API doesn't support images in tool messages,
                 # so inject them as a follow-up user message.
                 image_parts = _collect_tool_result_images(tool_results)
