@@ -619,6 +619,23 @@ def test_build_payload_tool_results() -> None:
     assert msg["role"] == "tool"
     assert msg["tool_call_id"] == "call_1"
     assert msg["content"] == "22C"
+    # No preceding assistant tool_use in this turn — nothing to resolve the name to.
+    assert "name" not in msg
+
+
+def test_build_payload_tool_result_carries_name() -> None:
+    """A tool message must carry the tool `name` (resolved from the preceding
+    assistant tool_use) so strict backends like Kimi K3 can bind it."""
+    t = OpenAITransport(model=OPENAI_MODELS["gpt-4.1-mini"], api="chat")
+    messages = [
+        Message(role="assistant", content=[ToolUseBlock(id="call_1", name="get_weather", input={})]),
+        Message(role="user", content=[ToolResultBlock(tool_use_id="call_1", content="22C")]),
+    ]
+    payload = t.build_payload(messages, [], "")
+    tool_msg = payload["messages"][-1]
+    assert tool_msg["role"] == "tool"
+    assert tool_msg["tool_call_id"] == "call_1"
+    assert tool_msg["name"] == "get_weather"
 
 
 def test_build_payload_tool_result_with_image() -> None:
