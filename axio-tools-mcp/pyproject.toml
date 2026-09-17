@@ -1,6 +1,6 @@
 [project]
 name = "axio-tools-mcp"
-version = "0.2.3"
+version = "0.3.0"
 description = "MCP tools loader for Axio"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,7 +12,11 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 keywords = ["llm", "agent", "ai", "mcp", "tools", "model-context-protocol"]
-dependencies = ["axio", "mcp>=1.6"]
+dependencies = [
+    "axio",
+    "aiohttp-tiny-mcp>=0.2.6",
+    "aiohttp>=3.11",
+]
 
 [project.entry-points."axio.tools.settings"]
 mcp = "axio_tools_mcp.plugin:MCPPlugin"

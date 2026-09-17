@@ -21,6 +21,8 @@ class MCPServerConfig:
     headers: dict[str, str] = field(default_factory=dict)
     timeout: float = 30.0
     scope: str = "global"
+    # Pin one MCP revision. The session negotiates one when this is unset.
+    protocol_version: str | None = None
 
     def __post_init__(self) -> None:
         has_command = self.command is not None
@@ -43,6 +45,8 @@ class MCPServerConfig:
             result["headers"] = json.dumps(self.headers)
         if self.timeout != 30.0:
             result["timeout"] = str(self.timeout)
+        if self.protocol_version is not None:
+            result["protocol_version"] = self.protocol_version
         return result
 
     @classmethod
@@ -60,4 +64,5 @@ class MCPServerConfig:
             url=data.get("url"),
             headers=headers,
             timeout=timeout,
+            protocol_version=data.get("protocol_version"),
         )

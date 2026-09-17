@@ -89,7 +89,8 @@ MCPServerConfig(
 | `command` | Executable to run |
 | `args` | Arguments passed to the command |
 | `env` | Extra environment variables (merged with the current environment) |
-| `timeout` | Connection timeout in seconds (default: `30.0`) |
+| `timeout` | Handshake timeout in seconds (default: `30.0`) |
+| `protocol_version` | Pin one MCP revision (default: negotiated, see below) |
 
 ### HTTP
 
@@ -106,7 +107,21 @@ MCPServerConfig(
 | `name` | Server identifier - used as tool name prefix |
 | `url` | HTTP endpoint URL |
 | `headers` | HTTP headers sent with every request |
-| `timeout` | Connection timeout in seconds (default: `30.0`) |
+| `timeout` | Connect and read timeout in seconds (default: `30.0`) |
+| `protocol_version` | Pin one MCP revision (default: negotiated, see below) |
+
+## Protocol revisions
+
+The transport is [aiohttp-tiny-mcp](https://github.com/mosquito/aiohttp-tiny-mcp),
+which speaks `2024-11-05`, `2025-03-26`, `2025-06-18`, `2025-11-25` and
+`2026-07-28`.
+
+The handshake starts on `2025-06-18`, because every current server answers it.
+A server that answers with another revision selects it, and a server that
+refuses and names what it supports gets a second handshake on the newest
+revision both sides speak. Set `protocol_version` to pin one revision instead;
+a pinned revision is never replaced, and a server that refuses it fails to
+connect.
 
 ## Tool naming
 
@@ -134,8 +149,8 @@ tools, sessions = await load_mcp_tools([
 
 ## Error handling
 
-If a server fails to connect, `load_mcp_tools` raises immediately. To handle
-per-server failures gracefully, connect sessions individually:
+`load_mcp_tools` logs a server that fails to connect and skips it, so the other
+servers still load. Connect sessions individually to see the failure itself:
 
 ```python
 from axio_tools_mcp import MCPSession, MCPServerConfig
@@ -148,3 +163,6 @@ except Exception as exc:
     print(f"Server unavailable: {exc}")
     tools = []
 ```
+
+A tool that fails on the server returns an error result, and the Axio tool
+raises `RuntimeError` with the text the server sent.

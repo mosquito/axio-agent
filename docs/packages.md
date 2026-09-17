@@ -227,7 +227,7 @@ returns regular `Tool` objects for explicit use in an agent.
 Entry points:
 - `axio.tools.settings` → `MCPPlugin`
 
-Dependencies: `axio`, `mcp>=1.6`
+Dependencies: `axio`, `aiohttp-tiny-mcp>=0.2.6`, `aiohttp>=3.11`
 
 ### axio-tools-docker
 

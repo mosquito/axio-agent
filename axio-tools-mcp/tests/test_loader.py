@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from mcp.types import TextContent
-from mcp.types import Tool as MCPTool
+from aiohttp_tiny_mcp import CallToolResult, TextContent
+from aiohttp_tiny_mcp.models import ToolDef
 
 from axio_tools_mcp.config import MCPServerConfig
 from axio_tools_mcp.loader import load_mcp_tools
 
 
-def _make_mock_session_cls(tools: list[MCPTool], fail: bool = False) -> type:
+def _make_mock_session_cls(tools: list[ToolDef], fail: bool = False) -> type:
     """Create a mock MCPSession class."""
 
     class MockSession:
@@ -24,16 +24,11 @@ def _make_mock_session_cls(tools: list[MCPTool], fail: bool = False) -> type:
                 raise ConnectionError("Failed to connect")
             self.is_connected = True
 
-        async def list_tools(self) -> list[MCPTool]:
+        async def list_tools(self) -> list[ToolDef]:
             return tools
 
-        async def call_tool(self, name: str, arguments: dict[str, object]) -> object:
-            from mcp.types import CallToolResult
-
-            return CallToolResult(
-                content=[TextContent(type="text", text="ok")],
-                isError=False,
-            )
+        async def call_tool(self, name: str, arguments: dict[str, object]) -> CallToolResult:
+            return CallToolResult(content=[TextContent(text="ok")], is_error=False)
 
         async def close(self) -> None:
             self.is_connected = False
@@ -43,17 +38,22 @@ def _make_mock_session_cls(tools: list[MCPTool], fail: bool = False) -> type:
 
 async def test_single_server() -> None:
     tools = [
-        MCPTool(name="read", description="Read file", inputSchema={"type": "object", "properties": {}}),
-        MCPTool(name="write", description="Write file", inputSchema={"type": "object", "properties": {}}),
+        ToolDef(name="read", description="Read file", input_schema={"type": "object", "properties": {}}),
+        ToolDef(name="write", description="Write file", input_schema={"type": "object", "properties": {}}),
     ]
     configs = [MCPServerConfig(name="fs", command="python")]
 
     with patch("axio_tools_mcp.loader.MCPSession") as mock_cls:
-        mock_session = MagicMock()
-        mock_session.connect = AsyncMock()
-        mock_session.list_tools = AsyncMock(return_value=tools)
-        mock_session.close = AsyncMock()
-        mock_cls.return_value = mock_session
+
+        def create_session(config: MCPServerConfig) -> MagicMock:
+            session = MagicMock()
+            session.config = config
+            session.connect = AsyncMock()
+            session.list_tools = AsyncMock(return_value=tools)
+            session.close = AsyncMock()
+            return session
+
+        mock_cls.side_effect = create_session
 
         result_tools, sessions = await load_mcp_tools(configs)
 
@@ -64,8 +64,8 @@ async def test_single_server() -> None:
 
 
 async def test_namespacing() -> None:
-    tools_a = [MCPTool(name="list", description="List", inputSchema={"type": "object", "properties": {}})]
-    tools_b = [MCPTool(name="list", description="List", inputSchema={"type": "object", "properties": {}})]
+    tools_a = [ToolDef(name="list", description="List", input_schema={"type": "object", "properties": {}})]
+    tools_b = [ToolDef(name="list", description="List", input_schema={"type": "object", "properties": {}})]
     configs = [
         MCPServerConfig(name="server_a", command="a"),
         MCPServerConfig(name="server_b", command="b"),
@@ -77,6 +77,7 @@ async def test_namespacing() -> None:
         def create_session(config: MCPServerConfig) -> MagicMock:
             nonlocal call_count
             session = MagicMock()
+            session.config = config
             session.connect = AsyncMock()
             session.list_tools = AsyncMock(return_value=tools_a if call_count == 0 else tools_b)
             session.close = AsyncMock()
@@ -94,7 +95,7 @@ async def test_namespacing() -> None:
 
 async def test_failed_server_graceful() -> None:
     """Failed server is skipped, other servers still load."""
-    good_tools = [MCPTool(name="ping", description="Ping", inputSchema={"type": "object", "properties": {}})]
+    good_tools = [ToolDef(name="ping", description="Ping", input_schema={"type": "object", "properties": {}})]
     configs = [
         MCPServerConfig(name="bad", command="fail"),
         MCPServerConfig(name="good", command="ok"),
@@ -106,6 +107,7 @@ async def test_failed_server_graceful() -> None:
         def create_session(config: MCPServerConfig) -> MagicMock:
             nonlocal call_count
             session = MagicMock()
+            session.config = config
             if call_count == 0:
                 session.connect = AsyncMock(side_effect=ConnectionError("refused"))
             else:

@@ -86,6 +86,12 @@ class MCPServerEditScreen(ModalScreen["MCPServerConfig | None"]):
                 placeholder="e.g. Authorization:Bearer xxx",
                 id="mcp-headers",
             )
+            yield Static("Protocol version (blank negotiates):")
+            yield Input(
+                value=self._editing.protocol_version or "" if self._editing else "",
+                placeholder="e.g. 2025-11-25",
+                id="mcp-protocol",
+            )
             yield Static("Scope:")
             yield Select(
                 [("Global", "global"), ("Project", "project")],
@@ -141,6 +147,7 @@ class MCPServerEditScreen(ModalScreen["MCPServerConfig | None"]):
             headers = _parse_headers(raw_headers)
 
         scope = str(self.query_one("#mcp-scope", Select).value)
+        protocol_version = self.query_one("#mcp-protocol", Input).value.strip() or None
 
         try:
             config = MCPServerConfig(
@@ -150,6 +157,10 @@ class MCPServerEditScreen(ModalScreen["MCPServerConfig | None"]):
                 args=args,
                 headers=headers,
                 scope=scope,
+                protocol_version=protocol_version,
+                # The screen does not show these, so keep what the server already has.
+                env=self._editing.env if self._editing else None,
+                timeout=self._editing.timeout if self._editing else 30.0,
             )
         except ValueError as exc:
             self.notify(str(exc), severity="error")

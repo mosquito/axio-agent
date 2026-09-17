@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from types import MappingProxyType
 from typing import Any
 
 from axio.tool import Tool
 
 from .config import MCPServerConfig
-from .handler import build_handler
+from .handler import build_tools
 from .session import MCPSession
 
 logger = logging.getLogger(__name__)
@@ -63,25 +62,7 @@ class MCPRegistry:
         tools: list[Tool[Any]] = []
         try:
             await session.connect()
-            mcp_tools = await session.list_tools()
-            for mcp_tool in mcp_tools:
-                tool_name = f"{config.name}__{mcp_tool.name}"
-                description = mcp_tool.description or mcp_tool.name
-                input_schema = mcp_tool.inputSchema if isinstance(mcp_tool.inputSchema, dict) else {}
-                handler = build_handler(
-                    tool_name=tool_name,
-                    mcp_tool_name=mcp_tool.name,
-                    description=description,
-                    session=session,
-                )
-                tools.append(
-                    Tool(
-                        name=tool_name,
-                        description=description,
-                        handler=handler,
-                        schema=MappingProxyType(input_schema),
-                    )
-                )
+            tools = build_tools(session, await session.list_tools())
             self._sessions[config.name] = session
             self._tools[config.name] = tools
             self._errors.pop(config.name, None)

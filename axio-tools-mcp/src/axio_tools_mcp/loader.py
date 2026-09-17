@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import logging
-from types import MappingProxyType
 from typing import Any
 
 from axio.tool import Tool
 
 from .config import MCPServerConfig
-from .handler import build_handler
+from .handler import build_tools
 from .session import MCPSession
 
 logger = logging.getLogger(__name__)
@@ -40,24 +39,8 @@ async def load_mcp_tools(
             continue
 
         sessions.append(session)
-        for mcp_tool in mcp_tools:
-            tool_name = f"{config.name}__{mcp_tool.name}"
-            description = mcp_tool.description or mcp_tool.name
-            input_schema = mcp_tool.inputSchema if isinstance(mcp_tool.inputSchema, dict) else {}
-            handler = build_handler(
-                tool_name=tool_name,
-                mcp_tool_name=mcp_tool.name,
-                description=description,
-                session=session,
-            )
-            all_tools.append(
-                Tool(
-                    name=tool_name,
-                    description=description,
-                    handler=handler,
-                    schema=MappingProxyType(input_schema),
-                )
-            )
-            logger.info("Loaded MCP tool %r from server %r", tool_name, config.name)
+        for tool in build_tools(session, mcp_tools):
+            all_tools.append(tool)
+            logger.info("Loaded MCP tool %r from server %r", tool.name, config.name)
 
     return all_tools, sessions
