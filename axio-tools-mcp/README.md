@@ -11,6 +11,7 @@ Connect any MCP server to your axio agent. Tools exposed by MCP servers are disc
 ## Features
 
 - **Dynamic tool discovery** - connects to MCP servers and converts their tools into axio `Tool` instances automatically
+- **Five protocol revisions** - the revision is negotiated with the server, or pinned per server
 - **Multiple servers** - configure and run several MCP servers simultaneously
 - **Lifecycle management** - handles server startup, shutdown, and reconnection
 - **TUI integration** - ships a settings screen for managing MCP server configuration from within `axio-tui`
@@ -36,6 +37,7 @@ uv run axio   # MCP Servers section appears in settings
 name: test_readme_standalone
 ```python
 from axio.testing import StubTransport, make_text_response
+
 transport = StubTransport([make_text_response("done")])
 ```
 -->
@@ -46,11 +48,12 @@ from axio_tools_mcp.registry import MCPRegistry
 from axio.agent import Agent
 from axio.context import MemoryContextStore
 
+
 async def main() -> None:
     registry = MCPRegistry()
     await registry.init(config=None)
 
-    tools = registry.all_tools   # list[axio.Tool]
+    tools = registry.all_tools  # list[axio.Tool]
     print(f"Loaded {len(tools)} tools from MCP servers")
 
     # Pass any CompletionTransport - e.g. OpenAITransport, AnthropicTransport
@@ -64,6 +67,7 @@ async def main() -> None:
 
     await registry.close()
 
+
 asyncio.run(main())
 ```
 
@@ -74,13 +78,19 @@ Two transport types are supported, selected by which field is set in the server 
 | Transport | Config field | Protocol |
 |-----------|-------------|---------|
 | **stdio** | `command` | Spawns a subprocess; communicates over stdin/stdout (MCP stdio transport) |
-| **HTTP** | `url` | Connects to a running HTTP server using the MCP Streamable HTTP transport (`httpx`) |
+| **HTTP** | `url` | Connects to a running HTTP server using the MCP Streamable HTTP transport (`aiohttp`) |
 
 Exactly one of `command` or `url` must be set per server - providing both or neither raises a `ValueError`.
 
 For stdio servers, stderr output from the subprocess is forwarded to the Python logger as warnings under the `mcp:<server-name>` prefix.
 
 HTTP servers accept optional `headers` (e.g., for bearer tokens) and a configurable `timeout` (default: 30 seconds).
+
+## Protocol revisions
+
+The client is [aiohttp-tiny-mcp](https://github.com/mosquito/aiohttp-tiny-mcp), which speaks `2024-11-05`, `2025-03-26`, `2025-06-18`, `2025-11-25` and `2026-07-28`.
+
+The handshake starts on `2025-06-18`, because every current server answers it. A server that answers with another revision selects it, and a server that refuses and names what it supports gets a second handshake on the newest revision both sides speak. Set `protocol_version` on the server config to pin one revision; a pinned revision is never replaced.
 
 ## Tool naming
 
@@ -129,7 +139,8 @@ MCP servers are configured via the `axio-tui` settings UI or programmatically:
       "name": "remote",
       "url": "https://my-mcp-server.example.com/mcp",
       "headers": {"Authorization": "Bearer my-token"},
-      "timeout": 60.0
+      "timeout": 60.0,
+      "protocol_version": "2025-11-25"
     }
   ]
 }

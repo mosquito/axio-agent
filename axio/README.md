@@ -32,9 +32,13 @@ import sys, types
 from axio.testing import StubTransport, make_text_response
 
 _m = types.ModuleType("axio_transport_openai")
+
+
 class OpenAITransport(StubTransport):
     def __init__(self, api_key: str = "", model: str = "") -> None:
         super().__init__([make_text_response("Hello, Alice!")])
+
+
 _m.OpenAITransport = OpenAITransport  # type: ignore[attr-defined]
 sys.modules["axio_transport_openai"] = _m
 ```
@@ -46,10 +50,12 @@ from axio.agent import Agent
 from axio.context import MemoryContextStore
 from axio.tool import Tool
 
+
 # 1. Define a tool
 async def greet(name: str) -> str:
     """Return a greeting for the given name."""
     return f"Hello, {name}!"
+
 
 greet_tool = Tool(name="greet", description="Greet someone by name", handler=greet)
 
@@ -59,11 +65,13 @@ from axio_transport_openai import OpenAITransport
 transport = OpenAITransport(api_key="sk-...", model="gpt-4o-mini")
 agent = Agent(system="You are helpful.", transport=transport, tools=[greet_tool])
 
+
 # 3. Run
 async def main() -> None:
     ctx = MemoryContextStore()
     async for event in agent.run_stream("Please greet Alice", ctx):
         print(event)
+
 
 asyncio.run(main())
 ```
@@ -104,11 +112,10 @@ from axio.events import StreamEvent
 from axio.messages import Message
 from axio.tool import Tool
 
+
 @runtime_checkable
 class CompletionTransport(Protocol):
-    def stream(
-        self, messages: list[Message], tools: list[Tool], system: str
-    ) -> AsyncIterator[StreamEvent]: ...
+    def stream(self, messages: list[Message], tools: list[Tool], system: str) -> AsyncIterator[StreamEvent]: ...
 ```
 
 ### ContextStore
@@ -117,6 +124,7 @@ class CompletionTransport(Protocol):
 ```python
 from axio.context import ContextStore
 from axio.messages import Message
+
 
 class MyContextStore(ContextStore):
     def __init__(self) -> None:
@@ -144,6 +152,7 @@ from typing import Any
 from axio.permission import PermissionGuard
 from axio.tool import Tool
 
+
 class MyGuard(PermissionGuard):
     async def check(self, tool: Tool[Any], **kwargs: Any) -> dict[str, Any]:
         # return kwargs to allow, raise GuardError to deny
@@ -168,16 +177,18 @@ class MyGuard(PermissionGuard):
 ```python
 from axio.tool import Tool
 
+
 async def summarise(text: str, max_words: int = 20) -> str:
     """Summarise the given text in one sentence."""
     # your implementation
     return "..."
 
+
 tool = Tool(
     name="summarise",
-    description="Summarise text",   # overrides docstring if set
+    description="Summarise text",  # overrides docstring if set
     handler=summarise,
-    concurrency=4,                   # max parallel executions
+    concurrency=4,  # max parallel executions
 )
 ```
 
@@ -194,11 +205,14 @@ from axio.testing import (
     make_echo_tool,
 )
 
+
 async def test_agent_calls_tool():
-    transport = StubTransport([
-        make_tool_use_response("echo", tool_input={"msg": "hi"}),
-        make_text_response("Done"),
-    ])
+    transport = StubTransport(
+        [
+            make_tool_use_response("echo", tool_input={"msg": "hi"}),
+            make_text_response("Done"),
+        ]
+    )
     agent = Agent(system="", tools=[make_echo_tool()], transport=transport)
     result = await agent.run("say hi", make_ephemeral_context())
     assert result == "Done"

@@ -40,6 +40,7 @@ async def write_file(file_path: str, content: str) -> str:
     """Write content to a file."""
     return "ok"
 
+
 async def shell(command: str, cwd: str = ".") -> str:
     """Run a shell command."""
     return "ok"
@@ -50,7 +51,7 @@ async def shell(command: str, cwd: str = ".") -> str:
 from axio_tui_guards.guards import PathGuard
 from axio.tool import Tool
 
-guard = PathGuard()   # uses TUI prompt_fn by default
+guard = PathGuard()  # uses TUI prompt_fn by default
 
 tool = Tool(
     name="write_file",
@@ -118,6 +119,7 @@ Implement the `PermissionGuard` protocol to write your own:
 from typing import Any
 from axio.permission import PermissionGuard
 from axio.exceptions import GuardError
+
 
 class MyGuard(PermissionGuard):
     async def check(self, tool: Any, **kwargs: Any) -> dict[str, Any]:

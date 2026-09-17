@@ -27,15 +27,18 @@ the one data payload that closes the stream, so a sentinel that is not JSON neve
 import asyncio
 from axio_sse import payloads
 
+
 async def chunks():
-    yield b': keep-alive\n\n'
+    yield b": keep-alive\n\n"
     yield b'data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n'
     yield b'data: {"choices":[{"delta":{"content":"lo"}}]}\n\n'
     yield b"data: [DONE]"
 
+
 async def main() -> None:
     got = [p["choices"][0]["delta"]["content"] async for p in payloads(chunks(), until="[DONE]")]
     assert got == ["Hel", "lo"]
+
 
 asyncio.run(main())
 ```
@@ -54,16 +57,19 @@ ends on `data: [DONE]` with no newline after it. That is how these streams reall
 import asyncio
 from axio_sse import Event, events
 
+
 async def chunks():
     yield b'data: {"first":\ndata: true}\n\n'
     yield b"event: named\r\ndata: sec"
     yield b"ond\r\n\r\n"
+
 
 async def main() -> None:
     assert [e async for e in events(chunks())] == [
         Event(data='{"first":\ntrue}'),
         Event(data="second", event="named"),
     ]
+
 
 asyncio.run(main())
 ```
@@ -113,18 +119,23 @@ value.
 from dataclasses import dataclass, field
 from axio_sse import Payload, Wire
 
+
 @dataclass(frozen=True, slots=True)
 class Usage(Wire):
     """Nested, and never dispatched to: it has no name of its own."""
+
     output_tokens: int = 0
+
 
 @dataclass(frozen=True, slots=True)
 class ResponseObject(Wire):
     usage: Usage = field(default_factory=Usage)
 
+
 @dataclass(frozen=True, slots=True)
 class OutputTextDelta(Wire, name="response.output_text.delta"):
     delta: str = ""
+
 
 @dataclass(frozen=True, slots=True)
 class Completed(Wire, name="response.completed"):
@@ -155,6 +166,7 @@ import asyncio
 from collections.abc import Iterator
 from axio_sse import Reader, on
 
+
 class Responses(Reader[str]):
     """What the Responses API sends, and what each event becomes."""
 
@@ -173,15 +185,18 @@ class Responses(Reader[str]):
     def _expected(self, payload: Payload) -> None:
         """The bookkeeping around the deltas. Named so strict fires only on something new."""
 
+
 async def chunks():
     yield b'data: {"type":"response.created"}\n\n'
     yield b'data: {"type":"response.output_text.delta","delta":"Hi"}\n\n'
     yield b'data: {"type":"response.completed","response":{"usage":{"output_tokens":7}}}\n\n'
 
+
 async def main() -> None:
     turn = Responses()
     assert [made async for made in turn.over(chunks())] == ["Hi"]
     assert turn.output_tokens == 7
+
 
 asyncio.run(main())
 ```
@@ -227,25 +242,31 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from axio_sse import EVENT_NAME, Reader, Wire, on
 
+
 @dataclass(frozen=True, slots=True)
 class BlockDelta(Wire):
     text: str = ""
 
+
 @dataclass(frozen=True, slots=True)
 class ContentBlockDelta(Wire, name="content_block_delta"):
     delta: BlockDelta = field(default_factory=BlockDelta)
+
 
 class Messages(Reader[str], by=EVENT_NAME):
     @on(ContentBlockDelta)
     def _delta(self, wire: ContentBlockDelta) -> Iterator[str]:
         yield wire.delta.text
 
+
 async def chunks():
     yield b'event: content_block_delta\ndata: {"delta":{"text":"Hi"}}\n\n'
     yield b"event: ping\ndata: {}\n\n"
 
+
 async def main() -> None:
     assert [made async for made in Messages().over(chunks())] == ["Hi"]
+
 
 asyncio.run(main())
 ```

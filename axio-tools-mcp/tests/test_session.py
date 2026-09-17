@@ -1,199 +1,203 @@
-"""Tests for MCPSession."""
+"""Tests for MCPSession against real MCP servers, over stdio and HTTP."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
-import os
-from io import TextIOWrapper
-from unittest.mock import AsyncMock, MagicMock, patch
+import sys
+from collections.abc import AsyncIterator
+from pathlib import Path
 
 import pytest
-from mcp.types import CallToolResult, ListToolsResult, TextContent
-from mcp.types import Tool as MCPTool
+from aiohttp import web
+from aiohttp.typedefs import Handler
+from aiohttp_tiny_mcp import ClientError, Registry
+from aiohttp_tiny_mcp.protocol.selection import AdapterSet
+from aiohttp_tiny_mcp.protocol.v2025_11_25 import Adapter2025_11_25
+from aiohttp_tiny_mcp.testing import serving
+from pydantic import BaseModel
 
 from axio_tools_mcp.config import MCPServerConfig
-from axio_tools_mcp.session import MCPSession
+from axio_tools_mcp.handler import result_text
+from axio_tools_mcp.session import DEFAULT_PROTOCOL_VERSION, MCPSession
+
+SERVER_SCRIPT = str(Path(__file__).parent / "stdio_server.py")
+
+AUTHORIZATION: list[str | None] = []
+
+
+class Nothing(BaseModel):
+    pass
+
+
+class Message(BaseModel):
+    message: str
+
+
+def http_registry() -> Registry:
+    registry = Registry("fixture", "1.0")
+
+    @registry.tool
+    async def echo(args: Message) -> str:
+        """Return the message."""
+        return args.message
+
+    @registry.tool
+    async def explode(args: Nothing) -> str:
+        """Always fail."""
+        raise RuntimeError("tool exploded")
+
+    return registry
+
+
+@web.middleware
+async def record_authorization(request: web.Request, handler: Handler) -> web.StreamResponse:
+    AUTHORIZATION.append(request.headers.get("Authorization"))
+    return await handler(request)
 
 
 @pytest.fixture
 def stdio_config() -> MCPServerConfig:
-    return MCPServerConfig(name="test", command="echo", args=["hello"])
+    return MCPServerConfig(name="fixture", command=sys.executable, args=[SERVER_SCRIPT])
 
 
 @pytest.fixture
-def http_config() -> MCPServerConfig:
-    return MCPServerConfig(name="remote", url="http://localhost:8000/mcp")
+async def http_url() -> AsyncIterator[str]:
+    async with serving(http_registry(), middlewares=[record_authorization]) as url:
+        AUTHORIZATION.clear()
+        yield url
 
 
-def _mock_client_session() -> MagicMock:
-    session = MagicMock()
-    session.initialize = AsyncMock()
-    session.list_tools = AsyncMock(
-        return_value=ListToolsResult(
-            tools=[
-                MCPTool(name="add", description="Add numbers", inputSchema={"type": "object"}),
-            ],
-        ),
-    )
-    session.call_tool = AsyncMock(
-        return_value=CallToolResult(
-            content=[TextContent(type="text", text="3")],
-            isError=False,
-        ),
-    )
-    session.__aenter__ = AsyncMock(return_value=session)
-    session.__aexit__ = AsyncMock(return_value=None)
-    return session
+@pytest.fixture
+async def legacy_url() -> AsyncIterator[str]:
+    """A server that speaks one revision, and not the one the client starts with."""
+    async with serving(http_registry(), adapters=AdapterSet([Adapter2025_11_25()])) as url:
+        yield url
 
 
-async def test_connect_stdio(stdio_config: MCPServerConfig) -> None:
-    mock_session = _mock_client_session()
-
-    with (
-        patch("axio_tools_mcp.session.stdio_client") as mock_stdio,
-        patch("axio_tools_mcp.session.ClientSession", return_value=mock_session),
-    ):
-        mock_read, mock_write = MagicMock(), MagicMock()
-        ctx = MagicMock()
-        ctx.__aenter__ = AsyncMock(return_value=(mock_read, mock_write))
-        ctx.__aexit__ = AsyncMock(return_value=None)
-        mock_stdio.return_value = ctx
-
-        session = MCPSession(stdio_config)
-        await session.connect()
-
-        assert session.is_connected
-        mock_session.initialize.assert_awaited_once()
-        await session.close()
-        assert not session.is_connected
-
-
-async def test_connect_http(http_config: MCPServerConfig) -> None:
-    mock_session = _mock_client_session()
-
-    with (
-        patch("axio_tools_mcp.session.streamable_http_client") as mock_http,
-        patch("axio_tools_mcp.session.ClientSession", return_value=mock_session),
-    ):
-        mock_read, mock_write = MagicMock(), MagicMock()
-        ctx = MagicMock()
-        ctx.__aenter__ = AsyncMock(return_value=(mock_read, mock_write, lambda: "sid"))
-        ctx.__aexit__ = AsyncMock(return_value=None)
-        mock_http.return_value = ctx
-
-        session = MCPSession(http_config)
-        await session.connect()
-
-        assert session.is_connected
-        mock_session.initialize.assert_awaited_once()
-        await session.close()
-
-
-async def test_list_tools(stdio_config: MCPServerConfig) -> None:
-    mock_session = _mock_client_session()
-
-    with (
-        patch("axio_tools_mcp.session.stdio_client") as mock_stdio,
-        patch("axio_tools_mcp.session.ClientSession", return_value=mock_session),
-    ):
-        ctx = MagicMock()
-        ctx.__aenter__ = AsyncMock(return_value=(MagicMock(), MagicMock()))
-        ctx.__aexit__ = AsyncMock(return_value=None)
-        mock_stdio.return_value = ctx
-
-        session = MCPSession(stdio_config)
-        await session.connect()
-        tools = await session.list_tools()
-
-        assert len(tools) == 1
-        assert tools[0].name == "add"
-        await session.close()
-
-
-async def test_call_tool(stdio_config: MCPServerConfig) -> None:
-    mock_session = _mock_client_session()
-
-    with (
-        patch("axio_tools_mcp.session.stdio_client") as mock_stdio,
-        patch("axio_tools_mcp.session.ClientSession", return_value=mock_session),
-    ):
-        ctx = MagicMock()
-        ctx.__aenter__ = AsyncMock(return_value=(MagicMock(), MagicMock()))
-        ctx.__aexit__ = AsyncMock(return_value=None)
-        mock_stdio.return_value = ctx
-
-        session = MCPSession(stdio_config)
-        await session.connect()
-        result = await session.call_tool("add", {"a": 1, "b": 2})
-
-        assert not result.isError
-        assert result.content[0].text == "3"  # type: ignore[union-attr]
-        await session.close()
-
-
-async def test_call_tool_not_connected(stdio_config: MCPServerConfig) -> None:
+async def test_stdio_round_trip(stdio_config: MCPServerConfig) -> None:
     session = MCPSession(stdio_config)
-    with pytest.raises(RuntimeError, match="Not connected"):
-        await session.call_tool("add", {})
+    await session.connect()
+    try:
+        assert session.is_connected
+        assert session.protocol_version == DEFAULT_PROTOCOL_VERSION
+        assert {tool.name for tool in await session.list_tools()} == {"echo", "token", "explode"}
+        result = await session.call_tool("echo", {"message": "hi"})
+        assert result.is_error is False
+        assert result_text(result) == "hi"
+    finally:
+        await session.close()
+    assert not session.is_connected
 
 
-async def test_list_tools_not_connected(stdio_config: MCPServerConfig) -> None:
+async def test_stdio_passes_extra_environment() -> None:
+    config = MCPServerConfig(
+        name="fixture",
+        command=sys.executable,
+        args=[SERVER_SCRIPT],
+        env={"AXIO_MCP_TEST_TOKEN": "secret"},
+    )
+    session = MCPSession(config)
+    await session.connect()
+    try:
+        result = await session.call_tool("token", {})
+        assert result_text(result) == "secret"
+    finally:
+        await session.close()
+
+
+async def test_stdio_standard_error_is_logged(stdio_config: MCPServerConfig, caplog: pytest.LogCaptureFixture) -> None:
+    session = MCPSession(stdio_config)
+    with caplog.at_level(logging.WARNING, logger="axio_tools_mcp.session"):
+        await session.connect()
+        await session.close()
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("[mcp:fixture] fixture server ready" in message for message in messages)
+
+
+async def test_stdio_serializes_concurrent_calls(stdio_config: MCPServerConfig) -> None:
+    """One channel carries every request, so answers must not be mixed up."""
+    session = MCPSession(stdio_config)
+    await session.connect()
+    try:
+        calls = [session.call_tool("echo", {"message": str(number)}) for number in range(8)]
+        results = await asyncio.gather(*calls)
+    finally:
+        await session.close()
+    assert [result_text(result) for result in results] == [str(n) for n in range(8)]
+
+
+async def test_failing_tool_returns_an_error_result(stdio_config: MCPServerConfig) -> None:
+    session = MCPSession(stdio_config)
+    await session.connect()
+    try:
+        result = await session.call_tool("explode", {})
+    finally:
+        await session.close()
+    assert result.is_error is True
+    assert "tool exploded" in result_text(result)
+
+
+async def test_connect_failure_leaves_nothing_open() -> None:
+    config = MCPServerConfig(name="missing", command="/nonexistent/mcp-server")
+    session = MCPSession(config)
+    with pytest.raises(FileNotFoundError):
+        await session.connect()
+    assert not session.is_connected
+    assert session.process is None
+
+
+async def test_http_round_trip(http_url: str) -> None:
+    session = MCPSession(MCPServerConfig(name="remote", url=http_url))
+    await session.connect()
+    try:
+        assert {tool.name for tool in await session.list_tools()} == {"echo", "explode"}
+        result = await session.call_tool("echo", {"message": "hi"})
+        assert result_text(result) == "hi"
+    finally:
+        await session.close()
+    assert not session.is_connected
+
+
+async def test_http_sends_configured_headers(http_url: str) -> None:
+    config = MCPServerConfig(name="remote", url=http_url, headers={"Authorization": "Bearer token"})
+    session = MCPSession(config)
+    await session.connect()
+    try:
+        await session.list_tools()
+    finally:
+        await session.close()
+    assert AUTHORIZATION and set(AUTHORIZATION) == {"Bearer token"}
+
+
+async def test_connect_follows_the_revision_the_server_requires(legacy_url: str) -> None:
+    session = MCPSession(MCPServerConfig(name="legacy", url=legacy_url))
+    await session.connect()
+    try:
+        assert session.protocol_version == "2025-11-25"
+        assert {tool.name for tool in await session.list_tools()} == {"echo", "explode"}
+    finally:
+        await session.close()
+
+
+async def test_pinned_revision_is_not_replaced(legacy_url: str) -> None:
+    config = MCPServerConfig(name="legacy", url=legacy_url, protocol_version="2025-06-18")
+    session = MCPSession(config)
+    with pytest.raises(ClientError):
+        await session.connect()
+    assert not session.is_connected
+
+
+async def test_unknown_revision_is_refused() -> None:
+    config = MCPServerConfig(name="fixture", command="true", protocol_version="1999-01-01")
+    session = MCPSession(config)
+    with pytest.raises(ValueError, match="Unsupported MCP protocol version"):
+        await session.connect()
+
+
+async def test_calls_need_a_connection(stdio_config: MCPServerConfig) -> None:
     session = MCPSession(stdio_config)
     with pytest.raises(RuntimeError, match="Not connected"):
         await session.list_tools()
-
-
-async def test_stdio_client_receives_errlog(stdio_config: MCPServerConfig) -> None:
-    """stdio_client must be called with a writable errlog pipe, not sys.stderr."""
-    mock_session = _mock_client_session()
-
-    with (
-        patch("axio_tools_mcp.session.stdio_client") as mock_stdio,
-        patch("axio_tools_mcp.session.ClientSession", return_value=mock_session),
-    ):
-        ctx = MagicMock()
-        ctx.__aenter__ = AsyncMock(return_value=(MagicMock(), MagicMock()))
-        ctx.__aexit__ = AsyncMock(return_value=None)
-        mock_stdio.return_value = ctx
-
-        session = MCPSession(stdio_config)
-        await session.connect()
-
-        _, kwargs = mock_stdio.call_args
-        errlog = kwargs.get("errlog")
-        assert errlog is not None, "errlog should be passed to stdio_client"
-        assert isinstance(errlog, TextIOWrapper), "errlog should be a file object (pipe write-end)"
-        assert not errlog.closed
-
-        await session.close()
-        assert errlog.closed
-
-
-async def test_stderr_lines_logged(stdio_config: MCPServerConfig, caplog: pytest.LogCaptureFixture) -> None:
-    """Lines written to the MCP process stderr appear as logger.warning records."""
-    read_fd, write_fd = os.pipe()
-
-    with (
-        patch("axio_tools_mcp.session.os.pipe", return_value=(read_fd, write_fd)),
-        patch("axio_tools_mcp.session.stdio_client") as mock_stdio,
-        patch("axio_tools_mcp.session.ClientSession", return_value=_mock_client_session()),
-        caplog.at_level(logging.WARNING, logger="axio_tools_mcp.session"),
-    ):
-        ctx = MagicMock()
-        ctx.__aenter__ = AsyncMock(return_value=(MagicMock(), MagicMock()))
-        ctx.__aexit__ = AsyncMock(return_value=None)
-        mock_stdio.return_value = ctx
-
-        session = MCPSession(stdio_config)
-        await session.connect()
-
-        # Write data via the raw fd (still valid since errlog hasn't been closed yet)
-        os.write(write_fd, b"something went wrong\nanother line\n")
-
-        # close() flushes and closes errlog → pipe EOF → _read_stderr task exits
-        await session.close()
-
-    messages = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
-    assert any("something went wrong" in m for m in messages)
-    assert any("another line" in m for m in messages)
-    assert all("[mcp:test]" in m for m in messages)
+    with pytest.raises(RuntimeError, match="Not connected"):
+        await session.call_tool("echo", {})

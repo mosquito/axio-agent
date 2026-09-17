@@ -5,11 +5,10 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from typing import Any
+from typing import Any, Self
 
 from axio import CONTEXT, Tool
 from axio_tools_docker import DockerSandbox
-
 
 TOOL_OUTPUT_MAX_CHARS = 4_000
 TRUNCATION_MARKER = "\n[tool output truncated]"
@@ -128,7 +127,7 @@ class _FakeSandbox:
         self.commands: list[str] = []
         self.tools = (Tool(name="shell", handler=_fake_shell, context=self),)
 
-    async def __aenter__(self) -> _FakeSandbox:
+    async def __aenter__(self) -> Self:
         self.entered = True
         return self
 

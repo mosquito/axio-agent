@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-
 TUTORIAL_ROOT = Path(__file__).parent
 REPOSITORY_ROOT = TUTORIAL_ROOT.parents[1]
 LESSON_ROOT = REPOSITORY_ROOT / "docs" / "agent-harness"

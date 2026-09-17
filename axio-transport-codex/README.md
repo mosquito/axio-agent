@@ -43,6 +43,7 @@ import asyncio
 from axio_transport_codex.oauth import run_oauth_flow
 from axio_transport_codex import CodexTransport
 
+
 async def main() -> None:
     tokens = await run_oauth_flow()
     # tokens = {
@@ -70,9 +71,11 @@ from axio_transport_codex import CodexTransport
 
 CRED_FILE = pathlib.Path("~/.config/axio/codex.json").expanduser()
 
+
 async def save_tokens(tokens: dict[str, str]) -> None:
     CRED_FILE.parent.mkdir(parents=True, exist_ok=True)
     CRED_FILE.write_text(json.dumps(tokens))
+
 
 async def main() -> None:
     creds = json.loads(CRED_FILE.read_text()) if CRED_FILE.exists() else {}
@@ -108,6 +111,7 @@ from axio.context import MemoryContextStore
 from axio.events import TextDelta
 from axio_transport_codex import CodexTransport, CODEX_MODELS
 
+
 async def main() -> None:
     async with aiohttp.ClientSession() as session:
         transport = CodexTransport(
@@ -124,6 +128,7 @@ async def main() -> None:
             if isinstance(event, TextDelta):
                 print(event.delta, end="", flush=True)
         print()
+
 
 asyncio.run(main())
 ```

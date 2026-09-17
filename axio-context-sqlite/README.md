@@ -52,6 +52,7 @@ from axio_context_sqlite import connect, SQLiteContextStore
 from axio.messages import Message
 from axio.blocks import TextBlock
 
+
 async def main() -> None:
     conn = await connect(pathlib.Path(tempfile.mkdtemp()) / "chat.db")
     try:
@@ -61,6 +62,7 @@ async def main() -> None:
         assert len(history) == 1
     finally:
         await conn.close()
+
 
 asyncio.run(main())
 ```
@@ -91,6 +93,7 @@ Every connection opened by `connect()` is configured with:
 name: test_readme_agent
 ```python
 from axio.testing import StubTransport, make_text_response
+
 transport = StubTransport([make_text_response("Hi!")])
 ```
 -->
@@ -102,6 +105,7 @@ import pathlib
 from axio.agent import Agent
 from axio_context_sqlite import connect, SQLiteContextStore
 
+
 async def main() -> None:
     conn = await connect(pathlib.Path(tempfile.mkdtemp()) / "chat.db")
     try:
@@ -111,6 +115,7 @@ async def main() -> None:
         assert result == "Hi!"
     finally:
         await conn.close()
+
 
 asyncio.run(main())
 ```
@@ -126,6 +131,7 @@ from axio_context_sqlite import connect, SQLiteContextStore
 from axio.messages import Message
 from axio.blocks import TextBlock
 
+
 async def main() -> None:
     conn = await connect(pathlib.Path(tempfile.mkdtemp()) / "chat.db")
     try:
@@ -137,6 +143,7 @@ async def main() -> None:
         assert len(sessions) == 1
     finally:
         await conn.close()
+
 
 asyncio.run(main())
 ```
@@ -165,6 +172,7 @@ from axio_context_sqlite import connect, SQLiteContextStore
 from axio.messages import Message
 from axio.blocks import TextBlock
 
+
 async def main() -> None:
     conn = await connect(pathlib.Path(tempfile.mkdtemp()) / "chat.db")
     try:
@@ -175,6 +183,7 @@ async def main() -> None:
         assert len(await branch.get_history()) == 1
     finally:
         await conn.close()
+
 
 asyncio.run(main())
 ```

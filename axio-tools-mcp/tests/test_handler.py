@@ -7,10 +7,18 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from aiohttp_tiny_mcp import (
+    CallToolResult,
+    EmbeddedResource,
+    ResourceLink,
+    TextContent,
+    TextResourceContents,
+)
+from aiohttp_tiny_mcp.models import ToolDef
 from axio.tool import Tool
-from mcp.types import CallToolResult, TextContent
 
-from axio_tools_mcp.handler import build_handler
+from axio_tools_mcp.config import MCPServerConfig
+from axio_tools_mcp.handler import build_handler, build_tools
 from axio_tools_mcp.session import MCPSession
 
 
@@ -24,8 +32,8 @@ async def test_call_forwarding() -> None:
     """Handler forwards kwargs to MCP session.call_tool."""
     session = _make_mock_session()
     cast(AsyncMock, session.call_tool).return_value = CallToolResult(
-        content=[TextContent(type="text", text="hello world")],
-        isError=False,
+        content=[TextContent(text="hello world")],
+        is_error=False,
     )
 
     handler = build_handler("echo__say", "say", "Say something", session)
@@ -36,11 +44,11 @@ async def test_call_forwarding() -> None:
 
 
 async def test_error_handling() -> None:
-    """Handler raises RuntimeError when isError=True."""
+    """Handler raises RuntimeError when is_error=True."""
     session = _make_mock_session()
     cast(AsyncMock, session.call_tool).return_value = CallToolResult(
-        content=[TextContent(type="text", text="not found")],
-        isError=True,
+        content=[TextContent(text="not found")],
+        is_error=True,
     )
 
     handler = build_handler("fs__read", "read", "Read file", session)
@@ -51,7 +59,7 @@ async def test_error_handling() -> None:
 async def test_empty_result() -> None:
     """Handler returns empty string when MCP content is empty."""
     session = _make_mock_session()
-    cast(AsyncMock, session.call_tool).return_value = CallToolResult(content=[], isError=False)
+    cast(AsyncMock, session.call_tool).return_value = CallToolResult(content=[], is_error=False)
 
     handler = build_handler("sys__status", "status", "Get status", session)
     assert await handler() == ""
@@ -62,10 +70,10 @@ async def test_multipart_content_joined() -> None:
     session = _make_mock_session()
     cast(AsyncMock, session.call_tool).return_value = CallToolResult(
         content=[
-            TextContent(type="text", text="line1"),
-            TextContent(type="text", text="line2"),
+            TextContent(text="line1"),
+            TextContent(text="line2"),
         ],
-        isError=False,
+        is_error=False,
     )
 
     handler = build_handler("t__t", "t", "t", session)
@@ -88,8 +96,8 @@ async def test_unknown_extras_filtered_by_schema() -> None:
     """
     session = _make_mock_session()
     cast(AsyncMock, session.call_tool).return_value = CallToolResult(
-        content=[TextContent(type="text", text="ok")],
-        isError=False,
+        content=[TextContent(text="ok")],
+        is_error=False,
     )
 
     mcp_schema: dict[str, Any] = {
@@ -149,8 +157,8 @@ async def test_schema_type_validated_at_runtime() -> None:
     """Tool enforces MCP schema types at call time - wrong type raises HandlerError."""
     session = _make_mock_session()
     cast(AsyncMock, session.call_tool).return_value = CallToolResult(
-        content=[TextContent(type="text", text="ok")],
-        isError=False,
+        content=[TextContent(text="ok")],
+        is_error=False,
     )
 
     mcp_schema: dict[str, Any] = {
@@ -181,8 +189,8 @@ async def test_schema_default_injected() -> None:
     """Schema property defaults are injected before the call reaches the MCP server."""
     session = _make_mock_session()
     cast(AsyncMock, session.call_tool).return_value = CallToolResult(
-        content=[TextContent(type="text", text="ok")],
-        isError=False,
+        content=[TextContent(text="ok")],
+        is_error=False,
     )
 
     mcp_schema: dict[str, Any] = {
@@ -209,8 +217,8 @@ async def test_empty_properties_strips_all_extras() -> None:
     """A schema with properties:{} accepts no kwargs - extras are silently dropped."""
     session = _make_mock_session()
     cast(AsyncMock, session.call_tool).return_value = CallToolResult(
-        content=[TextContent(type="text", text="ok")],
-        isError=False,
+        content=[TextContent(text="ok")],
+        is_error=False,
     )
 
     mcp_schema: dict[str, Any] = {"type": "object", "properties": {}}
@@ -240,8 +248,8 @@ async def test_guard_injected_extras_not_forwarded_to_mcp_server() -> None:
 
     session = _make_mock_session()
     cast(AsyncMock, session.call_tool).return_value = CallToolResult(
-        content=[TextContent(type="text", text="ok")],
-        isError=False,
+        content=[TextContent(text="ok")],
+        is_error=False,
     )
 
     mcp_schema: dict[str, Any] = {
@@ -260,3 +268,48 @@ async def test_guard_injected_extras_not_forwarded_to_mcp_server() -> None:
 
     await tool(path="/tmp/file.txt")
     cast(AsyncMock, session.call_tool).assert_awaited_once_with("read", {"path": "/tmp/file.txt"})
+
+
+async def test_embedded_text_resource_is_read() -> None:
+    """A resource carried in the result is content, so its text reaches the model."""
+    session = _make_mock_session()
+    cast(AsyncMock, session.call_tool).return_value = CallToolResult(
+        content=[
+            TextContent(text="here is the file"),
+            EmbeddedResource(resource=TextResourceContents(uri="file:///report.txt", text="report body")),
+        ],
+        is_error=False,
+    )
+
+    handler = build_handler("fs__read", "read", "Read", session)
+    assert await handler(path="/report.txt") == "here is the file\nreport body"
+
+
+async def test_link_content_carries_no_text() -> None:
+    """A link names a resource to read later, so there is nothing to return yet."""
+    session = _make_mock_session()
+    cast(AsyncMock, session.call_tool).return_value = CallToolResult(
+        content=[ResourceLink(uri="file:///report.txt", name="report")],
+        is_error=False,
+    )
+
+    handler = build_handler("fs__read", "read", "Read", session)
+    assert await handler(path="/report.txt") == ""
+
+
+def test_build_tools_prefixes_names_and_keeps_the_schema() -> None:
+    session = _make_mock_session()
+    session.config = MCPServerConfig(name="fs", command="mcp-server-filesystem")
+    schema = {"type": "object", "properties": {"path": {"type": "string"}}}
+    definitions = [
+        ToolDef(name="read", description="Read a file", input_schema=schema),
+        ToolDef(name="write", input_schema={"type": "object", "properties": {}}),
+    ]
+
+    tools = build_tools(session, definitions)
+
+    assert [tool.name for tool in tools] == ["fs__read", "fs__write"]
+    assert tools[0].description == "Read a file"
+    assert dict(tools[0].input_schema) == schema
+    # A server may omit the description, and the tool name is what is left to say.
+    assert tools[1].description == "write"

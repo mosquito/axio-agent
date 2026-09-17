@@ -2,27 +2,38 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from mcp.types import CallToolResult, TextContent
-from mcp.types import Tool as MCPTool
+from aiohttp_tiny_mcp import CallToolResult, TextContent
+from aiohttp_tiny_mcp.models import ToolDef
 
 from axio_tools_mcp.config import MCPServerConfig
 from axio_tools_mcp.registry import MCPRegistry
 
 
-def _mock_session(tools: list[MCPTool] | None = None) -> MagicMock:
+def _mock_session(tools: list[ToolDef] | None = None) -> MagicMock:
     if tools is None:
-        tools = [MCPTool(name="test", description="Test tool", inputSchema={"type": "object", "properties": {}})]
+        tools = [ToolDef(name="test", description="Test tool", input_schema={"type": "object", "properties": {}})]
     session = MagicMock()
     session.connect = AsyncMock()
     session.list_tools = AsyncMock(return_value=tools)
     session.call_tool = AsyncMock(
-        return_value=CallToolResult(content=[TextContent(type="text", text="ok")], isError=False),
+        return_value=CallToolResult(content=[TextContent(text="ok")], is_error=False),
     )
     session.close = AsyncMock()
     session.is_connected = True
     return session
+
+
+def session_factory(session: MagicMock) -> Callable[[MCPServerConfig], MagicMock]:
+    """Hand the registry one mock session, carrying the config it connected with."""
+
+    def make(config: MCPServerConfig) -> MagicMock:
+        session.config = config
+        return session
+
+    return make
 
 
 async def test_add_server() -> None:
@@ -30,7 +41,7 @@ async def test_add_server() -> None:
     config = MCPServerConfig(name="myserver", command="python")
 
     with patch("axio_tools_mcp.registry.MCPSession") as mock_cls:
-        mock_cls.return_value = _mock_session()
+        mock_cls.side_effect = session_factory(_mock_session())
         tools = await registry.add_server(config)
 
     assert len(tools) == 1
@@ -45,7 +56,7 @@ async def test_remove_server() -> None:
     config = MCPServerConfig(name="myserver", command="python")
 
     with patch("axio_tools_mcp.registry.MCPSession") as mock_cls:
-        mock_cls.return_value = _mock_session()
+        mock_cls.side_effect = session_factory(_mock_session())
         await registry.add_server(config)
         await registry.remove_server("myserver")
 
@@ -59,13 +70,13 @@ async def test_update_server() -> None:
     config2 = MCPServerConfig(name="myserver", command="node")
 
     with patch("axio_tools_mcp.registry.MCPSession") as mock_cls:
-        mock_cls.return_value = _mock_session()
+        mock_cls.side_effect = session_factory(_mock_session())
         await registry.add_server(config1)
 
         new_tools = [
-            MCPTool(name="new_tool", description="New", inputSchema={"type": "object", "properties": {}}),
+            ToolDef(name="new_tool", description="New", input_schema={"type": "object", "properties": {}}),
         ]
-        mock_cls.return_value = _mock_session(new_tools)
+        mock_cls.side_effect = session_factory(_mock_session(new_tools))
         tools = await registry.update_server("myserver", config2)
 
     assert len(tools) == 1
@@ -76,12 +87,12 @@ async def test_all_tools_aggregation() -> None:
     registry = MCPRegistry()
 
     with patch("axio_tools_mcp.registry.MCPSession") as mock_cls:
-        tools_a = [MCPTool(name="a", description="A", inputSchema={"type": "object", "properties": {}})]
-        mock_cls.return_value = _mock_session(tools_a)
+        tools_a = [ToolDef(name="a", description="A", input_schema={"type": "object", "properties": {}})]
+        mock_cls.side_effect = session_factory(_mock_session(tools_a))
         await registry.add_server(MCPServerConfig(name="server_a", command="a"))
 
-        tools_b = [MCPTool(name="b", description="B", inputSchema={"type": "object", "properties": {}})]
-        mock_cls.return_value = _mock_session(tools_b)
+        tools_b = [ToolDef(name="b", description="B", input_schema={"type": "object", "properties": {}})]
+        mock_cls.side_effect = session_factory(_mock_session(tools_b))
         await registry.add_server(MCPServerConfig(name="server_b", command="b"))
 
     all_tools = registry.all_tools
@@ -98,7 +109,7 @@ async def test_server_status_error() -> None:
     with patch("axio_tools_mcp.registry.MCPSession") as mock_cls:
         session = _mock_session()
         session.connect = AsyncMock(side_effect=ConnectionError("refused"))
-        mock_cls.return_value = session
+        mock_cls.side_effect = session_factory(session)
         await registry.add_server(config)
 
     assert registry.server_status("bad") == "error"
@@ -110,7 +121,7 @@ async def test_duplicate_server_raises() -> None:
     config = MCPServerConfig(name="myserver", command="python")
 
     with patch("axio_tools_mcp.registry.MCPSession") as mock_cls:
-        mock_cls.return_value = _mock_session()
+        mock_cls.side_effect = session_factory(_mock_session())
         await registry.add_server(config)
 
     import pytest
@@ -124,7 +135,7 @@ async def test_close_all() -> None:
 
     with patch("axio_tools_mcp.registry.MCPSession") as mock_cls:
         session = _mock_session()
-        mock_cls.return_value = session
+        mock_cls.side_effect = session_factory(session)
         await registry.add_server(MCPServerConfig(name="s1", command="a"))
         await registry.close()
 
@@ -146,7 +157,7 @@ async def test_init_from_config_db() -> None:
     registry = MCPRegistry()
 
     with patch("axio_tools_mcp.registry.MCPSession") as mock_cls:
-        mock_cls.return_value = _mock_session()
+        mock_cls.side_effect = session_factory(_mock_session())
         await registry.init(mock_db)
 
     assert "myserver" in registry.server_names
@@ -177,7 +188,7 @@ async def test_dual_config_init() -> None:
     registry = MCPRegistry()
 
     with patch("axio_tools_mcp.registry.MCPSession") as mock_cls:
-        mock_cls.return_value = _mock_session()
+        mock_cls.side_effect = session_factory(_mock_session())
         await registry.init(config=project_db, global_config=global_db)
 
     assert "global_server" in registry.server_names
@@ -204,7 +215,7 @@ async def test_dual_config_persist_to_correct_scope() -> None:
     await registry.init(config=project_db, global_config=global_db)
 
     with patch("axio_tools_mcp.registry.MCPSession") as mock_cls:
-        mock_cls.return_value = _mock_session()
+        mock_cls.side_effect = session_factory(_mock_session())
         await registry.add_server(MCPServerConfig(name="proj_srv", command="python"), scope=project_db)
 
     # Should persist to project DB, not global
@@ -234,7 +245,7 @@ async def test_scope_only_change_skips_reconnect() -> None:
 
     with patch("axio_tools_mcp.registry.MCPSession") as mock_cls:
         mock_session = _mock_session()
-        mock_cls.return_value = mock_session
+        mock_cls.side_effect = session_factory(mock_session)
         await registry.init(config=project_db, global_config=global_db)
 
         # Reset to track calls during update
@@ -269,7 +280,7 @@ async def test_persistence_roundtrip() -> None:
     await registry.init(mock_db)
 
     with patch("axio_tools_mcp.registry.MCPSession") as mock_cls:
-        mock_cls.return_value = _mock_session()
+        mock_cls.side_effect = session_factory(_mock_session())
         await registry.add_server(MCPServerConfig(name="persisted", command="python"))
 
     # Check that set was called with mcp.persisted.command
