@@ -8,11 +8,11 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 from axio import (
-    Agent,
     CONTEXT,
+    Agent,
     ContextStore,
     MemoryContextStore,
     Message,
@@ -28,7 +28,6 @@ from axio.events import SessionEndEvent
 from axio.testing import StubTransport, make_text_response
 from axio_context_sqlite import SQLiteContextStore, connect
 from axio_tools_docker import DockerSandbox
-
 
 TOOL_OUTPUT_MAX_CHARS = 4_000
 TRUNCATION_MARKER = "\n[tool output truncated]"
@@ -309,7 +308,7 @@ class _FakeSandbox:
         self.closed = False
         self.tool_calls = 0
 
-    async def __aenter__(self) -> _FakeSandbox:
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, *exc: object) -> None:

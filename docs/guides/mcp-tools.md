@@ -123,6 +123,9 @@ revision both sides speak. Set `protocol_version` to pin one revision instead;
 a pinned revision is never replaced, and a server that refuses it fails to
 connect.
 
+A server that pages its tool list is read to the end, so every page becomes
+tools.
+
 ## Tool naming
 
 Tools are prefixed with the server name and a double underscore:

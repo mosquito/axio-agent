@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 from axio import Agent, MemoryContextStore, Tool
 from axio.testing import StubTransport, make_text_response, make_tool_use_response
@@ -116,8 +116,8 @@ class _ScopeAgent:
 
 
 class _ScopeHarness:
-    instances: list[_ScopeHarness] = []
-    events: list[str] = []
+    instances: ClassVar[list[_ScopeHarness]] = []
+    events: ClassVar[list[str]] = []
 
     def __init__(self, prototype, context_factory, sandbox_factory) -> None:
         self.prototype = prototype
@@ -168,7 +168,7 @@ async def verify_failure_cleanup() -> None:
         return [], [copy_session]
 
     class CopyFailureAgent:
-        tools: list[Any] = []
+        tools: ClassVar[list[Any]] = []
 
         def copy(self, *, tools: list[Any]) -> CopyFailureAgent:
             raise RuntimeError("agent copy failed")

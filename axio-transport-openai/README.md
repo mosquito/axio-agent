@@ -41,6 +41,7 @@ from axio.context import MemoryContextStore
 from axio.events import TextDelta
 from axio_transport_openai import OpenAITransport, OPENAI_MODELS
 
+
 async def main() -> None:
     async with aiohttp.ClientSession() as session:
         transport = OpenAITransport(
@@ -54,6 +55,7 @@ async def main() -> None:
             if isinstance(event, TextDelta):
                 print(event.delta, end="", flush=True)
         print()
+
 
 asyncio.run(main())
 ```
@@ -74,7 +76,7 @@ from axio.models import ModelSpec, Capability
 from axio_transport_openai import OpenAITransport
 
 transport = OpenAITransport(
-    api_key="ollama",                        # any non-empty string
+    api_key="ollama",  # any non-empty string
     model=ModelSpec(id="llama3.2", capabilities=frozenset({Capability.text})),
     base_url="http://localhost:11434/v1",
 )
@@ -95,6 +97,7 @@ agent = Agent(
     transport=StubTransport([make_text_response("Why did the chicken cross the road?")]),
 )
 
+
 async def main() -> None:
     ctx = MemoryContextStore()
     async for event in agent.run_stream("Tell me a joke", ctx):
@@ -103,6 +106,7 @@ async def main() -> None:
                 print(text, end="", flush=True)
             case SessionEndEvent(total_usage=usage):
                 print(f"\n[{usage.input_tokens}in / {usage.output_tokens}out tokens]")
+
 
 asyncio.run(main())
 ```
@@ -154,7 +158,7 @@ The default model is `gpt-4.1-mini`.
 
 ```python
 # Serialise
-data = transport.to_dict()   # -> {"name": ..., "base_url": ..., "api_key": ..., "models": [...]}
+data = transport.to_dict()  # -> {"name": ..., "base_url": ..., "api_key": ..., "models": [...]}
 
 # Restore
 transport = OpenAITransport.from_dict(data, session=session)
@@ -172,7 +176,7 @@ transport = OpenAITransport.from_dict(data, session=session)
 from axio_transport_openai.nebius import NebiusTransport
 
 transport = NebiusTransport(
-    api_key="...",          # or set NEBIUS_API_KEY
+    api_key="...",  # or set NEBIUS_API_KEY
     session=session,
 )
 ```
@@ -194,7 +198,7 @@ transport = NebiusTransport(
 from axio_transport_openai.openrouter import OpenRouterTransport
 
 transport = OpenRouterTransport(
-    api_key="...",          # or set OPENROUTER_API_KEY
+    api_key="...",  # or set OPENROUTER_API_KEY
     session=session,
 )
 ```
@@ -220,14 +224,16 @@ transport = OpenAICompatibleTransport(
     name="localai",
     base_url="http://localhost:8080/v1",
     api_key="",
-    models=ModelRegistry([
-        ModelSpec(
-            id="llama3.2",
-            context_window=131_072,
-            max_output_tokens=4_096,
-            capabilities=frozenset({Capability.text, Capability.tool_use}),
-        )
-    ]),
+    models=ModelRegistry(
+        [
+            ModelSpec(
+                id="llama3.2",
+                context_window=131_072,
+                max_output_tokens=4_096,
+                capabilities=frozenset({Capability.text, Capability.tool_use}),
+            )
+        ]
+    ),
     session=session,
 )
 ```

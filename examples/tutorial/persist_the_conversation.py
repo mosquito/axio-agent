@@ -7,8 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, TextIO
 
-from axio_context_sqlite import SQLiteContextStore, connect
-
 from axio import (
     Agent,
     CompletionTransport,
@@ -21,6 +19,7 @@ from axio import (
 )
 from axio.events import Error, SessionEndEvent, TextDelta, ToolResult, ToolUseStart
 from axio.testing import StubTransport, make_text_response, make_tool_use_response
+from axio_context_sqlite import SQLiteContextStore, connect
 
 DOCUMENTS: dict[str, dict[str, str]] = {
     "README.md": {

@@ -41,8 +41,8 @@ from axio_tools_local.list_files import list_files
 from axio.tool import Tool
 
 tools = [
-    Tool(name="shell",      handler=shell),
-    Tool(name="read_file",  handler=read_file),
+    Tool(name="shell", handler=shell),
+    Tool(name="read_file", handler=read_file),
     Tool(name="write_file", handler=write_file),
     Tool(name="list_files", handler=list_files),
 ]

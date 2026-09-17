@@ -40,6 +40,7 @@ from axio.context import MemoryContextStore
 from axio.testing import StubTransport, make_text_response
 from axio_tools_docker import DockerSandbox
 
+
 async def main() -> None:
     transport = StubTransport([make_text_response("Done.")])
     async with DockerSandbox(image="python:3.12-alpine") as sandbox:
@@ -51,6 +52,7 @@ async def main() -> None:
         ctx = MemoryContextStore()
         result = await agent.run("Print hello from Python.", ctx)
         print(result)
+
 
 asyncio.run(main())
 ```
@@ -76,6 +78,7 @@ Cleanup runs even when the body raises an exception:
 ```python
 from axio_tools_docker import DockerSandbox
 from axio import Agent
+
 
 async def run(ctx):
     agent = Agent(
@@ -110,13 +113,16 @@ a new one. Attached containers are never removed on exit - regardless of
 import asyncio
 from axio_tools_docker import DockerSandbox
 
+
 async def first_session() -> None:
     async with DockerSandbox(image="python:3.12-slim", name="my-sandbox", remove=False) as sb:
         await sb.exec("pip install requests")
 
+
 async def second_session() -> None:
     async with DockerSandbox(name="my-sandbox") as sb:
         result = await sb.exec("python3 -c 'import requests; print(requests.__version__)'")
+
 
 asyncio.run(first_session())
 asyncio.run(second_session())
@@ -132,6 +138,7 @@ restarts. Use them to share state between sandbox sessions:
 import asyncio
 from axio_tools_docker import DockerSandbox
 
+
 async def main() -> None:
     async with DockerSandbox(
         image="python:3.12-alpine",
@@ -143,10 +150,11 @@ async def main() -> None:
     async with DockerSandbox(
         image="python:3.12-alpine",
         named_volumes={"/data": "my-project-data"},
-        volumes_remove=True,   # delete the volume on exit
+        volumes_remove=True,  # delete the volume on exit
     ) as sb:
         raw = await sb.read_file_bytes("/data/state.json")
         assert raw.decode() == '{"count": 1}'
+
 
 asyncio.run(main())
 ```

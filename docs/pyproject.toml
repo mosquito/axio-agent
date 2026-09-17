@@ -29,6 +29,8 @@ dependencies = [
 [dependency-groups]
 dev = [
     "markdown-pytest>=0.6.0",
+    # The best-practices example imports it; nothing else pulls it in.
+    "pydantic-settings>=2",
 ]
 docs = [
     "sphinx>=8",

@@ -47,6 +47,7 @@ from axio import Agent
 from axio.context import MemoryContextStore
 from axio_transport_anthropic import AnthropicTransport, ANTHROPIC_MODELS
 
+
 async def main() -> None:
     async with aiohttp.ClientSession() as session:
         transport = AnthropicTransport(
@@ -57,6 +58,7 @@ async def main() -> None:
         agent = Agent(system="You are helpful.", tools=[], transport=transport)
         ctx = MemoryContextStore()
         print(await agent.run("Hello!", ctx))
+
 
 asyncio.run(main())
 ```
