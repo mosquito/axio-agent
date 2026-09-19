@@ -14,7 +14,7 @@ classifiers = [
 keywords = ["llm", "agent", "ai", "mcp", "tools", "model-context-protocol"]
 dependencies = [
     "axio",
-    "aiohttp-tiny-mcp>=0.3.0",
+    "aiohttp-tiny-mcp~=0.3.3",
     "aiohttp>=3.11",
 ]
 
