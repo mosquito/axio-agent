@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiohttp_tiny_mcp import CallToolResult, TextContent
-from aiohttp_tiny_mcp.models import ToolDef
+from aiohttp_tiny_mcp.protocol.models import ToolDef
 
 from axio_tools_mcp.config import MCPServerConfig
 from axio_tools_mcp.loader import load_mcp_tools

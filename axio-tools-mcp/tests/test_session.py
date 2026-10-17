@@ -201,3 +201,21 @@ async def test_calls_need_a_connection(stdio_config: MCPServerConfig) -> None:
         await session.list_tools()
     with pytest.raises(RuntimeError, match="Not connected"):
         await session.call_tool("echo", {})
+
+
+async def test_silent_stdio_handshake_times_out_and_closes() -> None:
+    session = MCPSession(
+        MCPServerConfig(name="silent", command=sys.executable, args=["-c", "import time; time.sleep(60)"], timeout=0.1)
+    )
+    async with asyncio.timeout(3):
+        with pytest.raises(TimeoutError, match="Connection and handshake timed out after 0.1s"):
+            await session.connect()
+    assert session.process is None
+    assert session.stderr_task is None
+    assert not session.is_connected
+
+
+@pytest.mark.parametrize("timeout", [0, -1, float("inf"), float("nan"), True])
+def test_timeout_must_be_positive_and_finite(timeout: float) -> None:
+    with pytest.raises(ValueError, match="positive finite"):
+        MCPServerConfig(name="invalid", command="python", timeout=timeout)

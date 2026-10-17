@@ -16,6 +16,7 @@ class Nothing(BaseModel):
 
 class Message(BaseModel):
     message: str
+    delay: float = 0
 
 
 registry = Registry("fixture", "1.0")
@@ -24,6 +25,7 @@ registry = Registry("fixture", "1.0")
 @registry.tool
 async def echo(args: Message) -> str:
     """Return the message."""
+    await asyncio.sleep(args.delay)
     return args.message
 
 

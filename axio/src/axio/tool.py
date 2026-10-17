@@ -33,13 +33,22 @@ SCHEMA_JSON_TYPE_MAP: dict[str, type] = {
     "boolean": bool,
     "array": list,
     "object": dict,
+    "null": type(None),
 }
 
 
 def hint_from_json_schema(prop_schema: dict[str, Any]) -> Any:
     """Return the Python type hint for a single JSON Schema property definition."""
     t = prop_schema.get("type")
-    if t is not None:
+    if isinstance(t, list):
+        # JSON Schema permits type arrays, including nullable MCP arguments.
+        if not t or not all(isinstance(item, str) for item in t):
+            return object
+        hint: Any = SCHEMA_JSON_TYPE_MAP.get(t[0], object)
+        for item in t[1:]:
+            hint = hint | SCHEMA_JSON_TYPE_MAP.get(item, object)
+        return hint
+    if isinstance(t, str):
         return SCHEMA_JSON_TYPE_MAP.get(t, object)
     any_of = prop_schema.get("anyOf")
     if any_of is not None:

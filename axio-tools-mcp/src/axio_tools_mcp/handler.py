@@ -7,7 +7,7 @@ from types import MappingProxyType
 from typing import Any
 
 from aiohttp_tiny_mcp import CallToolResult, EmbeddedResource, TextContent, TextResourceContents
-from aiohttp_tiny_mcp.models import ToolDef
+from aiohttp_tiny_mcp.protocol.models import ToolDef
 from axio.tool import Tool
 
 from .session import MCPSession
@@ -67,6 +67,7 @@ def build_tools(session: MCPSession, definitions: Iterable[ToolDef]) -> list[Too
                 description=description,
                 handler=handler,
                 schema=MappingProxyType(dict(definition.input_schema)),
+                permission_identity=session.config.permission_identity,
             )
         )
     return tools

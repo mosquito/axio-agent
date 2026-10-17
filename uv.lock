@@ -223,15 +223,15 @@ wheels = [
 
 [[package]]
 name = "aiohttp-tiny-mcp"
-version = "0.3.0"
+version = "0.5.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2a/b7/2dfecc20836a2f82003dd1067be71bce09fe062ad6dfd294ad87f8f2067d/aiohttp_tiny_mcp-0.3.0.tar.gz", hash = "sha256:8379b16403d97253745f40485aa373f32fb35b054b84fbe58016bed599d58f0e", size = 86401, upload-time = "2026-09-17T21:23:56.819Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f4/7e/ca4e1e43537d966dca55c644adf80f5f9952332a36a3727c88ff57aae327/aiohttp_tiny_mcp-0.5.8.tar.gz", hash = "sha256:a9df6395fa52a5b025ccdbc87ba4f0648f34efee9d065d5fa1b1d0d2283ed437", size = 142454, upload-time = "2026-10-16T13:26:14.973Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e1/8f/487e89a208d95c5d0f7c219121760d1fa2a3ad6f9c6db02fa05ab41ff0f4/aiohttp_tiny_mcp-0.3.0-py3-none-any.whl", hash = "sha256:e8ff9b2c37001eaaa3b5b15088fcf77f1d747597ed5a30af37d2af86c57ee344", size = 106539, upload-time = "2026-09-17T21:23:55.225Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/76/2e4f7e463e868c60a5dff09fbc0168e462ba3f69c1663e63e294e8e6e242/aiohttp_tiny_mcp-0.5.8-py3-none-any.whl", hash = "sha256:9ae42f62504f6fd33fac0c11e0998ba26fa19f2d47f05018378113475c37a356", size = 167426, upload-time = "2026-10-16T13:26:13.564Z" },
 ]
 
 [[package]]
@@ -697,6 +697,12 @@ dependencies = [
     { name = "aiohttp" },
     { name = "aiohttp-tiny-mcp" },
     { name = "axio" },
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+tui = [
+    { name = "textual" },
 ]
 
 [package.dev-dependencies]
@@ -713,9 +719,12 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.11" },
-    { name = "aiohttp-tiny-mcp", specifier = ">=0.3.0" },
+    { name = "aiohttp-tiny-mcp", specifier = "~=0.5.8" },
     { name = "axio", editable = "axio" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "textual", marker = "extra == 'tui'", specifier = ">=2.1.0" },
 ]
+provides-extras = ["tui"]
 
 [package.metadata.requires-dev]
 dev = [

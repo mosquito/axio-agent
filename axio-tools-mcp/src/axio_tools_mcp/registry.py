@@ -48,7 +48,7 @@ class MCPRegistry:
                 if name in self._configs:
                     continue  # project cannot shadow global
                 try:
-                    cfg = MCPServerConfig.from_dict(name, data)
+                    cfg = MCPServerConfig.from_settings(name, data)
                 except Exception:
                     logger.warning("Invalid saved MCP config %r, skipping", name, exc_info=True)
                     continue
@@ -90,7 +90,7 @@ class MCPRegistry:
             return
         prefix = f"mcp.{config.name}."
         await db.delete_prefix(prefix)
-        for key, value in config.to_dict().items():
+        for key, value in config.to_settings().items():
             await db.set(f"{prefix}{key}", value)
         self._server_scope[config.name] = db
 

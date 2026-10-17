@@ -14,9 +14,13 @@ classifiers = [
 keywords = ["llm", "agent", "ai", "mcp", "tools", "model-context-protocol"]
 dependencies = [
     "axio",
-    "aiohttp-tiny-mcp>=0.3.0",
+    "aiohttp-tiny-mcp~=0.5.8",
     "aiohttp>=3.11",
+    "pydantic>=2",
 ]
+
+[project.optional-dependencies]
+tui = ["textual>=2.1.0"]
 
 [project.entry-points."axio.tools.settings"]
 mcp = "axio_tools_mcp.plugin:MCPPlugin"
