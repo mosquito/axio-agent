@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from axio.exceptions import StreamError
 from axio.models import Capability, ModelSpec
@@ -17,6 +17,13 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class OpenRouterTransport(ThinkingMixin, OpenAITransport):
+    display_name: ClassVar[str] = "OpenRouter"
+    env_vars: ClassVar[tuple[str, ...]] = ("OPENROUTER_API_KEY",)
+    supports_temperature: ClassVar[bool] = False
+    supports_max_tokens: ClassVar[bool] = False
+    supports_debug: ClassVar[bool] = False
+    supports_thinking: ClassVar[bool] = True
+
     # These point at servers that implement /v1/chat/completions and not /v1/responses.
     api: Literal["responses", "chat"] = field(default="chat", kw_only=True)
     name: str = "OpenRouter"

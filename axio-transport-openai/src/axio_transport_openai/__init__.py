@@ -12,7 +12,7 @@ import re
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Literal, Self
+from typing import Any, ClassVar, Literal, Self
 
 import aiohttp
 from axio.blocks import ImageBlock, ProviderBlock, ReasoningBlock, TextBlock, ToolResultBlock, ToolUseBlock
@@ -548,6 +548,13 @@ def _number[T: (int, float)](data: dict[str, Any], key: str, as_type: Callable[[
 
 @dataclass(slots=True)
 class OpenAITransport(CompletionTransport, EmbeddingTransport):
+    display_name: ClassVar[str] = "OpenAI"
+    env_vars: ClassVar[tuple[str, ...]] = ("OPENAI_API_KEY",)
+    supports_temperature: ClassVar[bool] = False
+    supports_max_tokens: ClassVar[bool] = False
+    supports_debug: ClassVar[bool] = False
+    supports_thinking: ClassVar[bool] = False
+
     name: str = "OpenAI"
     #: Which endpoint this server speaks. ``"responses"`` is the one that takes function tools and
     #: reasoning together, and OpenAI recommends it for new work. Left unset it follows
@@ -980,6 +987,16 @@ class ThinkingMixin:
     __slots__ = ()
 
     thinking: bool  # declared in the concrete dataclass subclass
+
+    def describe_thinking(self) -> str:
+        return f"Thinking: {'on' if self.thinking else 'off'}. Valid levels: on, off, default."
+
+    def configure_thinking(self, value: str) -> str:
+        setting = value.lower()
+        if setting not in {"on", "off", "default"}:
+            raise ValueError("This transport accepts thinking on, off, or default.")
+        setattr(self, "thinking", setting == "on")
+        return self.describe_thinking()
 
     def build_payload(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> dict[str, Any]:
         payload: dict[str, Any] = super().build_payload(messages, tools, system)  # type: ignore[misc]

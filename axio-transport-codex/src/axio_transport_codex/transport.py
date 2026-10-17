@@ -9,7 +9,7 @@ import platform
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 import aiohttp
 from axio.events import (
@@ -60,6 +60,13 @@ _convert_messages = convert_messages
 
 @dataclass(slots=True)
 class CodexTransport(CompletionTransport):
+    display_name: ClassVar[str] = "ChatGPT (Codex)"
+    env_vars: ClassVar[tuple[str, ...]] = ()
+    supports_temperature: ClassVar[bool] = False
+    supports_max_tokens: ClassVar[bool] = False
+    supports_debug: ClassVar[bool] = False
+    supports_thinking: ClassVar[bool] = False
+
     name: str = "ChatGPT (Codex)"
     api_key: str = ""
     refresh_token: str = ""
