@@ -525,13 +525,46 @@ source = { editable = "axio-repl" }
 dependencies = [
     { name = "aiohttp" },
     { name = "axio" },
+]
+
+[package.optional-dependencies]
+all = [
     { name = "axio-tools-local" },
+    { name = "axio-tools-mcp" },
+    { name = "axio-transport-anthropic" },
+    { name = "axio-transport-codex" },
+    { name = "axio-transport-google" },
+    { name = "axio-transport-openai" },
+]
+anthropic = [
+    { name = "axio-transport-anthropic" },
+]
+codex = [
+    { name = "axio-transport-codex" },
+]
+google = [
+    { name = "axio-transport-google" },
+]
+local = [
+    { name = "axio-tools-local" },
+]
+mcp = [
+    { name = "axio-tools-mcp" },
+]
+openai = [
     { name = "axio-transport-openai" },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "aiohttp-tiny-mcp" },
+    { name = "axio-tools-local" },
+    { name = "axio-tools-mcp" },
+    { name = "axio-transport-google" },
+    { name = "axio-transport-openai" },
+    { name = "axio-tui" },
     { name = "mypy" },
+    { name = "pydantic" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
@@ -541,13 +574,26 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.11" },
     { name = "axio", editable = "axio" },
-    { name = "axio-tools-local", editable = "axio-tools-local" },
-    { name = "axio-transport-openai", editable = "axio-transport-openai" },
+    { name = "axio-repl", extras = ["local", "mcp", "openai", "google", "anthropic", "codex"], marker = "extra == 'all'", editable = "axio-repl" },
+    { name = "axio-tools-local", marker = "extra == 'local'", editable = "axio-tools-local" },
+    { name = "axio-tools-mcp", marker = "extra == 'mcp'", editable = "axio-tools-mcp" },
+    { name = "axio-transport-anthropic", marker = "extra == 'anthropic'", editable = "axio-transport-anthropic" },
+    { name = "axio-transport-codex", marker = "extra == 'codex'", editable = "axio-transport-codex" },
+    { name = "axio-transport-google", marker = "extra == 'google'", editable = "axio-transport-google" },
+    { name = "axio-transport-openai", marker = "extra == 'openai'", editable = "axio-transport-openai" },
 ]
+provides-extras = ["local", "mcp", "openai", "google", "anthropic", "codex", "all"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "aiohttp-tiny-mcp", specifier = "~=0.5.8" },
+    { name = "axio-tools-local", editable = "axio-tools-local" },
+    { name = "axio-tools-mcp", editable = "axio-tools-mcp" },
+    { name = "axio-transport-google", editable = "axio-transport-google" },
+    { name = "axio-transport-openai", editable = "axio-transport-openai" },
+    { name = "axio-tui", editable = "axio-tui" },
     { name = "mypy", specifier = ">=1.14" },
+    { name = "pydantic", specifier = ">=2" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "ruff", specifier = ">=0.9" },

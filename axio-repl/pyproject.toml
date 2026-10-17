@@ -14,10 +14,17 @@ classifiers = [
 keywords = ["llm", "agent", "ai", "repl", "coding-assistant"]
 dependencies = [
     "axio",
-    "axio-tools-local",
-    "axio-transport-openai",
     "aiohttp>=3.11",
 ]
+
+[project.optional-dependencies]
+local = ["axio-tools-local"]
+mcp = ["axio-tools-mcp"]
+openai = ["axio-transport-openai"]
+google = ["axio-transport-google"]
+anthropic = ["axio-transport-anthropic"]
+codex = ["axio-transport-codex"]
+all = ["axio-repl[local,mcp,openai,google,anthropic,codex]"]
 
 [project.scripts]
 axio-repl = "axio_repl:main_sync"
@@ -48,6 +55,13 @@ python_version = "3.12"
 
 [dependency-groups]
 dev = [
+    "axio-tools-local",
+    "axio-tools-mcp",
+    "axio-transport-google",
+    "axio-transport-openai",
+    "axio-tui",
+    "aiohttp-tiny-mcp~=0.5.8",
+    "pydantic>=2",
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "mypy>=1.14",
