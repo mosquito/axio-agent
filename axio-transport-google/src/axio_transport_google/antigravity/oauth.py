@@ -30,8 +30,12 @@ class OAuthError(AxioError):
 
 @dataclass(frozen=True, slots=True)
 class OAuthConfig:
-    # Published installed-app configuration, not an account credential.
+    # Shared OAuth client ID/secret embedded in the Antigravity desktop app,
+    # as documented by pi-antigravity:
+    # https://github.com/Rahularya01/pi-antigravity/blob/main/SECURITY.md#oauth-client-credentials
+    # The same pair is published here:
     # https://github.com/dvcrn/antigravity-oauth-proxy/blob/main/internal/credentials/types.go
+    # These identify the client application; user access/refresh tokens are private.
     client_id: str = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
     client_secret: str = field(default="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", repr=False)
     redirect_uri: str = "http://localhost:51121/oauth-callback"
