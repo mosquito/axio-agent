@@ -24,15 +24,20 @@ import axio_transport_anthropic
 from axio import Tool
 from axio.testing import StubTransport, make_text_response
 
+
 async def _list_files() -> str:
     """List files in the current directory."""
     return "README.md\nsrc/"
 
+
 async def _fake_load(servers):
     return [Tool(name="fs__list_files", handler=_list_files)], []
 
+
 axio_tools_mcp.load_mcp_tools = _fake_load
-axio_transport_anthropic.AnthropicTransport = lambda: StubTransport([make_text_response("README.md and src/")])
+axio_transport_anthropic.AnthropicTransport = lambda: StubTransport(
+    [make_text_response("README.md and src/")]
+)
 ```
 -->
 <!-- name: test_mcp_load_tools -->
@@ -45,7 +50,9 @@ from axio_tools_mcp import load_mcp_tools, MCPServerConfig
 
 async def main() -> None:
     servers = [
-        MCPServerConfig(name="fs", command="mcp-server-filesystem", args=["--root", "."]),
+        MCPServerConfig(
+            name="fs", command="mcp-server-filesystem", args=["--root", "."]
+        ),
     ]
     tools, sessions = await load_mcp_tools(servers)
     try:
@@ -79,7 +86,7 @@ MCPServerConfig(
     name="filesystem",
     command="mcp-server-filesystem",
     args=["--root", "/home/user/project"],
-    env={"MY_VAR": "value"},   # optional extra environment variables
+    env={"MY_VAR": "value"},  # optional extra environment variables
 )
 ```
 
@@ -143,11 +150,15 @@ Pass multiple configs to `load_mcp_tools` - tools from all servers are merged
 into a single flat list:
 
 ```python
-tools, sessions = await load_mcp_tools([
-    MCPServerConfig(name="fs",  command="mcp-server-filesystem", args=["--root", "."]),
-    MCPServerConfig(name="git", command="mcp-server-git"),
-    MCPServerConfig(name="web", url="http://localhost:4000/mcp"),
-])
+tools, sessions = await load_mcp_tools(
+    [
+        MCPServerConfig(
+            name="fs", command="mcp-server-filesystem", args=["--root", "."]
+        ),
+        MCPServerConfig(name="git", command="mcp-server-git"),
+        MCPServerConfig(name="web", url="http://localhost:4000/mcp"),
+    ]
+)
 ```
 
 ## Error handling

@@ -22,6 +22,9 @@ dependencies = [
 [project.optional-dependencies]
 tui = ["textual>=2.1.0"]
 
+[project.entry-points."axio.tools.providers"]
+mcp = "axio_tools_mcp.provider:MCPToolProvider"
+
 [project.entry-points."axio.tools.settings"]
 mcp = "axio_tools_mcp.plugin:MCPPlugin"
 
