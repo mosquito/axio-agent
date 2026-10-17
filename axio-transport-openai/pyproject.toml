@@ -12,7 +12,7 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 keywords = ["llm", "agent", "ai", "openai", "transport", "openai-compatible"]
-dependencies = ["axio", "axio-responses", "axio-sse", "aiohttp>=3.11"]
+dependencies = ["axio", "axio-responses", "axio-sse", "aiohttp>=3.11", "PyJWT[crypto]>=2.10.1", "yarl>=1.18"]
 
 [project.optional-dependencies]
 tui = ["textual>=2.1.0"]
