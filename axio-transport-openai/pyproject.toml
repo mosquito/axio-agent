@@ -18,7 +18,11 @@ dependencies = ["axio", "axio-responses", "axio-sse", "aiohttp>=3.11", "PyJWT[cr
 tui = ["textual>=2.1.0"]
 examples = ["partial-json-parser>=0.2"]
 
+[project.scripts]
+axio-chatgpt = "axio_transport_openai.cli:main"
+
 [project.entry-points."axio.transport"]
+chatgpt = "axio_transport_openai:ChatGPTTransport"
 openai = "axio_transport_openai:OpenAITransport"
 nebius = "axio_transport_openai.nebius:NebiusTransport"
 openrouter = "axio_transport_openai.openrouter:OpenRouterTransport"

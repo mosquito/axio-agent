@@ -22,8 +22,13 @@ import aiohttp
 import jwt
 import pytest
 from aiohttp import web
+from axio import Agent, MemoryContextStore, Message, Tool
+from axio.models import Capability, ModelSpec
 from cryptography.hazmat.primitives.asymmetric import rsa
 
+from axio_transport_openai import ChatGPTTransport, auth, cli
+from axio_transport_openai.credential_stores import FileCredentialStore
+from axio_transport_openai.credentials import CredentialRecord, save_account
 from axio_transport_openai.oauth import (
     CALLBACK_PATH,
     DYNAMIC_CLIENT_ID,
@@ -36,6 +41,7 @@ from axio_transport_openai.oauth import (
     OAuthError,
     OAuthValidationError,
 )
+from axio_transport_openai.session import ChatGPTSession
 
 
 @pytest.fixture(scope="module")
@@ -220,6 +226,146 @@ async def assert_callback_closed(server: FakeOAuth) -> None:
         with pytest.raises(aiohttp.ClientConnectorError):
             async with server.session.get(server.authorizations[-1]["redirect_uri"]):
                 pass
+
+
+async def test_terminal_signin_shared_refresh_and_transport_restart(
+    server: FakeOAuth, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    credentials = tmp_path / "credentials" / "chatgpt.auth"
+
+    def oauth_client(http: aiohttp.ClientSession, host_id: str) -> ChatGPTOAuth:
+        return ChatGPTOAuth(http, host_id, issuer=server.issuer)
+
+    async def browser(self: auth.TerminalAuthorization, url: str) -> None:
+        await server.browser(url)
+
+    monkeypatch.setattr(auth, "ChatGPTOAuth", oauth_client)
+    monkeypatch.setattr(auth.TerminalAuthorization, "open", browser)
+    await cli.run(cli.parser().parse_args(["login", "--credentials", str(credentials), "--timeout", "5"]))
+    store = FileCredentialStore(credentials)
+    selected_id = await store.selected_account()
+    assert selected_id is not None
+    async with store.lock(selected_id):
+        saved = await store.load(selected_id)
+    assert saved is not None
+    signed_in = saved.account
+    assert signed_in.tokens is not None and signed_in.tokens.plan_enabled
+    other = replace(signed_in, client_id="other-registration")
+    await save_account(store, other)
+    async with store.lock(signed_in.client_id):
+        await store.save(
+            CredentialRecord(
+                replace(
+                    signed_in,
+                    tokens=replace(signed_in.tokens, received_at=time.time() - 3601, expires_at=time.time() - 1),
+                )
+            )
+        )
+    server.token_changes = {"access_token": "rotated-access", "refresh_token": "rotated-refresh"}
+    payloads: list[dict[str, Any]] = []
+    requests: list[str] = []
+
+    async def models(request: web.Request) -> web.Response:
+        requests.append(request.headers["Authorization"])
+        return web.json_response({"models": [{"slug": "gpt-6-luna", "display_name": "Luna", "visibility": "list"}]})
+
+    async def responses(request: web.Request) -> web.Response:
+        requests.append(request.headers["Authorization"])
+        payloads.append(await request.json())
+        turn = len(payloads)
+        events: list[dict[str, Any]] = [{"type": "response.created", "response": {"model": "gpt-6-luna"}}]
+        if turn % 2:
+            events.extend(
+                [
+                    {
+                        "type": "response.output_item.done",
+                        "output_index": 0,
+                        "item": {"type": "reasoning", "id": f"reason-{turn}", "encrypted_content": "opaque-proof"},
+                    },
+                    {
+                        "type": "response.output_item.added",
+                        "output_index": 1,
+                        "item": {
+                            "type": "function_call",
+                            "id": f"item-{turn}",
+                            "call_id": f"call-{turn}",
+                            "name": "answer",
+                        },
+                    },
+                    {
+                        "type": "response.function_call_arguments.delta",
+                        "output_index": 1,
+                        "item_id": f"item-{turn}",
+                        "delta": "{}",
+                    },
+                ]
+            )
+        else:
+            events.append({"type": "response.output_text.delta", "delta": "42"})
+        events.append({"type": "response.completed", "response": {"status": "completed", "output": []}})
+        return web.Response(
+            text="".join(f"data: {json.dumps(event)}\n\n" for event in events), content_type="text/event-stream"
+        )
+
+    app = web.Application()
+    app.router.add_get("/models", models)
+    app.router.add_post("/responses", responses)
+    runner = web.AppRunner(app, access_log=None)
+    await runner.setup()
+    await web.TCPSite(runner, "127.0.0.1", 0).start()
+    base_url = f"http://127.0.0.1:{runner.addresses[0][1]}"
+    spec = ModelSpec("gpt-6-luna", frozenset({Capability.text, Capability.tool_use, Capability.reasoning}))
+
+    async def answer() -> str:
+        return "42"
+
+    def transport(account: ChatGPTSession, http: aiohttp.ClientSession) -> ChatGPTTransport:
+        return ChatGPTTransport(account=account, session=http, base_url=base_url, model_specs=[spec])
+
+    first = ChatGPTSession(store, oauth_client(server.session, signed_in.host_id), signed_in.client_id)
+    second = ChatGPTSession(
+        FileCredentialStore(credentials), oauth_client(server.session, signed_in.host_id), signed_in.client_id
+    )
+    try:
+        one, two = transport(first, server.session), transport(second, server.session)
+        await asyncio.gather(one.fetch_models(), two.fetch_models())
+        assert len([item for item in server.exchanges if item["grant_type"] == "refresh_token"]) == 1
+        context = MemoryContextStore()
+        agent = Agent(system="Use answer.", transport=one, tools=[Tool(name="answer", handler=answer)])
+        assert await agent.run("first", context) == "42"
+        history_file = tmp_path / "history.json"
+        history_file.write_text(json.dumps([message.to_dict() for message in await context.get_history()]))
+        await asyncio.gather(first.close(), second.close())
+
+        async with aiohttp.ClientSession() as http:
+            reopened = FileCredentialStore(credentials)
+            async with ChatGPTSession(
+                reopened, oauth_client(http, await reopened.host_id()), signed_in.client_id
+            ) as account:
+                context = MemoryContextStore()
+                for item in json.loads(history_file.read_text()):
+                    await context.append(Message.from_dict(item))
+                selected = transport(account, http)
+                await selected.fetch_models()
+                agent = agent.copy(transport=selected.with_model("gpt-6-luna"))
+                assert await agent.run("second", context) == "42"
+            async with reopened.lock(signed_in.client_id):
+                record = await reopened.load(signed_in.client_id)
+                assert record is not None and record.operation is None and record.account.tokens is not None
+                assert record.account.tokens.refresh_token == "rotated-refresh"
+            async with reopened.lock(other.client_id):
+                unrelated = await reopened.load(other.client_id)
+                assert unrelated is not None and unrelated.account == other
+        assert set(requests) == {"Bearer rotated-access"}
+        assert len(server.exchanges) == 2  # One sign-in and one coordinated refresh.
+        assert len(payloads) == 4
+        for payload in payloads[1:]:
+            assert payload["input"][0]["type"] == "additional_tools"
+            assert any(item.get("encrypted_content") == "opaque-proof" for item in payload["input"])
+        assert any(item.get("call_id") == "call-1" and item.get("output") == "42" for item in payloads[2]["input"])
+    finally:
+        await asyncio.gather(first.close(), second.close())
+        await runner.cleanup()
 
 
 async def test_initial_registration(server: FakeOAuth, oauth: ChatGPTOAuth, caplog: pytest.LogCaptureFixture) -> None:

@@ -38,6 +38,7 @@ from axio.types import StopReason, Usage, stop_reason_from
 from axio_responses import Responses, ResponsesAPIError, convert_messages, convert_tools, request_id
 from axio_sse import Payload, Wire, payloads
 
+from .chatgpt import ChatGPTTransport as ChatGPTTransport
 from .realtime import OpenAIRealtimeSession, OpenAIRealtimeTransport  # noqa: F401
 
 logger = logging.getLogger(__name__)
