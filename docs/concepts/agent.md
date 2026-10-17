@@ -10,10 +10,12 @@ dispatches tool calls until the model signals it is done.
 name: test_agent_dataclass
 -->
 ```python
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 from axio import Tool, CompletionTransport, ToolSelector
 from axio.messages import Message
+from axio.blocks import ToolResultBlock, ToolUseBlock
 
 
 @dataclass(slots=True)
@@ -24,6 +26,12 @@ class Agent:
     selector: ToolSelector | None = field(default=None)
     max_iterations: int = field(default=50)
     last_iteration_message: Message | None = field(default=None)
+    before_turn: Callable[[int], Awaitable[None]] | None = field(
+        default=None, kw_only=True
+    )
+    before_tools: (
+        Callable[[list[ToolUseBlock], int], Awaitable[list[ToolResultBlock]]] | None
+    ) = field(default=None, kw_only=True)
 ```
 
 `system`
@@ -50,6 +58,23 @@ class Agent:
   final iteration (when `max_iterations` is about to be exceeded). Useful for
   injecting a stop instruction such as "you must answer now without calling
   more tools" to coerce a final response before the loop terminates.
+
+`before_turn`
+: Optional async callback receiving the iteration number before each model
+  request. It can refresh application state or `agent.system`. An exception
+  ends the run with `Error` and `SessionEndEvent(error)` before the model is called.
+
+`before_tools`
+: Optional async callback receiving all valid calls in a batch and its iteration
+  number. It runs before any handler, including streaming handlers. Return a
+  `ToolResultBlock` for each call that must not execute; return an empty list
+  to allow the whole batch. Returned IDs must be distinct and belong to that
+  batch. The agent stores and emits these results like ordinary tool results.
+  An exception or invalid result IDs fail the entire batch without executing
+  handlers. Cancellation uses the normal interrupted-call results.
+
+These callbacks are keyword-only fields and survive `agent.copy()`. Their
+policy belongs to the application. Axio does not discover instruction files.
 
 ## How the loop works
 
