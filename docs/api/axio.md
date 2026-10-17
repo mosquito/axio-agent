@@ -234,6 +234,13 @@ are separate from the core provider contract. Core imports no UI implementation.
 
 ## Protocols
 
+Transport discovery is available to user code through `axio.transport`.
+`discover_transports()` returns a `TransportCatalog`; use `require(name)` to get
+a `TransportEntry`, `open()` to enter its lifetime, and `select_model()` to choose
+a model. See {doc}`../guides/choosing-transports` for runnable application examples,
+authentication settings, and error handling. These helpers do not require REPL
+or TUI and are not re-exported from top-level `axio`.
+
 ```{eval-rst}
 .. automodule:: axio.transport
    :members:

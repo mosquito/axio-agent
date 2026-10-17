@@ -66,7 +66,8 @@ Available transports (each in its own installable package):
 | {class}`~axio_transport_openai.OpenAITransport` | `axio-transport-openai` | OpenAI and OpenAI-compatible APIs |
 | {class}`~axio_transport_openai.ChatGPTTransport` | `axio-transport-openai` | ChatGPT subscription through public Responses, with an explicit account session |
 | {class}`~axio_transport_google.GoogleTransport` | `axio-transport-google` | Gemini Developer API |
-| {class}`~axio_transport_google.VertexAITransport` | `axio-transport-google` | Gemini and Anthropic on Vertex AI |
+| {class}`~axio_transport_google.VertexAITransport` | `axio-transport-google` | Gemini on Vertex AI |
+| {class}`~axio_transport_anthropic.VertexAITransport` | `axio-transport-anthropic` | Anthropic Claude on Vertex AI |
 | {class}`~axio_transport_codex.CodexTransport` | `axio-transport-codex` | Codex OAuth through the ChatGPT backend |
 
 `OpenAITransport` speaks two endpoints. Its `api` field picks between them, and
@@ -76,6 +77,11 @@ defaults to `"responses"` (`/v1/responses`). The OpenAI-compatible subclasses -
 
 The core `axio` package does not bundle any transport implementation. Install
 the appropriate package for your model provider.
+
+Use `axio.transport.discover_transports()` to select an installed provider by
+entry-point name from your own application. The core adapter opens the transport
+and applies provider-specific model selection. See
+{doc}`../guides/choosing-transports` for a complete example and resource lifetimes.
 
 Every shipped transport reads its `text/event-stream` response through
 `axio-sse` rather than parsing SSE by hand. `axio-transport-openai` and

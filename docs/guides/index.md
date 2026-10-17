@@ -1,6 +1,9 @@
 # How-To Guides
 
-Practical, step-by-step guides for extending Axio with your own components.
+Practical guides for composing and extending Axio in your applications.
+
+Start with {doc}`choosing-transports` to discover installed providers, select a
+model, and run an agent through core without importing REPL or TUI.
 
 Extending Axio means writing one of four things: a tool, a guard, a context store, or a transport.
 {doc}`writing-transports` is the longest of them, because a transport is the only place that knows a
@@ -11,6 +14,7 @@ token counts, maps its stop reasons, and replays its reasoning.
 :maxdepth: 1
 
 axio-repl
+choosing-transports
 google-transport
 realtime-audio
 mcp-tools

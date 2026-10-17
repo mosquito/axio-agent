@@ -99,10 +99,12 @@ Here `stream` is an `async def` with `yield`, which makes it an async generator.
 transports instead declare `stream` as a plain `def` returning a call to a separate
 `async def _do_stream(...)`. Both satisfy the protocol: both return an `AsyncIterator[StreamEvent]`.
 
-## Register a transport for REPL and TUI
+## Register a transport for applications
 
-Both applications use `axio.transport.discover_transports()`. Install the provider
-package in the same Python environment as the application. Register its class:
+Custom applications, REPL, and TUI use `axio.transport.discover_transports()` from
+core. See {doc}`choosing-transports` for selecting and opening an installed provider
+in user code. Install the provider package in the same Python environment as the
+application. Register its class:
 
 ```toml
 [project.entry-points."axio.transport"]
