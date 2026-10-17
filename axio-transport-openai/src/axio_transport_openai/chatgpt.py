@@ -321,6 +321,28 @@ class ChatGPTTransport:
         )
         return await self.image_transport(model_id).generate_images(prompt, n=n)
 
+    async def edit_images(
+        self,
+        prompt: str,
+        *,
+        images: list[ImageBlock],
+        mask: ImageBlock | None = None,
+        model: str | None = None,
+        n: int = 1,
+    ) -> list[bytes]:
+        """Edit supplied images with the selected image model, or GPT Image 2."""
+        selected = self.model
+        model_id = (
+            model
+            if model is not None
+            else (
+                selected.id
+                if selected is not None and Capability.image_editing in selected.capabilities
+                else "gpt-image-2"
+            )
+        )
+        return await self.image_transport(model_id).edit_images(prompt, images=images, mask=mask, n=n)
+
     async def stream(
         self, messages: list[Message], tools: list[Tool[Any]], system: str
     ) -> AsyncGenerator[StreamEvent, None]:

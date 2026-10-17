@@ -196,7 +196,7 @@ Reauthorize a native registration with `login --account CLIENT_ID`.
 
 `ChatGPTImageTransport` implements `ImageGenTransport` and returns `list[bytes]`.
 `ChatGPTImageModel` describes an image-only model with
-`Capability.image_generation`. `CHATGPT_IMAGE_MODELS` currently contains
+`Capability.image_generation` and `Capability.image_editing`. `CHATGPT_IMAGE_MODELS` currently contains
 `gpt-image-2`. After a successful catalog fetch, native `ChatGPTTransport.models`
 appends these image presets to the server's completion models. Presets describe
 the implemented endpoint; the endpoint still checks account access and quota.
@@ -231,7 +231,7 @@ The current interface generates one image per call (`n=1`). The standalone class
 accepts `size="auto"`, `"1024x1024"`, `"1536x1024"`, or `"1024x1536"`;
 `quality="auto"`, `"low"`, `"medium"`, or `"high"`; and
 `transparent_background=True`. Native generation returns PNG; `image_media_type`
-recognizes PNG, JPEG and WebP signatures. Output format selection, editing,
+recognizes PNG, JPEG and WebP signatures. Output format selection,
 partial previews, seeds and reproducibility are not exposed.
 
 Requests use `POST https://chatgpt.com/backend-api/codex/images/generations`.
@@ -241,6 +241,60 @@ Missing or invalid image results raise an error. Quota exhaustion pauses the sha
 session until `resume_plan_usage()`. Generation POSTs are never automatically
 retried: cancellation or a lost response may leave a completed generation on the
 server. Closing the caller's sessions does not sign out.
+
+### Editing images and agent tools
+
+`ChatGPTImageTransport` also implements `axio.transport.ImageEditTransport`.
+`edit_images(prompt, images=[...])` requires a nonempty list of `ImageBlock`
+sources, preserves their order, and posts inline data to `/images/edits` using
+the same account session. PNG, JPEG and WebP are accepted; a mismatched MIME type
+is rejected before HTTP. The model's `image_editing` capability is independent of
+`vision` (understanding images) and `image_generation` (drawing from text).
+
+<!-- name: test_readme_chatgpt_edit -->
+```python
+from axio.blocks import ImageBlock
+from axio_transport_openai import ChatGPTImageTransport
+
+
+async def recolor(transport: ChatGPTImageTransport, source: ImageBlock) -> bytes:
+    images = await transport.edit_images("Change the circle to red", images=[source])
+    return images[0]
+```
+
+`ChatGPTTransport.edit_images()` exposes the same core interface. The standalone
+image transport additionally accepts the same size, quality, and background
+options as generation. One result per request is supported. The native Codex
+protocol has no mask field, so a non-None `mask` raises `ValueError` instead of
+being ignored. Editing has the same quota gate and no automatic request retries.
+
+`ChatGPTImageTools` provides separate `generate_image(prompt)` and
+`edit_image(prompt, images)` tools. Model-facing `images` contains registered IDs;
+the host supplies the actual `ImageBlock` data. Results include both an image ID
+and the image, allowing subsequent edits. Neither tool reads paths or downloads URLs.
+
+<!-- name: test_readme_chatgpt_image_tools -->
+```python
+from axio import Agent
+from axio.blocks import ImageBlock
+from axio_transport_openai import ChatGPTImageTools, ChatGPTTransport
+
+
+def editing_agent(chatgpt: ChatGPTTransport, source: ImageBlock) -> Agent:
+    images = ChatGPTImageTools(chatgpt.image_transport())
+    source_id = images.add_image(source)
+    return Agent(
+        system=f"Edit the supplied attachment when requested. Its image ID is {source_id}.",
+        transport=chatgpt.with_model("gpt-6-luna"),
+        tools=images.tools,
+    )
+```
+
+Keep one `ChatGPTImageTools` instance per conversation. Its `images` mapping
+retains sources and results; the application controls their lifetime. To resume,
+persist the mapping using image block serialization and pass it as `images=` to a
+new instance. Session and conversation-history persistence remain the host's job.
+Both tools declare external access for normal Axio permission guards.
 
 ### Token renewal and application storage
 

@@ -108,7 +108,8 @@ mode is persisted and determines routing after restart.
 
 `ChatGPTImageTransport` implements `ImageGenTransport`. Its `models` registry is
 `CHATGPT_IMAGE_MODELS`, currently containing `gpt-image-2` as a `ChatGPTImageModel`
-with `Capability.image_generation`. Native `ChatGPTTransport.fetch_models()` also
+with `Capability.image_generation` and `Capability.image_editing`.
+Native `ChatGPTTransport.fetch_models()` also
 appends these image presets to the completion catalog. They describe implemented
 image support, not guaranteed account entitlement. Filter completion choices by
 `Capability.text` and image choices by `Capability.image_generation`.
@@ -133,8 +134,8 @@ also returns image bytes. Image models reject `stream()` calls.
 
 One image per request (`n=1`) is supported. The standalone generator accepts
 `size` (`auto`, `1024x1024`, `1536x1024`, `1024x1536`), `quality` (`auto`, `low`,
-`medium`, `high`), and `transparent_background`. Native output is PNG. Editing,
-output format selection, partial images, and seeds are not exposed.
+`medium`, `high`), and `transparent_background`. Native output is PNG.
+Output format selection, partial images, and seeds are not exposed.
 
 The protocol follows [Codex CLI rust-v0.163.0](https://github.com/openai/codex/tree/rust-v0.163.0)
 and posts to `/backend-api/codex/images/generations` on ChatGPT. Backend access
@@ -143,6 +144,25 @@ invalid results raise an error. Quota errors pause the shared account session.
 Generation POSTs are never automatically replayed, including after server errors
 or cancellation. A connection failure can leave the server outcome unknown.
 The caller owns both sessions, and closing them retains credentials.
+
+`ChatGPTImageTransport` also implements `ImageEditTransport` from `axio.transport`.
+Use `edit_images(prompt, images=[ImageBlock(...)])` for changes to existing images.
+Sources are required and retain their order; PNG/JPEG/WebP bytes are sent as inline
+image references to `/backend-api/codex/images/edits`. `ChatGPTTransport.edit_images()`
+delegates to the same implementation. The standalone class accepts the generation
+size/quality/background settings. The native protocol has no mask field;
+`mask` must remain None. Editing shares the account's quota gate and never retries
+requests automatically. `image_editing` does not imply `vision`.
+
+`ChatGPTImageTools(chatgpt.image_transport())` creates two `Tool` instances in
+`.tools`: `generate_image(prompt)` and `edit_image(prompt, images)`. Attach these
+to `Agent.tools`. The model supplies image IDs to the edit tool; the host registers
+the actual attachments with `add_image(ImageBlock(...))` and includes their IDs in
+the conversation. Results contain new IDs and `ImageBlock`s for subsequent edits.
+Use one tool set per conversation. Its read-only `.images` catalog can be persisted
+by the host and restored with the constructor's `images=` argument. No filesystem
+paths, URLs, or raw base64 are requested from the model. Both tools declare external
+access, so standard tool guards apply.
 
 ```{eval-rst}
 .. autoclass:: axio_transport_openai.ChatGPTTransport
@@ -155,6 +175,9 @@ The caller owns both sessions, and closing them retains credentials.
    :members:
 
 .. autoclass:: axio_transport_openai.ChatGPTImageTransport
+   :members:
+
+.. autoclass:: axio_transport_openai.ChatGPTImageTools
    :members:
 
 .. autofunction:: axio_transport_openai.chatgpt_images.image_media_type

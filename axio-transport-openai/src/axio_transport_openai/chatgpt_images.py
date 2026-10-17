@@ -8,7 +8,7 @@ import uuid
 from typing import Any, Literal
 
 import aiohttp
-from axio.blocks import ImageMediaType
+from axio.blocks import ImageBlock, ImageMediaType
 from axio.models import ModelRegistry, ModelSpec
 from axio_responses import Recovery, ResponsesAPIError, ResponsesInterruptedError, request_id
 
@@ -83,6 +83,37 @@ class ChatGPTImageTransport:
         transparent_background: bool = False,
     ) -> list[bytes]:
         """Return complete images; use image_media_type() to identify their format."""
+        payload = self._payload(prompt, model, n, size, quality, transparent_background)
+        return await self._request("generations", payload, n)
+
+    async def edit_images(
+        self,
+        prompt: str,
+        *,
+        images: list[ImageBlock],
+        mask: ImageBlock | None = None,
+        model: str | None = None,
+        n: int = 1,
+        size: Literal["auto", "1024x1024", "1536x1024", "1024x1536"] = "auto",
+        quality: Literal["auto", "low", "medium", "high"] = "auto",
+        transparent_background: bool = False,
+    ) -> list[bytes]:
+        """Edit one or more PNG/JPEG/WebP sources using native ChatGPT Images.
+
+        The native Codex protocol does not expose masks. Passing one fails before
+        authorization or HTTP; sources are never silently treated as a text prompt.
+        """
+        payload = self._payload(prompt, model, n, size, quality, transparent_background)
+        if mask is not None:
+            raise ValueError("The native ChatGPT image edit route does not support masks.")
+        if not isinstance(images, list) or not images:
+            raise ValueError("Image editing requires a nonempty list of ImageBlock sources.")
+        payload["images"] = [image_reference(image) for image in images]
+        return await self._request("edits", payload, n)
+
+    def _payload(
+        self, prompt: str, model: str | None, n: int, size: str, quality: str, transparent_background: bool
+    ) -> dict[str, Any]:
         model_id = self.model.id if model is None else model
         if model_id not in self.models:
             raise ValueError(f"Unsupported ChatGPT image model: {model_id}")
@@ -96,21 +127,23 @@ class ChatGPTImageTransport:
             raise ValueError("Unsupported image quality.")
         if type(transparent_background) is not bool:
             raise ValueError("transparent_background must be a boolean.")
-        if self.account.plan_usage_error is not None:
-            raise self.account.plan_usage_error
-        headers = await self.account.request_headers(images=True)
-        headers["x-codex-image-turn-id"] = str(uuid.uuid4())
-        payload: dict[str, Any] = {
+        return {
             "model": model_id,
             "prompt": prompt,
             "background": "transparent" if transparent_background else "opaque",
             "quality": quality,
             "size": size,
         }
+
+    async def _request(self, operation: str, payload: dict[str, Any], n: int) -> list[bytes]:
+        if self.account.plan_usage_error is not None:
+            raise self.account.plan_usage_error
+        headers = await self.account.request_headers(images=True)
+        headers["x-codex-image-turn-id"] = str(uuid.uuid4())
         response: aiohttp.ClientResponse | None = None
         try:
             async with self.session.post(
-                f"{self.base_url.rstrip('/')}/images/generations",
+                f"{self.base_url.rstrip('/')}/images/{operation}",
                 headers=headers,
                 json=payload,
                 allow_redirects=False,
@@ -138,10 +171,20 @@ class ChatGPTImageTransport:
             raise
         except (aiohttp.ClientError, TimeoutError) as exc:
             raise ResponsesInterruptedError(
-                "Image generation was interrupted; its outcome is unknown. The request was not retried.",
+                "Image request was interrupted; its outcome is unknown. The request was not retried.",
                 status=response.status if response is not None else None,
                 request_id=request_id(response.headers) if response is not None else None,
             ) from exc
+
+
+def image_reference(image: ImageBlock) -> dict[str, str]:
+    """Encode a supported source without file reads or remote URL fetching."""
+    if not isinstance(image, ImageBlock) or not isinstance(image.data, bytes):
+        raise ValueError("Image editing requires ImageBlock sources containing bytes.")
+    if image_media_type(image.data) != image.media_type:
+        raise ValueError("Image source media_type does not match its contents.")
+    encoded = base64.b64encode(image.data).decode("ascii")
+    return {"image_url": f"data:{image.media_type};base64,{encoded}"}
 
 
 def decode_images(body: Any, n: int) -> list[bytes]:

@@ -14,12 +14,19 @@ from unittest.mock import AsyncMock, patch
 import aiohttp
 import pytest
 from aiohttp import web
-from axio import Message, TextBlock, Tool
+from axio import HandlerError, Message, TextBlock, Tool
+from axio.blocks import ImageBlock
 from axio.models import Capability
-from axio.transport import ImageGenTransport
+from axio.transport import ImageEditTransport, ImageGenTransport
 from axio_responses import Recovery, ResponsesInterruptedError
 
-from axio_transport_openai import CHATGPT_IMAGE_MODELS, ChatGPTImageModel, ChatGPTImageTransport, ChatGPTTransport
+from axio_transport_openai import (
+    CHATGPT_IMAGE_MODELS,
+    ChatGPTImageModel,
+    ChatGPTImageTools,
+    ChatGPTImageTransport,
+    ChatGPTTransport,
+)
 from axio_transport_openai.chatgpt_images import ChatGPTImageError, image_media_type
 from axio_transport_openai.credential_stores import FileCredentialStore
 from axio_transport_openai.credentials import CredentialRecord, save_account
@@ -36,6 +43,7 @@ class Endpoint:
     body: Any = field(default_factory=lambda: RESULT)
     status: int = 200
     requests: list[dict[str, Any]] = field(default_factory=list)
+    paths: list[str] = field(default_factory=list)
     headers: list[dict[str, str]] = field(default_factory=list)
     base_url: str = ""
     disconnect: bool = False
@@ -45,6 +53,7 @@ class Endpoint:
 
     async def images(self, request: web.Request) -> web.StreamResponse:
         self.requests.append(await request.json())
+        self.paths.append(request.path)
         self.headers.append(dict(request.headers))
         self.started.set()
         if self.pause:
@@ -70,6 +79,7 @@ async def endpoint() -> AsyncIterator[Endpoint]:
     endpoint = Endpoint()
     app = web.Application()
     app.router.add_post("/images/generations", endpoint.images)
+    app.router.add_post("/images/edits", endpoint.images)
     app.router.add_get("/models", endpoint.models)
     runner = web.AppRunner(app, access_log=None, shutdown_timeout=0.1)
     await runner.setup()
@@ -115,7 +125,7 @@ async def client(endpoint: Endpoint, tmp_path: Path) -> AsyncIterator[ChatGPTIma
 async def test_image_model_catalog_and_request(client: ChatGPTImageTransport, endpoint: Endpoint) -> None:
     assert isinstance(client, ImageGenTransport)
     assert isinstance(client.model, ChatGPTImageModel)
-    assert client.model.capabilities == frozenset({Capability.image_generation})
+    assert client.model.capabilities == frozenset({Capability.image_generation, Capability.image_editing})
     assert list(CHATGPT_IMAGE_MODELS.by_capability(Capability.image_generation).values()) == [client.model]
     images = await client.generate_images("An owl", size="1024x1536", quality="high", transparent_background=True)
     assert images == [PNG] and image_media_type(images[0]) == "image/png"
@@ -311,3 +321,143 @@ async def test_rotated_credentials_are_used_for_image_request(
     async with store.lock(key):
         stored = await store.load(key)
     assert stored is not None and stored.account.tokens == renewed.tokens
+
+
+async def test_edit_uses_sources_in_order_and_separate_route(
+    client: ChatGPTImageTransport, endpoint: Endpoint
+) -> None:
+    assert isinstance(client, ImageEditTransport)
+    png = ImageBlock(media_type="image/png", data=PNG)
+    jpeg = ImageBlock(media_type="image/jpeg", data=b"\xff\xd8\xfftest")
+    images = await client.edit_images(
+        "Put the second image on the first",
+        images=[png, jpeg],
+        quality="low",
+        size="1024x1024",
+        transparent_background=True,
+    )
+    assert images == [PNG] and endpoint.paths == ["/images/edits"]
+    assert endpoint.requests[0] == {
+        "prompt": "Put the second image on the first",
+        "model": "gpt-image-2",
+        "size": "1024x1024",
+        "quality": "low",
+        "background": "transparent",
+        "images": [
+            {"image_url": "data:image/png;base64," + base64.b64encode(PNG).decode()},
+            {"image_url": "data:image/jpeg;base64," + base64.b64encode(jpeg.data).decode()},
+        ],
+    }
+    assert endpoint.headers[0]["Authorization"] == "Bearer access-secret"
+    assert endpoint.headers[0]["ChatGPT-Account-ID"] == "workspace"
+    assert png.data == PNG
+    transport = ChatGPTTransport(
+        account=client.account, session=client.session, base_url=endpoint.base_url, image_base_url=endpoint.base_url
+    )
+    await transport.fetch_models()
+    selected = transport.with_model("gpt-image-2")
+    assert isinstance(selected, ImageEditTransport)
+    assert await selected.edit_images("Make it red", images=[png]) == [PNG]
+    assert endpoint.paths == ["/images/edits", "/images/edits"]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"images": []},
+        {"images": None},
+        {"images": ["image.png"]},
+        {"images": [ImageBlock(media_type="image/png", data=b"bad")]},
+        {"images": [ImageBlock(media_type="image/jpeg", data=PNG)]},
+        {"mask": ImageBlock(media_type="image/png", data=PNG)},
+        {"prompt": ""},
+        {"n": 2},
+        {"model": "unknown"},
+    ],
+)
+async def test_edit_invalid_input_never_falls_back_to_generation(
+    client: ChatGPTImageTransport, endpoint: Endpoint, kwargs: dict[str, Any]
+) -> None:
+    arguments: dict[str, Any] = {"prompt": "Change it", "images": [ImageBlock(media_type="image/png", data=PNG)]}
+    arguments.update(kwargs)
+    with pytest.raises(ValueError):
+        await client.edit_images(**arguments)
+    assert not endpoint.requests
+
+
+@pytest.mark.parametrize("failure", ["refusal", "invalid", "quota", "disconnect", "server"])
+async def test_edit_failures_do_not_replay(client: ChatGPTImageTransport, endpoint: Endpoint, failure: str) -> None:
+    if failure == "refusal":
+        endpoint.status, endpoint.body = 400, {"error": {"code": "content_policy_violation"}}
+    elif failure == "invalid":
+        endpoint.body = {"data": []}
+    elif failure == "quota":
+        endpoint.status, endpoint.body = 429, {"error": {"type": "usage_limit_reached"}}
+    elif failure == "server":
+        endpoint.status, endpoint.body = 500, {"error": {"code": "server_error"}}
+    else:
+        endpoint.disconnect = True
+    with pytest.raises((ChatGPTImageError, ResponsesInterruptedError)):
+        await client.edit_images("Change it", images=[ImageBlock(media_type="image/png", data=PNG)])
+    assert endpoint.paths == ["/images/edits"]
+    if failure == "quota":
+        with pytest.raises(ChatGPTImageError):
+            await client.generate_images("A new image")
+        assert len(endpoint.requests) == 1
+
+
+async def test_edit_tool_cancellation_keeps_sources_without_partial_result(
+    client: ChatGPTImageTransport, endpoint: Endpoint
+) -> None:
+    tools = ChatGPTImageTools(client, images={"source": ImageBlock(media_type="image/png", data=PNG)})
+    endpoint.pause = True
+    task = asyncio.create_task(tools.tools[1](prompt="Make red", images=["source"]))
+    await asyncio.wait_for(endpoint.started.wait(), 2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert list(tools.images) == ["source"]
+    assert endpoint.paths == ["/images/edits"]
+    endpoint.release.set()
+
+
+async def test_separate_tools_schemas_and_generate_then_edit(
+    client: ChatGPTImageTransport, endpoint: Endpoint
+) -> None:
+    tools = ChatGPTImageTools(client)
+    draw, edit = tools.tools
+    assert draw.name == "generate_image" and edit.name == "edit_image"
+    assert draw.input_schema["required"] == ["prompt"]
+    assert set(edit.input_schema["required"]) == {"prompt", "images"}
+    assert edit.input_schema["properties"]["images"]["items"]["type"] == "string"
+    assert "images" not in draw.input_schema["properties"]
+    assert "mask" not in edit.input_schema["properties"]
+    assert draw.access is not None and edit.access is not None
+    assert [a.operation for a in edit.access({"images": ["source"]})] == ["external"]
+    result = await draw(prompt="An owl")
+    assert isinstance(result[0], TextBlock) and isinstance(result[1], ImageBlock)
+    source_id = result[0].text.removeprefix("Image ID: ")
+    assert tools.images[source_id] == result[1]
+    edited = await edit(prompt="Add a red hat", images=[source_id])
+    edited_id = edited[0].text.removeprefix("Image ID: ")
+    assert edited_id != source_id
+    assert tools.images[source_id] == result[1] and tools.images[edited_id] == edited[1]
+    assert endpoint.paths == ["/images/generations", "/images/edits"]
+    restored = ChatGPTImageTools(client, images=tools.images)
+    assert dict(restored.images) == dict(tools.images)
+    other = ChatGPTImageTools(client)
+    with pytest.raises(ValueError, match="Unknown"):
+        await other.edit_image("Change it", images=[source_id])
+    assert len(endpoint.requests) == 2
+
+
+async def test_edit_tool_requires_registered_sources(client: ChatGPTImageTransport, endpoint: Endpoint) -> None:
+    tools = ChatGPTImageTools(client)
+    image_id = tools.add_image(ImageBlock(media_type="image/png", data=PNG), image_id="attachment")
+    assert image_id == "attachment"
+    for sources in ([], ["unknown"], ["attachment", "unknown"]):
+        with pytest.raises(HandlerError):
+            await tools.tools[1](prompt="Change it", images=sources)
+    with pytest.raises(ValueError, match="already exists"):
+        tools.add_image(ImageBlock(media_type="image/png", data=PNG), image_id="attachment")
+    assert not endpoint.requests

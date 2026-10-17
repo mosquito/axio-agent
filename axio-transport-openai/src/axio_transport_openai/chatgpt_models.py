@@ -40,7 +40,7 @@ class ChatGPTImageModel(ChatGPTModel):
     is checked by the image endpoint for the selected account on each request.
     """
 
-    capabilities: frozenset[Capability] = frozenset({Capability.image_generation})
+    capabilities: frozenset[Capability] = frozenset({Capability.image_generation, Capability.image_editing})
     context_window: int = 0
     max_output_tokens: int = 0
     visibility: str = "list"
