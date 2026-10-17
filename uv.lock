@@ -986,21 +986,26 @@ name = "axio-tui"
 version = "0.2.3"
 source = { editable = "axio-tui" }
 dependencies = [
+    { name = "aiohttp" },
+    { name = "aiosqlite" },
     { name = "argclass" },
     { name = "axio" },
-    { name = "axio-context-sqlite" },
+    { name = "pygments" },
+    { name = "rich" },
     { name = "textual" },
     { name = "textual-serve" },
 ]
 
 [package.optional-dependencies]
 all = [
+    { name = "axio-context-sqlite" },
     { name = "axio-tools-local" },
-    { name = "axio-tools-mcp" },
+    { name = "axio-tools-mcp", extra = ["tui"] },
     { name = "axio-transport-anthropic" },
     { name = "axio-transport-codex" },
+    { name = "axio-transport-google", extra = ["tui"] },
     { name = "axio-transport-openai" },
-    { name = "axio-tui-guards" },
+    { name = "axio-tui-guards", extra = ["tui"] },
 ]
 anthropic = [
     { name = "axio-transport-anthropic" },
@@ -1008,14 +1013,20 @@ anthropic = [
 codex = [
     { name = "axio-transport-codex" },
 ]
+google = [
+    { name = "axio-transport-google", extra = ["tui"] },
+]
 guards = [
-    { name = "axio-tui-guards" },
+    { name = "axio-tui-guards", extra = ["tui"] },
+]
+history = [
+    { name = "axio-context-sqlite" },
 ]
 local = [
     { name = "axio-tools-local" },
 ]
 mcp = [
-    { name = "axio-tools-mcp" },
+    { name = "axio-tools-mcp", extra = ["tui"] },
 ]
 openai = [
     { name = "axio-transport-openai" },
@@ -1023,8 +1034,16 @@ openai = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "aiohttp-tiny-mcp" },
+    { name = "axio-context-sqlite" },
+    { name = "axio-tools-local" },
+    { name = "axio-tools-mcp" },
+    { name = "axio-transport-google" },
+    { name = "axio-transport-openai" },
+    { name = "axio-tui-guards" },
     { name = "markdown-pytest" },
     { name = "mypy" },
+    { name = "pydantic" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -1033,25 +1052,38 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", specifier = ">=3.11" },
+    { name = "aiosqlite", specifier = ">=0.20" },
     { name = "argclass", specifier = ">=1.6" },
     { name = "axio", editable = "axio" },
-    { name = "axio-context-sqlite", editable = "axio-context-sqlite" },
+    { name = "axio-context-sqlite", marker = "extra == 'history'", editable = "axio-context-sqlite" },
     { name = "axio-tools-local", marker = "extra == 'local'", editable = "axio-tools-local" },
-    { name = "axio-tools-mcp", marker = "extra == 'mcp'", editable = "axio-tools-mcp" },
+    { name = "axio-tools-mcp", extras = ["tui"], marker = "extra == 'mcp'", editable = "axio-tools-mcp" },
     { name = "axio-transport-anthropic", marker = "extra == 'anthropic'", editable = "axio-transport-anthropic" },
     { name = "axio-transport-codex", marker = "extra == 'codex'", editable = "axio-transport-codex" },
+    { name = "axio-transport-google", extras = ["tui"], marker = "extra == 'google'", editable = "axio-transport-google" },
     { name = "axio-transport-openai", marker = "extra == 'openai'", editable = "axio-transport-openai" },
-    { name = "axio-tui", extras = ["anthropic", "openai", "codex", "local", "mcp", "guards"], marker = "extra == 'all'", editable = "axio-tui" },
-    { name = "axio-tui-guards", marker = "extra == 'guards'", editable = "axio-tui-guards" },
+    { name = "axio-tui", extras = ["anthropic", "openai", "codex", "google", "local", "mcp", "guards", "history"], marker = "extra == 'all'", editable = "axio-tui" },
+    { name = "axio-tui-guards", extras = ["tui"], marker = "extra == 'guards'", editable = "axio-tui-guards" },
+    { name = "pygments", specifier = ">=2.18" },
+    { name = "rich", specifier = ">=13" },
     { name = "textual", specifier = ">=2.1.0" },
     { name = "textual-serve", specifier = ">=1.1" },
 ]
-provides-extras = ["anthropic", "openai", "codex", "local", "mcp", "guards", "all"]
+provides-extras = ["history", "anthropic", "openai", "codex", "google", "local", "mcp", "guards", "all"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "aiohttp-tiny-mcp", specifier = "~=0.5.8" },
+    { name = "axio-context-sqlite", editable = "axio-context-sqlite" },
+    { name = "axio-tools-local", editable = "axio-tools-local" },
+    { name = "axio-tools-mcp", editable = "axio-tools-mcp" },
+    { name = "axio-transport-google", editable = "axio-transport-google" },
+    { name = "axio-transport-openai", editable = "axio-transport-openai" },
+    { name = "axio-tui-guards", editable = "axio-tui-guards" },
     { name = "markdown-pytest", specifier = ">=0.6.0" },
     { name = "mypy", specifier = ">=1.14" },
+    { name = "pydantic", specifier = ">=2" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "pytest-cov", specifier = ">=7.1.0" },

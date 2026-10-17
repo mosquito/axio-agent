@@ -1,8 +1,9 @@
 """TUI-specific tool handlers."""
 
+from __future__ import annotations
+
 import asyncio
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -11,6 +12,7 @@ from axio.blocks import ImageBlock, TextBlock
 from axio.context import ContextStore
 from axio.events import TextDelta
 from axio.messages import Message
+from axio.tool_access import Access, tool_access
 from axio.transport import CompletionTransport
 
 
@@ -29,24 +31,11 @@ vision_transport: CompletionTransport | None = None
 
 
 # ---------------------------------------------------------------------------
-# Confirm dataclass - used by LLMGuard to hold the verdict
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class Confirm:
-    """Safety verdict produced by the LLM guard."""
-
-    verdict: Literal["SAFE", "RISKY", "DENY"]
-    reason: str
-    category: str
-
-
-# ---------------------------------------------------------------------------
 # Tool handlers (plain async functions)
 # ---------------------------------------------------------------------------
 
 
+@tool_access(lambda arguments: ())
 async def status_line(message: str) -> str:
     """Set a short status message shown to the user in the TUI status bar.
     Call this at the start of every turn before other tools to indicate
@@ -57,6 +46,7 @@ async def status_line(message: str) -> str:
     return "ok"
 
 
+@tool_access(lambda arguments: ())
 async def confirm(
     verdict: Literal["SAFE", "RISKY", "DENY"],
     reason: str,
@@ -68,6 +58,7 @@ async def confirm(
     return verdict
 
 
+@tool_access(lambda arguments: ())
 async def subagent(task: str) -> str:
     """Delegate a task to an independent sub-agent. The sub-agent receives
     conversation context and has access to the same tools (except subagent).
@@ -93,6 +84,7 @@ _IMAGE_MEDIA_TYPES: dict[str, str] = {
 }
 
 
+@tool_access(lambda arguments: (Access("read", arguments["path"]), Access("external")))
 async def vision_analyze(
     path: str,
     prompt: str = "Describe this image in detail.",

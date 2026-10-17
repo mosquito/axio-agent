@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import logging
+from pathlib import Path
 
 import argclass
 from textual.logging import TextualHandler
@@ -35,6 +38,22 @@ class ServeGroup(argclass.Group):
 class Args(argclass.Parser):
     """Axio Agent TUI."""
 
-    serve: bool = argclass.Argument(action="store_true", help="run in web mode")  # type: ignore[call-overload]
+    serve: bool = argclass.Argument(action=argclass.Actions.STORE_TRUE, help="run in web mode")
+    project_root: Path | None = argclass.Argument(default=None, type=Path, help="primary workspace root")
+    additional_root: list[Path] = argclass.Argument(
+        default=[], action=argclass.Actions.APPEND, type=Path, help="additional workspace root"
+    )
+    isolated: bool = argclass.Argument(
+        action=argclass.Actions.STORE_TRUE, help="load only explicit workspace configuration"
+    )
+    instructions_file: list[Path] = argclass.Argument(
+        default=[], action=argclass.Actions.APPEND, type=Path, help="explicit instruction file"
+    )
+    mcp_config: list[Path] = argclass.Argument(
+        default=[], action=argclass.Actions.APPEND, type=Path, help="explicit MCP configuration"
+    )
+    skills_dir: list[Path] = argclass.Argument(
+        default=[], action=argclass.Actions.APPEND, type=Path, help="additional skills directory"
+    )
     log = LogGroup(title="logging options")
     web = ServeGroup(title="web serving options")

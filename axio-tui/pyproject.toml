@@ -14,28 +14,30 @@ classifiers = [
 keywords = ["llm", "agent", "ai", "tui", "textual", "terminal", "chat"]
 dependencies = [
     "axio",
-    "axio-context-sqlite",
+    "aiohttp>=3.11",
+    "aiosqlite>=0.20",
+    "pygments>=2.18",
+    "rich>=13",
     "textual>=2.1.0",
     "textual-serve>=1.1",
     "argclass>=1.6",
 ]
 
 [project.optional-dependencies]
+history = ["axio-context-sqlite"]
 anthropic = ["axio-transport-anthropic"]
 openai = ["axio-transport-openai"]
 codex = ["axio-transport-codex"]
+google = ["axio-transport-google[tui]"]
 local = ["axio-tools-local"]
-mcp = ["axio-tools-mcp"]
-guards = ["axio-tui-guards"]
+mcp = ["axio-tools-mcp[tui]"]
+guards = ["axio-tui-guards[tui]"]
 all = [
-    "axio-tui[anthropic,openai,codex,local,mcp,guards]",
+    "axio-tui[anthropic,openai,codex,google,local,mcp,guards,history]",
 ]
 
-[project.entry-points."axio.tools"]
-status_line = "axio_tui.tools:status_line"
-confirm = "axio_tui.tools:confirm"
-subagent = "axio_tui.tools:subagent"
-vision = "axio_tui.tools:vision_analyze"
+[project.entry-points."axio.tools.providers"]
+tui = "axio_tui.provider:TUIToolProvider"
 
 [project.scripts]
 axio = "axio_tui.__main__:main"
@@ -80,6 +82,14 @@ ignore_missing_imports = true
 
 [dependency-groups]
 dev = [
+    "axio-tools-local",
+    "axio-tools-mcp",
+    "axio-context-sqlite",
+    "axio-tui-guards",
+    "axio-transport-openai",
+    "axio-transport-google",
+    "aiohttp-tiny-mcp~=0.5.8",
+    "pydantic>=2",
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "mypy>=1.14",

@@ -1,13 +1,15 @@
 """AgentApp: Textual TUI for the Axio coding-assist agent."""
 
+from __future__ import annotations
+
 import asyncio
+import importlib.util
 import logging
-from collections.abc import Generator
+from collections.abc import Generator, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
-from uuid import uuid4
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
 import aiosqlite
@@ -29,14 +31,25 @@ from axio.events import (
     ToolResult,
     ToolUseStart,
 )
+from axio.exceptions import GuardError
 from axio.messages import Message
 from axio.models import Capability, ModelSpec
 from axio.permission import PermissionGuard
+from axio.permission_policy import Approval, PermissionRequest, PolicyGuard
+from axio.plugins import (
+    ContextBackend,
+    RefreshableToolProvider,
+    ToolProvider,
+    collect_tools,
+    discover_context_backends,
+    discover_tool_providers,
+    standalone_tools,
+)
+from axio.plugins import discover_tools as discover_tool_catalog
 from axio.selector import ToolSelector
 from axio.tool import Tool
 from axio.tool_args import ToolArgStream
 from axio.types import INCOMPLETE
-from axio_context_sqlite import SQLiteContextStore
 from pygments.token import Token  # type: ignore[import-untyped]
 from rich.markup import escape
 from textual.app import App, ComposeResult, SystemCommand
@@ -55,17 +68,27 @@ from axio_tui.plugin import (
     ToolsPlugin,
     discover_guards,
     discover_selectors,
-    discover_tools,
     discover_tools_by_package,
     discover_tools_plugins,
 )
 from axio_tui.transport_registry import RoleBinding, TransportRegistry
 
 from . import tools as _tools
+from .mcp import MCPScreen
+from .options import StartupOptions
+from .paths import ConfigPaths, ConfigurationPaths
+from .permissions import ConfigRuleStore, PermissionsScreen, prompt_permission
 from .prompt import LAST_ITERATION_MESSAGE, SYSTEM_PROMPT
 from .screens import ModelSelectScreen, PluginHubScreen, QuitDialog, SessionSelectScreen, ToolDetailScreen
+from .skills import SkillEntry, SkillsScreen, catalog_entries, instruction_entry, provider_entries
 from .sqlite_config import GLOBAL_PROJECT, ProjectConfig, connect_config
 from .tools import SUBAGENT_SYSTEM_PROMPT, _short, confirm
+
+if TYPE_CHECKING:
+    from axio_tools_local.provider import LocalBinding
+    from axio_tools_mcp.inspection import ServerInspection
+
+    from .configuration import MCPConfiguration
 
 logger = logging.getLogger(__name__)
 
@@ -379,6 +402,33 @@ class _RichLogHandler(logging.Handler):
             self.handleError(record)
 
 
+class _ApplicationGuard(PermissionGuard):
+    def __init__(self, app: AgentApp) -> None:
+        self.app = app
+
+    async def check(self, tool: Tool[Any], **kwargs: Any) -> dict[str, Any]:
+        if tool.name in self.app._disabled_plugins:
+            raise GuardError("Tool is disabled")
+        for name, names in self.app._guard_tool_map.items():
+            if name in self.app._disabled_guards or name in {"path", "llm"}:
+                continue
+            guard = self.app._guard_instances.get(name)
+            if tool.name in names and guard is not None:
+                kwargs = await guard(tool, **kwargs)
+        return await self.app._permissions(tool, **kwargs)
+
+
+class _ApplicationSelector:
+    def __init__(self, app: AgentApp, excluded: frozenset[str] = frozenset()) -> None:
+        self.app = app
+        self.excluded = excluded
+
+    async def select(self, messages: Iterable[Message], tools: Iterable[Tool[Any]]) -> Iterable[Tool[Any]]:
+        available = [tool for tool in tools if tool.name not in self.app._disabled_plugins | self.excluded]
+        selector = self.app._get_active_selector()
+        return await selector.select(messages, available) if selector is not None else available
+
+
 class AgentApp(App[None]):
     """Axio Agent TUI."""
 
@@ -441,15 +491,27 @@ class AgentApp(App[None]):
     }
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, paths: ConfigurationPaths | None = None, options: StartupOptions = StartupOptions()) -> None:
         super().__init__()
+        self.paths = paths or ConfigPaths.discover(Path.cwd())
+        self.options = options
+        self._providers: dict[str, ToolProvider] = {}
+        self._provider_catalog = discover_tool_providers()
+        self._base_tools: list[Tool[Any]] = []
+        self._projects: tuple[MCPConfiguration, ...] = ()
+        self._local_binding: LocalBinding | None = None
+        self._tool_guard = _ApplicationGuard(self)
+        self._tool_selector = _ApplicationSelector(self)
+        self._workspace_loading = False
+        self._workspace_task: Any = None
+        self._init_task: Any = None
         self._session: aiohttp.ClientSession | None = None
         self._agent: Agent | None = None
         self._transports = TransportRegistry()
         self._role_bindings: dict[ModelRole, RoleBinding] = {}
-        self._db_conn: aiosqlite.Connection | None = None
+        self._context_backend: ContextBackend | None = None
         self._config_conn: aiosqlite.Connection | None = None
-        self._chat_context_: SQLiteContextStore | None = None
+        self._chat_context_: ContextStore | None = None
         self._config_: ProjectConfig | None = None
         self._global_config_: ProjectConfig | None = None
         self._is_running = False
@@ -457,6 +519,10 @@ class AgentApp(App[None]):
         self._worker: Any = None
         self._pending_input: asyncio.Queue[tuple[str, Static]] = asyncio.Queue()
         self._guard_lock = asyncio.Lock()
+        self._permission_store: ConfigRuleStore | None = None
+        self._permissions = PolicyGuard(
+            self.paths.project_root, self._permission_prompt, advisor=self._permission_advice
+        )
         self._current_md: Markdown | None = None
         self._response_text = ""
         self._declined = False
@@ -486,13 +552,14 @@ class AgentApp(App[None]):
         self._nav_index: int | None = None
 
     @property
-    def _chat_context(self) -> SQLiteContextStore:
+    def _chat_context(self) -> ContextStore:
         assert self._chat_context_ is not None
         return self._chat_context_
 
     @_chat_context.setter
-    def _chat_context(self, value: SQLiteContextStore) -> None:
+    def _chat_context(self, value: ContextStore) -> None:
         self._chat_context_ = value
+        self._permissions.set_session(value.session_id)
 
     @property
     def _config(self) -> ProjectConfig:
@@ -535,19 +602,34 @@ class AgentApp(App[None]):
 
         self._session = aiohttp.ClientSession()
 
-        from axio_context_sqlite import connect as connect_context
-
-        self._db_conn = await connect_context(DB_PATH)
+        for name, backend in discover_context_backends().entries.items():
+            try:
+                await backend.init(DB_PATH)
+            except BaseException as error:
+                await backend.close()
+                if not isinstance(error, Exception):
+                    raise
+                logger.warning("Context backend %s failed: %s", name, error)
+                continue
+            self._context_backend = backend
+            break
         self._config_conn = await connect_config(DB_PATH)
-        self._chat_context = SQLiteContextStore(self._db_conn, uuid4().hex)
+        self._chat_context = self._create_context()
+        if self._context_backend is None:
+            await self._write_meta("[yellow]History is temporary. Install axio-tui[history] to save conversations.[/]")
         self._config = ProjectConfig(self._config_conn)
         self._global_config = ProjectConfig(self._config_conn, project=GLOBAL_PROJECT)
+        self._permission_store = ConfigRuleStore(
+            ProjectConfig(self._config_conn, project=str(self.paths.project_root))
+        )
+        self._permissions.store = self._permission_store
 
         # Show UI immediately; heavy init runs in background
         inp = self.query_one("#input", Input)
         inp.placeholder = "Initializing..."
         inp.focus()
-        self.run_worker(self._init_worker(), exclusive=True)
+        self.set_interval(0.1, self._flush_text)
+        self._init_task = self.run_worker(self._init_worker(), group="initialization")
 
     async def _init_worker(self) -> None:
         try:
@@ -561,10 +643,15 @@ class AgentApp(App[None]):
 
             # Discover MCP/tool plugins synchronously (no I/O), then init concurrently with transports
             self._tools_plugins = discover_tools_plugins()
+            if self.options.isolated:
+                self._tools_plugins.pop("mcp", None)
 
             async def _init_plugins() -> None:
                 for plugin in self._tools_plugins.values():
                     try:
+                        set_status = getattr(plugin, "set_status_callback", None)
+                        if callable(set_status):
+                            set_status(self._mcp_status)
                         await plugin.init(config=self._config, global_config=self._global_config)
                     except Exception:
                         logger.warning("Tools plugin init failed", exc_info=True)
@@ -575,59 +662,41 @@ class AgentApp(App[None]):
                 _init_plugins(),
             )
 
-            if not self._transports.available:
-                await self._write_meta("[red]No transports available - set an API key env variable[/]")
-                return
+            for name, reason in self._transports.errors.items():
+                await self._write_meta(f"[yellow]{escape(name)} unavailable: {escape(reason)}[/]")
 
+            await self._load_workspace()
+
+            requested_chat: str | None = None
             # Resolve model for each role from persisted config
             for role in ModelRole:
                 config_value = await self._config.get(f"model.{role}")
                 if config_value:
+                    if role is ModelRole.CHAT and ":" in config_value:
+                        requested_chat = config_value.split(":", 1)[0]
                     binding = self._transports.resolve(config_value)
                     if binding is not None:
                         self._role_bindings[role] = binding
+                    elif role is ModelRole.CHAT:
+                        detail = f"Saved model {config_value!r} is unavailable. Select a model explicitly."
+                        if requested_chat in self._transports.available:
+                            source = self._transports.get_transport(requested_chat)
+                            diagnostic = getattr(source, "model_selection_error", None)
+                            if callable(diagnostic):
+                                detail = diagnostic(config_value.split(":", 1)[1])
+                        await self._write_meta("[yellow]" + escape(detail) + "[/]")
 
-            # Apply Nebius defaults when no config is saved for a role
-            _NEBIUS = "nebius"
-            if _NEBIUS in self._transports.available:
-                _nebius_t = self._transports.get_transport(_NEBIUS)
-                if ModelRole.CHAT not in self._role_bindings and "MiniMaxAI/MiniMax-M2.5" in _nebius_t.models:
-                    self._role_bindings[ModelRole.CHAT] = RoleBinding(
-                        transport=_NEBIUS, model=_nebius_t.models["MiniMaxAI/MiniMax-M2.5"]
-                    )
-                if ModelRole.VISION not in self._role_bindings and "Qwen/Qwen2.5-VL-72B-Instruct" in _nebius_t.models:
-                    self._role_bindings[ModelRole.VISION] = RoleBinding(
-                        transport=_NEBIUS, model=_nebius_t.models["Qwen/Qwen2.5-VL-72B-Instruct"]
-                    )
+            # Choose defaults from installed providers without replacing saved roles.
+            for role, capability in ((ModelRole.CHAT, Capability.text), (ModelRole.VISION, Capability.vision)):
+                if role not in self._role_bindings:
+                    default = self._transports.default_model(str(role), capability)
+                    if default is not None and (role is not ModelRole.CHAT or requested_chat is None):
+                        self._role_bindings[role] = default
 
-            # Set up chat transport
-            if ModelRole.CHAT in self._role_bindings:
-                chat_binding = self._role_bindings[ModelRole.CHAT]
-                chat_transport = self._transports.make_transport(chat_binding.transport, chat_binding.model)
-                self._chat_model = chat_binding.model
-            else:
-                # Fallback: first available transport with its default model
-                first = self._transports.available[0]
-                t = self._transports.get_transport(first)
-                chat_transport = self._transports.make_transport(first, t.model)
-                self._chat_model = t.model
-
-            self._model_name = self._chat_model.id
-            self.sub_title = self._model_name
-
-            if ModelRole.VISION in self._role_bindings:
-                vb = self._role_bindings[ModelRole.VISION]
-                _tools.vision_transport = self._transports.make_transport(vb.transport, vb.model)
-
-            # Wire Google transport into image/video generation tools
-            if "google" in self._transports.available:
-                self._wire_google_gen_tools(self._transports.get_transport("google"))
-
-            self._chat_transport = chat_transport
-
-            # Discover tools and guards via entry points
-            tools: list[Tool[Any]] = discover_tools()
+            # Discover guards via entry points
             self._guard_classes = discover_guards()
+            # The built-in policy replaces legacy path prompts. Keep other guard plugins.
+            self._guard_classes.pop("path", None)
 
             # Load disabled plugins from config
             raw = await self._config.get("plugins.disabled")
@@ -644,16 +713,11 @@ class AgentApp(App[None]):
             if raw:
                 self._disabled_guards = {n.strip() for n in raw.split(",") if n.strip()}
 
-            # Load guard-tool assignments from config (seed defaults for path guard)
-            _DEFAULT_PATH_TOOLS = frozenset(
-                {"shell", "run_python", "write_file", "read_file", "list_files", "patch_file", "vision", "index_files"}
-            )
+            # Load optional guard/reviewer assignments. Policy covers every tool.
             for guard_name in self._guard_classes:
                 raw = await self._config.get(f"guards.{guard_name}.tools")
                 if raw is not None:
                     self._guard_tool_map[guard_name] = {n.strip() for n in raw.split(",") if n.strip()}
-                elif guard_name == "path":
-                    self._guard_tool_map[guard_name] = set(_DEFAULT_PATH_TOOLS)
                 else:
                     self._guard_tool_map[guard_name] = set()
 
@@ -665,22 +729,59 @@ class AgentApp(App[None]):
                 if instance is not None:
                     self._guard_instances[guard_name] = instance
 
-            # Collect tools from plugins (already initialised concurrently above)
-            for plugin in self._tools_plugins.values():
-                tools.extend(plugin.all_tools)
+            self._on_tools_plugin_dismissed()
 
-            self._all_tools = tools
-            self._rebuild_agent_tools()
+            if not self._transports.available:
+                await self._write_meta("[yellow]Configure a transport from the command palette to start chatting.[/]")
+                return
+
+            if requested_chat is not None and requested_chat not in self._transports.available:
+                await self._write_meta(
+                    f"[yellow]Saved transport {escape(requested_chat)} is unavailable. "
+                    "Configure it or explicitly choose another model.[/]"
+                )
+                return
+
+            if requested_chat is not None and ModelRole.CHAT not in self._role_bindings:
+                return
+
+            # Set up chat transport
+            if ModelRole.CHAT in self._role_bindings:
+                chat_binding = self._role_bindings[ModelRole.CHAT]
+                chat_transport = self._transports.make_transport(chat_binding.transport, chat_binding.model)
+                self._chat_model = chat_binding.model
+            else:
+                # Fallback: first available transport with its default model
+                first = self._transports.available[0]
+                t = self._transports.get_transport(first)
+                chat_transport = self._transports.make_transport(first, t.model)
+                self._chat_model = t.model
+                self._role_bindings[ModelRole.CHAT] = RoleBinding(first, t.model)
+
+            self._model_name = self._chat_model.id
+            self.sub_title = self._model_name
+
+            if ModelRole.VISION in self._role_bindings:
+                vb = self._role_bindings[ModelRole.VISION]
+                _tools.vision_transport = self._transports.make_transport(vb.transport, vb.model)
+
+            # Connect optional provider tools through the transport contract
+            self._transports.bind_tools()
+
+            self._chat_transport = chat_transport
 
             self._agent = Agent(
                 system=SYSTEM_PROMPT,
-                tools=self._active_tools,
+                tools=self._base_tools,
+                providers=self._agent_providers(),
+                tool_guards=(self._tool_guard,),
+                selector=self._tool_selector,
                 transport=chat_transport,
                 last_iteration_message=LAST_ITERATION_MESSAGE,
             )
 
+            self._bind_workspace()
             await self._update_status()
-            self.set_interval(0.1, self._flush_text)
             await self._show_welcome()
         except Exception:
             logger.error("Initialization failed", exc_info=True)
@@ -750,6 +851,12 @@ class AgentApp(App[None]):
         scroll.scroll_end(animate=False)
 
     async def on_unmount(self) -> None:
+        if self._init_task is not None and self._init_task.is_running:
+            self._init_task.cancel()
+            try:
+                await self._init_task.wait()
+            except Exception:
+                pass
         # Cancel the active agent worker first so the SSE connection is
         # released before we close the aiohttp session.  Without this the
         # executor shutdown hangs waiting for orphan threads.
@@ -766,14 +873,26 @@ class AgentApp(App[None]):
         _tools.status_line_callback = None
         _tools.subagent_factory = None
         _tools.vision_transport = None
-        self._wire_google_gen_tools(None)
+        self._transports.unbind_tools()
         for plugin in self._tools_plugins.values():
             try:
                 await plugin.close()
             except Exception:
                 pass
-        if self._db_conn is not None:
-            await self._db_conn.close()
+        if self._workspace_task is not None and self._workspace_task.is_running:
+            self._workspace_task.cancel()
+            try:
+                await self._workspace_task.wait()
+            except Exception:
+                pass
+        for provider in reversed(list(self._providers.values())):
+            try:
+                await provider.close()
+            except Exception:
+                logger.warning("Provider close failed", exc_info=True)
+        await self._transports.close()
+        if self._context_backend is not None:
+            await self._context_backend.close()
         if self._config_conn is not None:
             await self._config_conn.close()
         if self._session is not None:
@@ -784,35 +903,24 @@ class AgentApp(App[None]):
     async def _make_subagent(self) -> tuple[Agent, ContextStore]:
         context = await MemoryContextStore.from_context(self._chat_context)
         assert self._agent is not None
-        # Don't forward `schema=t.schema` — it would flip the rebuilt Tool into
-        # explicit-schema mode and synthesise _fields from JSON Schema only,
-        # losing Field bounds and Literal/Annotated constraints. Letting
-        # __post_init__ rebuild the schema from the handler keeps validation
-        # parity with the parent agent.
-        sub_tools: list[Tool[Any]] = [
-            Tool(
-                name=t.name,
-                description=t.description,
-                handler=t.handler,
-                guards=t.guards,
-                context=t.context,
-                concurrency=t.concurrency,
-            )
-            for t in self._agent.tools
-            if t.name != "subagent"
-        ]
+        # Tools are immutable. Reuse them to retain explicit MCP schemas, validation and concurrency limits.
+        sub_tools = [tool for tool in self._agent.tools if tool.name != "subagent"]
         transport = self._chat_transport if self._chat_transport is not None else self._agent.transport
-        sub_agent = replace(
-            self._agent,
+        sub_agent = self._agent.copy(
             system=SUBAGENT_SYSTEM_PROMPT,
             tools=sub_tools,
             max_iterations=25,
+            selector=_ApplicationSelector(self, frozenset({"subagent"})),
             transport=transport,
         )
         if ModelRole.SUBAGENT in self._role_bindings:
             sb = self._role_bindings[ModelRole.SUBAGENT]
             sub_transport = self._transports.make_transport(sb.transport, sb.model)
-            sub_agent = replace(sub_agent, transport=sub_transport)
+            sub_agent = sub_agent.copy(transport=sub_transport)
+        for provider in self._providers.values():
+            bind = getattr(provider, "bind", None)
+            if callable(bind):
+                bind(sub_agent)
         return sub_agent, context
 
     def _on_agent_status(self, message: str) -> None:
@@ -953,7 +1061,7 @@ class AgentApp(App[None]):
                 result: str = await self.push_screen_wait(PathGuardDialog(msg))
                 return result
             except ImportError:
-                return "y"
+                raise GuardError("Path permission dialog is unavailable")
 
     async def _llm_guard_prompt_fn(self, msg: str) -> str:
         async with self._guard_lock:
@@ -963,17 +1071,23 @@ class AgentApp(App[None]):
                 result = await self.push_screen_wait(LLMGuardDialog(msg))
                 return str(result)
             except ImportError:
-                return "y"
+                raise GuardError("Review dialog is unavailable")
 
-    @staticmethod
-    def _wire_google_gen_tools(transport: Any) -> None:
-        """Set/clear transport on image/video generation tools if available."""
-        try:
-            import axio_transport_google.tools as _gen_tools
+    async def _permission_prompt(self, request: PermissionRequest) -> Approval:
+        return await prompt_permission(self, request)
 
-            _gen_tools.transport = transport
-        except ImportError:
-            pass
+    async def _permission_advice(self, tool: Tool[Any], arguments: Mapping[str, Any]) -> str:
+        if "llm" in self._disabled_guards or tool.name not in self._guard_tool_map.get("llm", set()):
+            return ""
+        reviewer = self._guard_instances.get("llm")
+        review = getattr(reviewer, "review", None)
+        if callable(review):
+            return str(await review(tool, **arguments))
+        return "Review unavailable; explicit permission is required."
+
+    def _show_permissions(self) -> None:
+        if self._permission_store is not None:
+            self.push_screen(PermissionsScreen(self._permissions, self._permission_store))
 
     def _instantiate_guard(self, name: str, cls: type[PermissionGuard]) -> PermissionGuard | None:
         match name:
@@ -1004,22 +1118,19 @@ class AgentApp(App[None]):
                     return None
 
     def _rebuild_agent_tools(self) -> None:
-        tools: list[Tool[Any]] = []
-        for t in self._all_tools:
-            if t.name in self._disabled_plugins:
-                continue
-            guards: list[PermissionGuard] = []
-            for guard_name, tool_names in self._guard_tool_map.items():
-                if guard_name in self._disabled_guards:
-                    continue
-                if t.name in tool_names and guard_name in self._guard_instances:
-                    guards.append(self._guard_instances[guard_name])
-            if guards:
-                t = replace(t, guards=tuple(guards))
-            tools.append(t)
-        self._active_tools = tools
+        self._active_tools = [
+            replace(tool, guards=(*tool.guards, self._tool_guard))
+            for tool in self._all_tools
+            if tool.name not in self._disabled_plugins
+        ]
         if self._agent is not None:
-            self._agent.tools = tools
+            self._agent.tools = list(self._base_tools)
+            self._agent.providers = self._agent_providers()
+            self._agent.tool_guards = (self._tool_guard,)
+            self._agent.selector = self._tool_selector
+
+    def _agent_providers(self) -> list[ToolProvider]:
+        return [*self._providers.values(), *(p for p in self._tools_plugins.values() if isinstance(p, ToolProvider))]
 
     def _show_model_select(self) -> None:
         if not self._transports.available:
@@ -1045,7 +1156,7 @@ class AgentApp(App[None]):
         )
 
     async def _on_model_selected(self, role: ModelRole, result: tuple[str, ModelSpec] | None) -> None:
-        if result is None:
+        if result is None or self._is_running:
             return
         transport_name, spec = result
         binding = RoleBinding(transport=transport_name, model=spec)
@@ -1054,6 +1165,8 @@ class AgentApp(App[None]):
 
         match role:
             case ModelRole.CHAT:
+                if self._agent is None:
+                    await self._activate_transport(transport_name)
                 self._chat_transport = self._transports.make_transport(transport_name, spec)
                 if self._agent is not None:
                     self._agent.transport = self._chat_transport
@@ -1074,9 +1187,16 @@ class AgentApp(App[None]):
         await self._update_status()
         self.push_screen(ModelRoleSelectScreen(self._role_bindings), self._on_role_selected)
 
+    def _create_context(self, session_id: str | None = None) -> ContextStore:
+        if self._context_backend is not None:
+            return self._context_backend.create(session_id)
+        return MemoryContextStore()
+
     async def _new_session(self) -> None:
-        assert self._db_conn is not None
-        self._chat_context = SQLiteContextStore(self._db_conn, uuid4().hex)
+        if self._is_running:
+            self.notify("Stop the active run before starting a new chat.")
+            return
+        self._chat_context = self._create_context()
         self._last_input_tokens = 0
         await self.action_clear_log()
         await self._write_meta("[dim]--- New session ---[/]")
@@ -1090,6 +1210,9 @@ class AgentApp(App[None]):
         await self._write_meta("[dim]--- Forked conversation ---[/]")
 
     async def _show_session_select(self) -> None:
+        if self._context_backend is None:
+            await self._write_meta("[yellow]History is temporary. Previous sessions are not saved.[/]")
+            return
         sessions = await self._chat_context.list_sessions()
         if not sessions:
             await self._write_meta("[dim]No previous sessions found[/]")
@@ -1097,10 +1220,11 @@ class AgentApp(App[None]):
         self.push_screen(SessionSelectScreen(sessions), self._on_session_selected)
 
     async def _on_session_selected(self, info: SessionInfo | None) -> None:
-        if info is None:
+        if info is None or self._is_running:
             return
-        assert self._db_conn is not None
-        self._chat_context = SQLiteContextStore(self._db_conn, info.session_id)
+        if self._context_backend is None:
+            return
+        self._chat_context = self._create_context(info.session_id)
         self._last_input_tokens = 0
         await self._update_status()
         await self.action_clear_log()
@@ -1153,10 +1277,10 @@ class AgentApp(App[None]):
         scroll.scroll_end(animate=False)
 
     async def _replace_context(self, messages: list[Message]) -> None:
-        """Close current context, create a fresh SQLite store, populate it."""
-        assert self._db_conn is not None and self._chat_context is not None
+        """Create a fresh context and retain the conversation token counts."""
         total_in, total_out = await self._chat_context.get_context_tokens()
-        self._chat_context = SQLiteContextStore(self._db_conn, uuid4().hex)
+        # Compaction changes storage, but does not end the permission lifetime of this chat.
+        self._chat_context_ = self._create_context()
         for msg in messages:
             await self._chat_context.append(msg)
         if total_in or total_out:
@@ -1224,7 +1348,13 @@ class AgentApp(App[None]):
         yield SystemCommand(
             "Toggle Dev Console", "Show or hide the developer log console", self.action_toggle_dev_console
         )
+        yield SystemCommand("Workspace Configuration", "Show instruction and MCP sources", self._show_workspace)
+        yield SystemCommand("Skills", "Show local and MCP skills", self._show_skills)
+        yield SystemCommand("MCP Servers", "Inspect connections, tools, resources and skills", self._show_mcp)
+        yield SystemCommand("Reconnect MCP", "Reconnect automatic and saved MCP servers", self._reconnect_mcp)
+        yield SystemCommand("Reload Workspace", "Reload instructions, skills and MCP", self._reload_workspace)
         yield SystemCommand("Manage Plugins", "Configure tools and guards", self._show_plugin_hub)
+        yield SystemCommand("Permissions", "Inspect and revoke chat or project rules", self._show_permissions)
         for pname, plugin in self._tools_plugins.items():
             yield SystemCommand(
                 f"Manage {plugin.label}",
@@ -1236,7 +1366,7 @@ class AgentApp(App[None]):
             if name not in screens:
                 continue
             label = (
-                self._transports.get_transport(name).name
+                self._transports.display_name(name)
                 if name in self._transports.available
                 else name.replace("-", " ").title()
             )
@@ -1247,8 +1377,227 @@ class AgentApp(App[None]):
                 lambda n=name, s=screen_cls: self._show_transport_settings(n, s),
             )
 
+    async def _load_workspace(self) -> None:
+        projects: tuple[MCPConfiguration, ...] = ()
+        config: dict[str, Any] = {"application": "tui"}
+        if importlib.util.find_spec("axio_tools_local") is not None:
+            from axio_tools_local.provider import LocalOptions
+
+            config["local"] = LocalOptions(
+                self.paths.cwd,
+                self.paths.roots,
+                self.options.isolated,
+                self.options.instructions_files,
+                self.options.skill_directories,
+                self.options.instructions_max_bytes,
+            )
+        elif self.options.instructions_files or self.options.skill_directories:
+            await self._write_meta("[yellow]Local instructions and skills require axio-tui[local].[/]")
+        if importlib.util.find_spec("axio_tools_mcp") is not None:
+            from .configuration import connection_configs, load_mcp_config
+
+            projects = await asyncio.to_thread(
+                load_mcp_config, self.paths, files=self.options.mcp_files, isolated=self.options.isolated
+            )
+            config["mcp"] = connection_configs(projects)
+        elif self.options.mcp_files:
+            await self._write_meta("[yellow]MCP configuration requires axio-tui[mcp].[/]")
+        for name, error in self._provider_catalog.errors.items():
+            await self._write_meta(escape(f"Provider {name}: {error}"))
+        for name, provider in self._provider_catalog.entries.items():
+            try:
+                if name in self._providers:
+                    if isinstance(provider, RefreshableToolProvider):
+                        await provider.refresh(config=config)
+                else:
+                    set_status = getattr(provider, "set_status_callback", None)
+                    if callable(set_status):
+                        set_status(self._mcp_status)
+                    try:
+                        await provider.init(config=config, global_config=self._global_config)
+                    except BaseException:
+                        await provider.close()
+                        raise
+                    self._providers[name] = provider
+                    self._provider_catalog.errors.pop(name, None)
+            except Exception as error:
+                if name not in self._providers:
+                    self._provider_catalog.errors[name] = str(error)
+                await self._write_meta(escape(f"Provider {name} failed: {error}"))
+        self._projects = projects
+        self._on_tools_plugin_dismissed()
+
+    def _mcp_status(self, message: str) -> None:
+        self.call_later(self._write_meta, escape(message))
+
+    def _plugin_instructions(self) -> str:
+        parts = []
+        for plugin in self._tools_plugins.values():
+            if isinstance(plugin, ToolProvider):
+                continue
+            describe = getattr(plugin, "instructions", None)
+            if callable(describe):
+                parts.append(str(describe()))
+        return "\n\n".join(["", *parts])
+
+    def _bind_workspace(self) -> None:
+        if self._agent is None:
+            return
+        self._agent.system = SYSTEM_PROMPT + self._plugin_instructions()
+        for provider in self._providers.values():
+            bind = getattr(provider, "bind", None)
+            if callable(bind):
+                binding = bind(self._agent)
+                if getattr(binding, "instruction", None) is not None:
+                    self._local_binding = binding
+
+    async def _reload_workspace(self) -> None:
+        if self._is_running or self._workspace_loading or not self.ready.is_set():
+            await self._write_meta("[yellow]Stop the current operation before reloading the workspace.[/]")
+            return
+        self._workspace_loading = True
+        self._workspace_task = self.run_worker(self._reload_workspace_work(), group="workspace")
+
+    async def _reconnect_mcp(self) -> None:
+        if self._is_running or self._workspace_loading or not self.ready.is_set():
+            self.notify("Stop the current operation before reconnecting MCP.", severity="warning")
+            return
+        self._workspace_loading = True
+        self._workspace_task = self.run_worker(self._reload_workspace_work(reconnect_mcp=True), group="workspace")
+
+    async def _reload_workspace_work(self, *, reconnect_mcp: bool = False) -> None:
+        self._workspace_loading = True
+        try:
+            if reconnect_mcp:
+                await self._write_meta("[dim]Reconnecting automatic and saved MCP servers...[/]")
+                for plugin in self._tools_plugins.values():
+                    reconnect = getattr(plugin, "reconnect", None)
+                    if callable(reconnect):
+                        await reconnect()
+            await self._load_workspace()
+            if reconnect_mcp:
+                servers = self._inspect_mcp()
+                connected = sum(server.state == "connected" for server in servers)
+                failed = sum(server.state == "error" for server in servers)
+                await self._write_meta(
+                    f"MCP reconnect finished: {connected} connected, {failed} failed. Open /mcp for details."
+                )
+            else:
+                await self._write_meta("[dim]Workspace instructions, skills and MCP reloaded.[/]")
+        except Exception as error:
+            await self._write_meta(f"[red]Workspace reload failed: {escape(str(error))}[/]")
+        finally:
+            self._on_tools_plugin_dismissed()
+            self._workspace_loading = False
+
+    async def _show_workspace(self) -> None:
+        text = self.paths.describe()
+        if self._local_binding is not None:
+            snapshot = await self._local_binding.instruction.load()
+            text += "\n\n" + snapshot.text
+        for project in self._projects:
+            text += "\nMCP project: " + project.origin
+            for source in project.files:
+                text += f"\n  {source.layer}: {source.source}"
+        await self._write_meta(escape(text))
+
+    async def _show_skills(self) -> None:
+        entries: list[SkillEntry] = []
+        notes: list[str] = []
+        for name, provider in self._providers.items():
+            if importlib.util.find_spec("axio_tools_local") is not None:
+                from axio_tools_local.provider import LocalToolProvider
+
+                if isinstance(provider, LocalToolProvider):
+                    found, diagnostics = await asyncio.to_thread(provider_entries, skills=provider.skills)
+                    entries.extend(found)
+                    notes.extend(diagnostics)
+                    continue
+            if importlib.util.find_spec("axio_tools_mcp") is not None:
+                from axio_tools_mcp.provider import MCPToolProvider
+
+                if isinstance(provider, MCPToolProvider):
+                    found, diagnostics = await asyncio.to_thread(provider_entries, mcp=provider.runtime)
+                    entries.extend(found)
+                    notes.extend(diagnostics)
+                    continue
+            for instruction in provider.get_instructions():
+                entries.append(instruction_entry(name, instruction))
+        for plugin in self._tools_plugins.values():
+            catalogs = getattr(plugin, "skill_catalogs", None)
+            if callable(catalogs):
+                for name, catalog in catalogs().items():
+                    entries.extend(catalog_entries(f"MCP (manual): {name}", catalog))
+            else:
+                describe = getattr(plugin, "describe_skills", None)
+                if callable(describe):
+                    notes.append(str(describe()))
+        self.push_screen(SkillsScreen(entries, notes))
+
+    def _inspect_mcp(self) -> list[ServerInspection]:
+        servers: list[ServerInspection] = []
+        for provider in self._providers.values():
+            inspect_servers = getattr(provider, "inspect_servers", None)
+            if callable(inspect_servers):
+                from .configuration import inspect_configurations
+
+                servers.extend(inspect_configurations(self._projects, inspect_servers()))
+        for plugin in self._tools_plugins.values():
+            inspect_servers = getattr(plugin, "inspect_servers", None)
+            if callable(inspect_servers):
+                servers.extend(inspect_servers())
+        return servers
+
+    async def _show_mcp(self) -> None:
+        available = importlib.util.find_spec("axio_tools_mcp") is not None
+        self.push_screen(
+            MCPScreen(
+                self._inspect_mcp,
+                reconnect=self._reconnect_mcp,
+                manage=self._manage_mcp if available else None,
+            )
+        )
+
+    async def _manage_mcp(self) -> None:
+        if self._is_running or self._workspace_loading or not self.ready.is_set():
+            self.notify("Stop the current operation before editing MCP servers.", severity="warning")
+            return
+        from .mcp_manage import MCPManagementScreen, destinations
+
+        plugin = self._tools_plugins.get("mcp")
+
+        async def legacy() -> None:
+            if plugin is not None:
+                self._show_tools_plugin(plugin)
+
+        self.push_screen(
+            MCPManagementScreen(
+                destinations(self.paths, self.options.mcp_files),
+                isolated=self.options.isolated,
+                legacy=legacy if plugin is not None else None,
+            ),
+            self._mcp_management_closed,
+        )
+
+    async def _mcp_management_closed(self, changed: bool | None) -> None:
+        if changed:
+            self._workspace_loading = True
+            self._workspace_task = self.run_worker(self._apply_mcp_management(), group="workspace")
+        elif isinstance(self.screen, MCPScreen):
+            self.screen.refresh_servers()
+
+    async def _apply_mcp_management(self) -> None:
+        await self._reload_workspace_work(reconnect_mcp=True)
+        if isinstance(self.screen, MCPScreen):
+            self.screen.refresh_servers()
+
     async def _show_transport_settings(self, name: str, screen_cls: type) -> None:
+        if self._is_running or not self.ready.is_set():
+            await self._write_meta("[yellow]Stop the active run before changing accounts or transport settings.[/]")
+            return
         settings = await self._transports.get_settings(name)
+        if name in self._transports.errors:
+            settings["_error"] = self._transports.errors[name]
         self.push_screen(
             screen_cls(settings),
             lambda result: self._on_transport_configured(name, result),
@@ -1257,15 +1606,31 @@ class AgentApp(App[None]):
     async def _on_transport_configured(self, name: str, result: dict[str, str] | None) -> None:
         if result is None:
             return
+        if self._is_running:
+            await self._write_meta("[yellow]Stop the active run before applying transport settings.[/]")
+            return
         was_available = name in self._transports.available
         await self._transports.save_settings(name, result)
 
         if name not in self._transports.available:
             label = name.replace("-", " ").title()
-            await self._write_meta(f"[yellow]{label}: API key required to activate[/]")
+            reason = self._transports.errors.get(name, "Check the transport credentials.")
+            await self._write_meta(f"[yellow]{escape(label)}: {escape(reason)}[/]")
+            if (
+                self._role_bindings.get(ModelRole.CHAT, None) is not None
+                and self._role_bindings[ModelRole.CHAT].transport == name
+            ):
+                self._agent = None
+                self._chat_transport = None
             return
 
-        if not was_available:
+        source = self._transports.get_transport(name)
+        for role, binding in list(self._role_bindings.items()):
+            if binding.transport == name:
+                model = source.models.get(binding.model.id) or source.model
+                self._role_bindings[role] = RoleBinding(name, model)
+                await self._config.set(f"model.{role}", self._transports.encode(name, model.id))
+        if not was_available or self._agent is None:
             await self._activate_transport(name)
         else:
             await self._reconfigure_transport(name)
@@ -1273,6 +1638,9 @@ class AgentApp(App[None]):
 
     async def _activate_transport(self, name: str) -> None:
         """Set up agent for a newly activated transport."""
+        if ModelRole.CHAT not in self._role_bindings:
+            transport = self._transports.get_transport(name)
+            self._role_bindings[ModelRole.CHAT] = RoleBinding(name, transport.model)
         # Set up chat if this transport claimed the chat role
         if ModelRole.CHAT in self._role_bindings and self._role_bindings[ModelRole.CHAT].transport == name:
             cb = self._role_bindings[ModelRole.CHAT]
@@ -1284,9 +1652,11 @@ class AgentApp(App[None]):
                 self._rebuild_agent_tools()
                 self._agent = Agent(
                     system=SYSTEM_PROMPT,
-                    tools=self._active_tools,
+                    tools=self._base_tools,
+                    providers=self._agent_providers(),
+                    tool_guards=(self._tool_guard,),
+                    selector=self._tool_selector,
                     transport=self._chat_transport,
-                    selector=self._get_active_selector(),
                     last_iteration_message=LAST_ITERATION_MESSAGE,
                 )
             else:
@@ -1296,10 +1666,10 @@ class AgentApp(App[None]):
             vb = self._role_bindings[ModelRole.VISION]
             _tools.vision_transport = self._transports.make_transport(name, vb.model)
 
-        if name == "google":
-            self._wire_google_gen_tools(self._transports.get_transport("google"))
+        self._transports.bind_tools()
 
-        label = self._transports.get_transport(name).name
+        self._bind_workspace()
+        label = self._transports.display_name(name)
         await self._write_meta(f"[green]{label} activated[/]")
 
     async def _reconfigure_transport(self, name: str) -> None:
@@ -1309,12 +1679,21 @@ class AgentApp(App[None]):
                 continue
             match role:
                 case ModelRole.CHAT:
+                    self._chat_model = binding.model
+                    self._model_name = binding.model.id
+                    self.sub_title = self._model_name
                     self._chat_transport = self._transports.make_transport(name, binding.model)
                     if self._agent is not None:
                         self._agent.transport = self._chat_transport
                 case ModelRole.VISION:
                     _tools.vision_transport = self._transports.make_transport(name, binding.model)
-        label = self._transports.get_transport(name).name
+                case ModelRole.GUARD:
+                    if "llm" in self._guard_classes and "llm" not in self._disabled_guards:
+                        instance = self._instantiate_guard("llm", self._guard_classes["llm"])
+                        if instance is not None:
+                            self._guard_instances["llm"] = instance
+                            self._rebuild_agent_tools()
+        label = self._transports.display_name(name)
         await self._write_meta(f"[dim]{label} settings updated[/]")
 
     def _guard_descriptions(self) -> dict[str, str]:
@@ -1331,6 +1710,7 @@ class AgentApp(App[None]):
 
     def _show_plugin_hub(self) -> None:
         tool_groups = discover_tools_by_package()
+        tool_groups.update({name: provider.all_tools for name, provider in self._providers.items()})
         for ep_name, plugin in self._tools_plugins.items():
             tool_groups[ep_name] = list(plugin.all_tools)
         self.push_screen(
@@ -1358,9 +1738,12 @@ class AgentApp(App[None]):
         self._active_selector = active
         await self._config.set("selector.active", active or "")
         if self._agent is not None:
-            self._agent.selector = self._get_active_selector()
+            self._agent.selector = self._tool_selector
 
     async def _reload_transport_models(self) -> dict[str, int]:
+        if self._is_running:
+            self.notify("Stop the active run before reloading models.")
+            return self._transports.model_counts()
         self.ready.clear()
         try:
             await self._transports.reload_models()
@@ -1369,16 +1752,22 @@ class AgentApp(App[None]):
         return self._transports.model_counts()
 
     def _show_tools_plugin(self, plugin: ToolsPlugin) -> None:
+        if self._is_running or self._workspace_loading:
+            self.notify("Stop the current operation before changing MCP connections.")
+            return
         screen = plugin.settings_screen()
         self.push_screen(screen, lambda _result: self._on_tools_plugin_dismissed())
 
     def _on_tools_plugin_dismissed(self) -> None:
-        # Rebuild tools list with all plugin tools
-        tools: list[Tool[Any]] = discover_tools()
+        self._base_tools = standalone_tools(
+            discover_tool_catalog(), replace(self._provider_catalog, entries=self._providers)
+        )
         for plugin in self._tools_plugins.values():
-            tools.extend(plugin.all_tools)
-        self._all_tools = tools
+            if not isinstance(plugin, ToolProvider):
+                self._base_tools.extend(plugin.all_tools)
+        self._all_tools = collect_tools(self._agent_providers(), tools=self._base_tools)
         self._rebuild_agent_tools()
+        self._bind_workspace()
 
     async def _on_transports_changed(self, disabled: set[str]) -> None:
         self._disabled_transports = disabled
@@ -1437,6 +1826,29 @@ class AgentApp(App[None]):
             return
         message.input.value = ""
 
+        if value == "/permissions":
+            self._show_permissions()
+            return
+
+        if value.split()[0] in {"/skills", "/mcp", "/instructions", "/config"}:
+            if value in {"/mcp reconnect", "/mcp reload"}:
+                await self._reconnect_mcp()
+            elif value.endswith(" reload"):
+                await self._reload_workspace()
+            elif value == "/skills":
+                await self._show_skills()
+            elif value == "/mcp":
+                await self._show_mcp()
+            elif value in {"/instructions", "/config"}:
+                await self._show_workspace()
+            else:
+                await self._write_meta("Usage: /skills, /mcp [reconnect|reload], /instructions, /config [reload]")
+            return
+
+        if self._workspace_loading:
+            await self._write_meta("[dim]Workspace is loading; please wait.[/]")
+            return
+
         if value.lower() == "exit":
             self.exit()
             return
@@ -1458,6 +1870,7 @@ class AgentApp(App[None]):
 
     async def _run_agent_work(self, task: str) -> None:
         if self._agent is None:
+            await self._write_meta("[yellow]Configure a transport from the command palette first.[/]")
             return
 
         self._is_running = True
@@ -1549,7 +1962,9 @@ class AgentApp(App[None]):
                                     self._declined = False
                                 self._tool_status = None
                             case Error(exception=exc):
-                                await self._write_meta(f"[red]Error: {exc}[/]")
+                                describe = getattr(self._agent.transport, "format_error", str)
+                                detail = describe(exc) if isinstance(exc, Exception) else type(exc).__name__
+                                await self._write_meta(f"[red]Error: {escape(detail)}[/]")
                 finally:
                     await stream.aclose()
 
