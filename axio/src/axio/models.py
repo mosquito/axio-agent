@@ -15,6 +15,7 @@ class Capability(StrEnum):
     audio = "audio"
     # Output modalities
     image_generation = "image_generation"
+    image_editing = "image_editing"
     video_generation = "video_generation"
     # Processing capabilities
     reasoning = "reasoning"

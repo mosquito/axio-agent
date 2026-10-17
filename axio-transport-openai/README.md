@@ -108,9 +108,11 @@ See the [OpenAI registration and sign-in specification](https://developers.opena
 
 ### ChatGPT subscription transport
 
-`ChatGPTTransport` implements completion through the public `/v1/responses` endpoint.
-It uses a selected `ChatGPTSession` and the caller's `aiohttp.ClientSession`; it does
-not read `OPENAI_API_KEY` or reuse Codex backend credentials.
+`ChatGPTTransport` implements completion using the selected `ChatGPTSession` and
+the caller's `aiohttp.ClientSession`. Ordinary sign-in uses public `/v1/responses`;
+native sign-in (`axio-chatgpt login --codex`) uses the Codex backend for completion
+and image generation. The registration determines the route. It does not read
+`OPENAI_API_KEY` or import credentials from Codex CLI.
 
 <!-- name: test_readme_chatgpt_transport -->
 ```python
@@ -143,7 +145,7 @@ bound to their original account. Fetch the new catalog before showing its choice
 `stream()` fetches lazily if needed. Keep both sessions open until consumers finish.
 
 Capabilities and token budgets come from the selected account's API catalog.
-All catalog models are treated as supporting text and function tools, including
+All server completion catalog models are treated as supporting text and function tools, including
 new model IDs. `input_modalities` enables vision when it contains `image`;
 `supported_reasoning_levels` enables reasoning and restricts explicit effort values
 in payloads. Unsupported efforts raise `ValueError` before inference, including
@@ -165,6 +167,7 @@ occupy one developer `additional_tools` item at the start of `input`, without
 namespaces. Its position stays fixed across turns. A selector or schema change
 replaces this declaration; old calls remain in history. This can invalidate cached
 prefixes, but it does not retain removed tools or share tool state across contexts.
+Native Codex sessions instead send current function declarations in top-level `tools`.
 
 `reasoning_effort` and `reasoning_summary` configure known reasoning models. The
 builder always sets `store=false` and `stream=true`; it exposes no arbitrary extra
@@ -180,6 +183,118 @@ raw Responses inputs can use `ChatGPTResponses` for inline files.
 
 See the [subscription route restrictions](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)
 and [account model discovery](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference).
+
+### ChatGPT image generation
+
+Run `axio-chatgpt login --codex` once to authorize and select a native ChatGPT
+registration. This uses the public OAuth client and backend protocol from
+[Codex CLI rust-v0.163.0](https://github.com/openai/codex/tree/rust-v0.163.0),
+with a loopback callback on port 1455 by default. `--manual` also works over SSH.
+The ordinary Sign in with ChatGPT token cannot call this image route; Axio reports
+that an explicit native sign-in is needed. Existing registrations remain saved.
+Reauthorize a native registration with `login --account CLIENT_ID`.
+
+`ChatGPTImageTransport` implements `ImageGenTransport` and returns `list[bytes]`.
+`ChatGPTImageModel` describes an image-only model with
+`Capability.image_generation` and `Capability.image_editing`. `CHATGPT_IMAGE_MODELS` currently contains
+`gpt-image-2`. After a successful catalog fetch, native `ChatGPTTransport.models`
+appends these image presets to the server's completion models. Presets describe
+the implemented endpoint; the endpoint still checks account access and quota.
+Select completion models by `Capability.text` and image models by
+`Capability.image_generation`. Image models cannot be used with `stream()`.
+
+<!-- name: test_readme_chatgpt_images -->
+```python
+import aiohttp
+from axio.models import Capability
+from axio_transport_openai.accounts import open_chatgpt
+from axio_transport_openai.chatgpt_images import image_media_type
+from axio_transport_openai.credential_stores import FileCredentialStore
+
+
+async def draw(prompt: str) -> tuple[bytes, str]:
+    async with aiohttp.ClientSession() as http:
+        async with open_chatgpt(FileCredentialStore(), http) as chatgpt:
+            model = chatgpt.models.by_capability(Capability.image_generation).first()
+            generator = chatgpt.image_transport(model)
+            images = await generator.generate_images(prompt, quality="low")
+            return images[0], image_media_type(images[0])
+```
+
+For an existing account session, construct
+`ChatGPTImageTransport(account=account, session=http)` directly; it needs no
+completion catalog request. `chatgpt.with_model("gpt-image-2").generate_images(prompt)`
+is also supported. The generator shares credential renewal, account selection,
+and quota state with completion. It never changes the account or billing method.
+
+The current interface generates one image per call (`n=1`). The standalone class
+accepts `size="auto"`, `"1024x1024"`, `"1536x1024"`, or `"1024x1536"`;
+`quality="auto"`, `"low"`, `"medium"`, or `"high"`; and
+`transparent_background=True`. Native generation returns PNG; `image_media_type`
+recognizes PNG, JPEG and WebP signatures. Output format selection,
+partial previews, seeds and reproducibility are not exposed.
+
+Requests use `POST https://chatgpt.com/backend-api/codex/images/generations`.
+This backend protocol can change independently of the public OpenAI API.
+`ChatGPTImageError` (a `ResponsesAPIError`) retains provider errors and request IDs.
+Missing or invalid image results raise an error. Quota exhaustion pauses the shared
+session until `resume_plan_usage()`. Generation POSTs are never automatically
+retried: cancellation or a lost response may leave a completed generation on the
+server. Closing the caller's sessions does not sign out.
+
+### Editing images and agent tools
+
+`ChatGPTImageTransport` also implements `axio.transport.ImageEditTransport`.
+`edit_images(prompt, images=[...])` requires a nonempty list of `ImageBlock`
+sources, preserves their order, and posts inline data to `/images/edits` using
+the same account session. PNG, JPEG and WebP are accepted; a mismatched MIME type
+is rejected before HTTP. The model's `image_editing` capability is independent of
+`vision` (understanding images) and `image_generation` (drawing from text).
+
+<!-- name: test_readme_chatgpt_edit -->
+```python
+from axio.blocks import ImageBlock
+from axio_transport_openai import ChatGPTImageTransport
+
+
+async def recolor(transport: ChatGPTImageTransport, source: ImageBlock) -> bytes:
+    images = await transport.edit_images("Change the circle to red", images=[source])
+    return images[0]
+```
+
+`ChatGPTTransport.edit_images()` exposes the same core interface. The standalone
+image transport additionally accepts the same size, quality, and background
+options as generation. One result per request is supported. The native Codex
+protocol has no mask field, so a non-None `mask` raises `ValueError` instead of
+being ignored. Editing has the same quota gate and no automatic request retries.
+
+`ChatGPTImageTools` provides separate `generate_image(prompt)` and
+`edit_image(prompt, images)` tools. Model-facing `images` contains registered IDs;
+the host supplies the actual `ImageBlock` data. Results include both an image ID
+and the image, allowing subsequent edits. Neither tool reads paths or downloads URLs.
+
+<!-- name: test_readme_chatgpt_image_tools -->
+```python
+from axio import Agent
+from axio.blocks import ImageBlock
+from axio_transport_openai import ChatGPTImageTools, ChatGPTTransport
+
+
+def editing_agent(chatgpt: ChatGPTTransport, source: ImageBlock) -> Agent:
+    images = ChatGPTImageTools(chatgpt.image_transport())
+    source_id = images.add_image(source)
+    return Agent(
+        system=f"Edit the supplied attachment when requested. Its image ID is {source_id}.",
+        transport=chatgpt.with_model("gpt-6-luna"),
+        tools=images.tools,
+    )
+```
+
+Keep one `ChatGPTImageTools` instance per conversation. Its `images` mapping
+retains sources and results; the application controls their lifetime. To resume,
+persist the mapping using image block serialization and pass it as `images=` to a
+new instance. Session and conversation-history persistence remain the host's job.
+Both tools declare external access for normal Axio permission guards.
 
 ### Token renewal and application storage
 

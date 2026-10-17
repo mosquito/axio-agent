@@ -29,6 +29,8 @@ RESOURCE = "https://api.openai.com/v1"
 DYNAMIC_CLIENT_ID = "dynamic_agent_client"
 PLAN_SCOPE = "chatgpt.tokens.use.direct"
 SCOPES = f"openid profile email offline_access resource.invoke {PLAN_SCOPE}"
+CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
+CODEX_SCOPES = "openid profile email offline_access api.connectors.read api.connectors.invoke"
 CALLBACK_PATH = "/auth/callback"
 TERMINAL_REFRESH_ERRORS = frozenset(
     {
@@ -83,11 +85,12 @@ class ChatGPTTokens:
     scopes: frozenset[str]
     received_at: float
     expires_at: float | None
+    codex: bool = field(default=False, kw_only=True, metadata={"credential_optional": True})
 
     @property
     def plan_enabled(self) -> bool:
         """Whether the token response granted ChatGPT plan usage."""
-        return PLAN_SCOPE in self.scopes
+        return self.codex or PLAN_SCOPE in self.scopes
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +108,7 @@ class ChatGPTAccount:
     email: str | None = None
     name: str | None = None
     tokens: ChatGPTTokens | None = field(default=None, repr=False)
+    codex_account_id: str | None = field(default=None, kw_only=True, metadata={"credential_optional": True})
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +168,7 @@ class ChatGPTOAuth:
     host_id: str
     agent_name: str = "Axio"
     issuer: str = ISSUER
+    codex: bool = False
     _jwks: jwt.PyJWKSet | None = field(default=None, init=False, repr=False)
     _jwks_url: str = field(default="", init=False, repr=False)
     _jwks_expires: float = field(default=0, init=False, repr=False)
@@ -217,7 +222,8 @@ class ChatGPTOAuth:
             authorize_url = self._endpoint(discovery, "authorization_endpoint")
             token_url = self._endpoint(discovery, "token_endpoint")
             jwks_url = self._endpoint(discovery, "jwks_uri")
-            client_id = account.client_id if account else DYNAMIC_CLIENT_ID
+            native = self.codex or (account is not None and account.codex_account_id is not None)
+            client_id = CODEX_CLIENT_ID if native else account.client_id if account else DYNAMIC_CLIENT_ID
 
             async def complete(authorization: _Authorization) -> ChatGPTAccount:
                 nonlocal client_id
@@ -227,7 +233,13 @@ class ChatGPTOAuth:
             for attempt in range(2):
                 try:
                     return await self._authorize(
-                        authorize_url, client_id, account, open_browser, port, complete, read_callback
+                        authorize_url,
+                        client_id,
+                        account,
+                        open_browser,
+                        port or (1455 if native else 0),
+                        complete,
+                        read_callback,
                     )
                 except OAuthError as exc:
                     if exc.code != "invalid_grant" or attempt != 0:
@@ -241,6 +253,7 @@ class ChatGPTOAuth:
         jwks_url: str,
         account: ChatGPTAccount | None,
     ) -> ChatGPTAccount:
+        native = authorization.client_id == CODEX_CLIENT_ID
         data = await self._json(
             "POST",
             token_url,
@@ -250,22 +263,26 @@ class ChatGPTOAuth:
                 "code": authorization.code,
                 "code_verifier": authorization.verifier,
                 "redirect_uri": authorization.redirect_uri,
-                "resource": RESOURCE,
+                **({} if native else {"resource": RESOURCE}),
             },
         )
-        tokens = self._tokens(data, time.time())
+        tokens = self._codex_tokens(data, time.time()) if native else self._tokens(data, time.time())
         claims = await self._verify(tokens.id_token, authorization.client_id, authorization.nonce, jwks_url)
         subject = required_string(claims, "sub")
         if account is not None and subject != account.subject:
             raise OAuthValidationError("The signed-in identity does not match the selected account.")
+        codex_account_id = self._codex_account_id(claims) if native else None
+        if account is not None and account.codex_account_id != codex_account_id:
+            raise OAuthValidationError("The signed-in workspace does not match the selected account.")
         return ChatGPTAccount(
-            client_id=authorization.client_id,
+            client_id=f"codex:{codex_account_id}:{subject}" if native else authorization.client_id,
             host_id=self.host_id,
             issuer=self.issuer,
             subject=subject,
             email=optional_string(claims, "email"),
             name=optional_string(claims, "name"),
             tokens=tokens,
+            codex_account_id=codex_account_id,
         )
 
     async def refresh(self, account: ChatGPTAccount) -> ChatGPTAccount:
@@ -289,15 +306,18 @@ class ChatGPTOAuth:
         except TimeoutError:
             raise OAuthError("OAuth discovery timed out.", request_not_sent=True) from None
         async with asyncio.timeout(30):
+            native = account.codex_account_id is not None
+            form = {
+                "grant_type": "refresh_token",
+                "client_id": CODEX_CLIENT_ID if native else account.client_id,
+                "refresh_token": previous.refresh_token,
+            }
+            if not native:
+                form["resource"] = RESOURCE
             data = await self._json(
                 "POST",
                 token_endpoint,
-                form={
-                    "grant_type": "refresh_token",
-                    "client_id": account.client_id,
-                    "refresh_token": previous.refresh_token,
-                    "resource": RESOURCE,
-                },
+                **({"json_body": form} if native else {"form": form}),
             )
         # An omitted scope retains the original grant. An omitted ID token
         # retains the login hint; it is not a new assertion of identity.
@@ -306,12 +326,15 @@ class ChatGPTOAuth:
         data.setdefault("scope", " ".join(sorted(previous.scopes)))
         required_string(data, "refresh_token")
         required_string(data, "access_token")
-        tokens = self._tokens(data, time.time())
+        tokens = self._codex_tokens(data, time.time()) if native else self._tokens(data, time.time())
         if new_identity:
             try:
                 async with asyncio.timeout(30):
                     claims = await self._verify(
-                        tokens.id_token, account.client_id, None, self._endpoint(discovery, "jwks_uri")
+                        tokens.id_token,
+                        CODEX_CLIENT_ID if native else account.client_id,
+                        None,
+                        self._endpoint(discovery, "jwks_uri"),
                     )
             except (OAuthError, TimeoutError):
                 # The exchange already succeeded. Even a temporary JWKS failure
@@ -319,6 +342,8 @@ class ChatGPTOAuth:
                 raise OAuthValidationError("Could not verify the rotated ID token.") from None
             if required_string(claims, "sub") != account.subject:
                 raise OAuthValidationError("The refreshed identity did not match the account.")
+            if native and self._codex_account_id(claims) != account.codex_account_id:
+                raise OAuthValidationError("The refreshed workspace did not match the account.")
         return replace(account, tokens=tokens)
 
     async def revoke(self, account: ChatGPTAccount) -> None:
@@ -334,7 +359,7 @@ class ChatGPTOAuth:
                     data={
                         "token": account.tokens.refresh_token,
                         "token_type_hint": "refresh_token",
-                        "client_id": account.client_id,
+                        "client_id": CODEX_CLIENT_ID if account.codex_account_id is not None else account.client_id,
                     },
                     allow_redirects=False,
                 ) as response:
@@ -488,6 +513,15 @@ class ChatGPTOAuth:
                 "code_challenge_method": "S256",
                 "code_challenge": challenge.decode("ascii"),
             }
+            if client_id == CODEX_CLIENT_ID:
+                params.pop("ext_agent_host_id")
+                params.pop("resource")
+                params.update(
+                    scope=CODEX_SCOPES,
+                    id_token_add_organizations="true",
+                    codex_cli_simplified_flow="true",
+                    originator="axio",
+                )
             if client_id == DYNAMIC_CLIENT_ID:
                 params["agent_name_hint"] = self.agent_name
             if account is not None:
@@ -517,9 +551,16 @@ class ChatGPTOAuth:
             result.cancel()
             await runner.cleanup()
 
-    async def _json(self, method: str, url: str, *, form: dict[str, str] | None = None) -> dict[str, Any]:
+    async def _json(
+        self,
+        method: str,
+        url: str,
+        *,
+        form: dict[str, str] | None = None,
+        json_body: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         try:
-            async with self.session.request(method, url, data=form, allow_redirects=False) as response:
+            async with self.session.request(method, url, data=form, json=json_body, allow_redirects=False) as response:
                 if response.status != 200:
                     code = ""
                     # Only retain a known error code; provider descriptions can contain secrets.
@@ -542,6 +583,32 @@ class ChatGPTOAuth:
         if not isinstance(data, dict):
             raise OAuthValidationError("OAuth response must be a JSON object.")
         return data
+
+    @staticmethod
+    def _codex_account_id(claims: dict[str, Any]) -> str:
+        auth = claims.get("https://api.openai.com/auth")
+        if not isinstance(auth, dict):
+            raise OAuthValidationError("The Codex identity has no workspace metadata.")
+        return required_string(auth, "chatgpt_account_id")
+
+    @staticmethod
+    def _codex_tokens(data: dict[str, Any], received_at: float) -> ChatGPTTokens:
+        data = dict(data)
+        data.setdefault("scope", CODEX_SCOPES)
+        data.setdefault("token_type", "Bearer")
+        access_token = required_string(data, "access_token")
+        if "expires_in" not in data:
+            # Only read expiry from the token returned by the trusted token endpoint.
+            # Identity and workspace are verified separately using the signed ID token.
+            try:
+                claims = jwt.decode(access_token, options={"verify_signature": False})
+                expires = claims["exp"]
+                if isinstance(expires, bool) or not isinstance(expires, (int, float)):
+                    raise ValueError
+                data["expires_in"] = expires - received_at
+            except (jwt.PyJWTError, KeyError, ValueError):
+                raise OAuthValidationError("Invalid Codex access token expiry.") from None
+        return replace(ChatGPTOAuth._tokens(data, received_at), codex=True)
 
     async def _verify(self, token: str, client_id: str, nonce: str | None, jwks_url: str) -> dict[str, Any]:
         try:

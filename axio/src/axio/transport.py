@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from .blocks import ContentBlock
+from .blocks import ContentBlock, ImageBlock
 from .events import StreamEvent
 from .messages import Message
 from .models import ModelSpec
@@ -66,6 +66,25 @@ class ImageGenTransport(Protocol):
     (PNG / JPEG / WebP — provider-defined)."""
 
     async def generate_images(self, prompt: str, *, model: str | None = None, n: int = 1) -> list[bytes]: ...
+
+
+@runtime_checkable
+class ImageEditTransport(Protocol):
+    """Edit supplied images according to a prompt, returning complete image bytes.
+
+    Sources are required. Implementations must reject unsupported masks instead
+    of ignoring them; supported formats and counts are provider-specific.
+    """
+
+    async def edit_images(
+        self,
+        prompt: str,
+        *,
+        images: list[ImageBlock],
+        mask: ImageBlock | None = None,
+        model: str | None = None,
+        n: int = 1,
+    ) -> list[bytes]: ...
 
 
 @runtime_checkable
@@ -201,6 +220,20 @@ class DummyCompletionTransport(DummyTransport, CompletionTransport):
 
 class DummyImageGenTransport(DummyTransport, ImageGenTransport):
     async def generate_images(self, prompt: str, *, model: str | None = None, n: int = 1) -> list[bytes]:
+        self._do_fail()
+        raise AssertionError("unreachable")
+
+
+class DummyImageEditTransport(DummyTransport, ImageEditTransport):
+    async def edit_images(
+        self,
+        prompt: str,
+        *,
+        images: list[ImageBlock],
+        mask: ImageBlock | None = None,
+        model: str | None = None,
+        n: int = 1,
+    ) -> list[bytes]:
         self._do_fail()
         raise AssertionError("unreachable")
 

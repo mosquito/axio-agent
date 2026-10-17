@@ -33,6 +33,12 @@ class CredentialRecord:
                     raise ValueError
             if account.client_id == DYNAMIC_CLIENT_ID:
                 raise ValueError
+            if account.codex_account_id is not None and (
+                not isinstance(account.codex_account_id, str)
+                or not account.codex_account_id
+                or account.client_id != f"codex:{account.codex_account_id}:{account.subject}"
+            ):
+                raise ValueError
             for optional in (account.email, account.name):
                 if optional is not None and not isinstance(optional, str):
                     raise ValueError
@@ -43,6 +49,8 @@ class CredentialRecord:
                     or not isinstance(tokens.id_token, str)
                     or not tokens.id_token
                 ):
+                    raise ValueError
+                if type(tokens.codex) is not bool or tokens.codex != (account.codex_account_id is not None):
                     raise ValueError
                 if not isinstance(tokens.scopes, frozenset) or not all(
                     isinstance(scope, str) and scope for scope in tokens.scopes
@@ -68,7 +76,7 @@ class CredentialRecord:
                         or tokens.token_type.lower() != "bearer"
                     ):
                         raise ValueError
-                elif tokens.expires_at is not None or PLAN_SCOPE in tokens.scopes:
+                elif tokens.expires_at is not None or PLAN_SCOPE in tokens.scopes or tokens.codex:
                     raise ValueError
             if (
                 not isinstance(self.revision, str)

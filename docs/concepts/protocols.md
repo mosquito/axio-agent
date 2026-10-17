@@ -249,8 +249,35 @@ async def example():
 ```
 
 **Implementation status**: implemented by
+{class}`~axio_transport_openai.ChatGPTImageTransport` and
+{class}`~axio_transport_openai.ChatGPTTransport`, and by
 {class}`~axio_transport_google.GoogleTransport`, which declares
 `CompletionTransport`, `ImageGenTransport` and `VideoGenTransport` together.
+
+### ImageEditTransport
+
+Edits existing images according to a prompt. This is separate from drawing from
+text (`ImageGenTransport`) and understanding images (`Capability.vision`). Models
+advertise editing with `Capability.image_editing`.
+
+<!-- name: test_image_edit_transport_protocol -->
+```python
+from axio.blocks import ImageBlock
+from axio.transport import ImageEditTransport
+
+
+async def edit(transport: ImageEditTransport, source: ImageBlock) -> list[bytes]:
+    return await transport.edit_images("Change the background to blue", images=[source])
+```
+
+The signature is `edit_images(prompt, *, images, mask=None, model=None, n=1)`.
+`images` is a required `list[ImageBlock]`; `mask`, when supported, is an `ImageBlock`.
+Implementations reject unsupported masks rather than ignoring them. Format and
+count limits belong to the provider. Results are complete image bytes, as with
+`ImageGenTransport`.
+
+Implemented by `ChatGPTImageTransport` and `ChatGPTTransport`. The native ChatGPT
+route currently supports PNG/JPEG/WebP sources, one output, and no mask.
 
 ### VideoGenTransport
 
@@ -504,7 +531,7 @@ A session yields the realtime events described in {doc}`events` -
 ## Placeholder transports
 
 `axio.transport` also ships a `Dummy*` implementation of each protocol -
-`DummyCompletionTransport`, `DummyImageGenTransport`, `DummyVideoGenTransport`,
+`DummyCompletionTransport`, `DummyImageGenTransport`, `DummyImageEditTransport`, `DummyVideoGenTransport`,
 `DummyAudioGenTransport`, `DummyTTSTransport`, `DummySTTTransport`,
 `DummyEmbeddingTransport`. Each one raises `RuntimeError` when called.
 

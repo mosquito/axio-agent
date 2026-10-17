@@ -100,6 +100,7 @@ async def sign_in(
     manual: bool = False,
     port: int = 0,
     timeout: float = 300,
+    codex: bool = False,
 ) -> ChatGPTAccount:
     """Authorize and persist an account using the default XDG credentials file."""
     store = FileCredentialStore(credentials)
@@ -111,7 +112,7 @@ async def sign_in(
             raise CredentialError("The selected account registration was not found.")
     terminal = TerminalAuthorization(manual=manual)
     async with aiohttp.ClientSession() as http:
-        oauth = ChatGPTOAuth(http, await store.host_id())
+        oauth = ChatGPTOAuth(http, await store.host_id(), codex=codex)
         account = await oauth.sign_in(
             expected.public_account() if expected else None,
             open_browser=terminal.open,
@@ -127,6 +128,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Sign in with ChatGPT and save local credentials.")
     parser.add_argument("--credentials", type=Path, help="Override the XDG credentials file.")
     parser.add_argument("--client-id", help="Reauthorize an existing registration.")
+    parser.add_argument("--codex", action="store_true", help="Use native ChatGPT OAuth for images and completion.")
     parser.add_argument(
         "--manual", action="store_true", help="Print the login URL and accept the redirect URL on stdin."
     )
