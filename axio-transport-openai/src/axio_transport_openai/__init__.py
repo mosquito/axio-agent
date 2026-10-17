@@ -51,7 +51,16 @@ _TT = frozenset({Capability.text, Capability.tool_use})
 
 OPENAI_MODELS: ModelRegistry = ModelRegistry(
     {
-        # GPT-5.6 family (latest, 9 July 2026). The tiers differ only in price, except
+        # https://developers.openai.com/api/docs/models/gpt-6-luna
+        ModelSpec(
+            id="gpt-6-luna",
+            context_window=1_050_000,
+            max_output_tokens=128_000,
+            capabilities=_VRT,
+            input_cost=0.10,
+            output_cost=0.50,
+        ),
+        # GPT-5.6 family (9 July 2026). The tiers differ only in price, except
         # gpt-5.6-cyber, which has a smaller window.
         ModelSpec(
             id="gpt-5.6",
