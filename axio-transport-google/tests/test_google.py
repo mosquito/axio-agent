@@ -297,7 +297,7 @@ def test_build_tools_json() -> None:
     assert len(declarations) == 1
     assert declarations[0]["name"] == "search"
     assert declarations[0]["description"] == "Search the web"
-    assert "query" in declarations[0]["parameters"].get("properties", {})
+    assert "query" in declarations[0]["parametersJsonSchema"].get("properties", {})
 
 
 # ---------------------------------------------------------------------------

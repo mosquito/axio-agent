@@ -338,7 +338,7 @@ def _build_tools_json(tools: list[Tool[Any]]) -> list[ToolDict]:
             {
                 "name": tool.name,
                 "description": tool.description,
-                "parameters": schema,
+                "parametersJsonSchema": schema,
             }
         )
     return [{"functionDeclarations": declarations}]
