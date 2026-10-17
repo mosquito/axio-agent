@@ -91,12 +91,123 @@ async def main() -> None:
     assert isinstance(events[2], IterationEnd)
     assert events[2].stop_reason == StopReason.end_turn
 
+
 asyncio.run(main())
 ```
 
 Here `stream` is an `async def` with `yield`, which makes it an async generator. The production
 transports instead declare `stream` as a plain `def` returning a call to a separate
 `async def _do_stream(...)`. Both satisfy the protocol: both return an `AsyncIterator[StreamEvent]`.
+
+## Register a transport for applications
+
+See {doc}`plugin-discovery` for how installed metadata is loaded and how the
+transport groups differ from tool providers and UI integrations.
+
+Custom applications, REPL, and TUI use `axio.transport.discover_transports()` from
+core. See {doc}`choosing-transports` for selecting and opening an installed provider
+in user code. Install the provider package in the same Python environment as the
+application. Register its class:
+
+```toml
+[project.entry-points."axio.transport"]
+my-provider = "my_package:MyTransport"
+```
+
+The entry point name is the stable provider ID used by `--transport` and saved
+TUI settings. A class entry can supply metadata with `ClassVar` attributes:
+
+```python
+from typing import ClassVar
+
+class MyTransport:
+    display_name: ClassVar[str] = "My provider"
+    env_vars: ClassVar[tuple[str, ...]] = ("MY_PROVIDER_API_KEY",)
+    supports_temperature: ClassVar[bool] = True
+    supports_max_tokens: ClassVar[bool] = False
+    supports_debug: ClassVar[bool] = False
+    supports_thinking: ClassVar[bool] = False
+    # Implement __init__(session=..., **settings), fetch_models(), and stream().
+```
+
+`TransportEntry` adapts this class. It calls the constructor with the shared HTTP
+session and saved settings, then awaits `fetch_models()` when present. The ready
+instance supplies `models: ModelRegistry` and `model: ModelSpec`, in addition to
+`CompletionTransport.stream()`. A `with_model(model)` method can return a clone
+that shares its account and HTTP session. Otherwise, the adapter makes a shallow
+copy and sets its model. The caller owns the shared HTTP session.
+
+For account sessions or custom initialization, expose a plugin object that
+implements `TransportPlugin`, or add an `open_for_app` class method. Its factory
+returns an async context manager and yields a ready transport. It owns catalog
+loading and resource cleanup; the adapter does not fetch the catalog twice.
+
+```python
+from contextlib import asynccontextmanager
+
+class MyPlugin:
+    display_name = "My provider"
+    env_vars = ("MY_PROVIDER_API_KEY",)
+    supports_temperature = True
+    supports_max_tokens = False
+    supports_debug = False
+    supports_thinking = False
+    auth = None
+
+    def has_credentials(self, config=None):
+        import os
+        return bool(os.environ.get("MY_PROVIDER_API_KEY"))
+
+    @asynccontextmanager
+    async def open(self, *, session, account=None, credentials=None, **settings):
+        transport = MyTransport(session=session, **settings)
+        await transport.fetch_models()
+        yield transport
+
+plugin = MyPlugin()
+```
+
+Register this object as `my-provider = "my_package:plugin"`. Add a `try/finally`
+around `yield` when the factory owns resources. Cancellation and application exit
+close entered contexts. Existing transports with `open_for_app` remain supported.
+Saved settings, including existing `client_id` and `account_id` keys, reach the
+factory unchanged. New account-aware factories accept the common `account` key.
+
+The optional extension points are:
+
+| Extension | Contract |
+|---|---|
+| `has_credentials(config)` | Check local configuration without network requests. The default checks `env_vars`. |
+| `auto_select` | Allow REPL autodetection; defaults to `True`. ChatGPT and Antigravity set `False` to retain explicit account-provider selection. |
+| `auth` | An object implementing `TransportAuth`; enables `/account`, `/login`, and `/logout`. |
+| `select_model(transport, model)` | Application-specific model cloning, including resetting incompatible settings. |
+| `format_error(error)` | Return a safe diagnostic without credentials or raw response bodies. |
+| `default_models` | Map TUI role names such as `chat` and `vision` to preferred model IDs. Saved user choices take precedence. |
+| `bind_tools(transport_or_none)` | Connect or disconnect provider-owned tool handlers without imports in the interface. |
+
+`TransportAuth` receives a credential-file `Path` or `None`. It supplies
+`has_accounts`, `prompt_login_if_needed`, `describe_accounts`, `sign_in`,
+`select_account`, `logout`, and `account_id`. `sign_in` returns the selected
+account ID. `describe_accounts` and `logout` receive the active transport so
+external changes to the default account cannot redirect the active session.
+An account switch opens the new transport before changing the saved selection
+and clears REPL conversation history. Model changes preserve the account.
+
+REPL settings use the `supports_*` metadata before applying an option. Transport
+instances can expose `configure_thinking(value)` and `describe_thinking()` for
+provider-specific controls. Discrete reasoning efforts use
+`supported_thinking_levels(model)` and `reasoning_effort`; numeric thinking uses
+`thinking_budget` and `thinking_level`. A provider can declare
+`default_reasoning_effort` for startup. Optional TUI screens remain registered in
+`axio.transport.settings` under the same provider ID.
+
+The first declaration of a duplicate name wins, even if loading it fails. Later
+declarations produce a warning and are not loaded. A failed or invalid entry
+remains in `TransportCatalog.errors`; other providers remain usable. Explicit
+REPL selection reports the load failure and exits with code 1. TUI lists the
+failure and passes it to an available settings screen as `_error`. An absent
+provider reports its name and the available IDs. With no installed providers,
+REPL asks for a package installation and TUI remains available for configuration.
 
 ## What you do not write yourself
 
@@ -148,13 +259,16 @@ from axio.events import IterationEnd
 
 async def example_tool_call_stream():
     yield ToolUseStart(index=0, tool_use_id="call_abc", name="my_tool")
-    yield ToolInputDelta(index=0, tool_use_id="call_abc", partial_json='{"arg": "value"}')
+    yield ToolInputDelta(
+        index=0, tool_use_id="call_abc", partial_json='{"arg": "value"}'
+    )
     yield IterationEnd(iteration=0, stop_reason=StopReason.tool_use, usage=Usage(10, 5))
 
 
 async def main():
     events = [e async for e in example_tool_call_stream()]
     assert len(events) == 3
+
 
 asyncio.run(main())
 ```
@@ -184,6 +298,7 @@ async def example_parallel_stream():
 async def main():
     events = [e async for e in example_parallel_stream()]
     assert len(events) == 5
+
 
 asyncio.run(main())
 ```
@@ -222,6 +337,7 @@ async def main() -> None:
     read = [p.string("delta") async for p in payloads(chunks(), until="[DONE]")]
     assert read == ["Hel", "lo"]
 
+
 asyncio.run(main())
 ```
 
@@ -248,7 +364,9 @@ class Chunk(Wire):
     finish_reason: str = ""
 
 
-read = Chunk.read(Payload({"model": "m-1", "delta": "hi", "finish_reason": None, "extra": 1}))
+read = Chunk.read(
+    Payload({"model": "m-1", "delta": "hi", "finish_reason": None, "extra": 1})
+)
 # A null field and an unknown key are both normal on the wire: the null takes the declared
 # default, the extra key is ignored, and neither loses the fields beside it.
 assert read == Chunk(model="m-1", delta="hi", finish_reason="")
@@ -295,7 +413,7 @@ class Reply(Reader[StreamEvent], by=EVENT_NAME):
 
 async def stream() -> AsyncIterator[bytes]:
     yield b'event: text.delta\ndata: {"text": "Hi"}\n\n'
-    yield b'event: ping\ndata: {}\n\n'
+    yield b"event: ping\ndata: {}\n\n"
     yield b'event: web_search.started\ndata: {"query": "axio"}\n\n'
 
 
@@ -304,8 +422,11 @@ async def main() -> None:
     # The ping carried nothing, and the event nobody named was forwarded rather than dropped.
     assert made == [
         TextDelta(index=0, delta="Hi"),
-        ProviderEvent(provider="demo", kind="web_search.started", data={"query": "axio"}),
+        ProviderEvent(
+            provider="demo", kind="web_search.started", data={"query": "axio"}
+        ),
     ]
+
 
 asyncio.run(main())
 
@@ -352,10 +473,10 @@ class Quiet(Reader[StreamEvent], by=EVENT_NAME):
         yield ProviderEvent(provider="demo", kind=name, data=dict(payload))
 
 
-[event] = Decoder().decode(b'event: web_search.started\ndata: {}\n\n', final=True)
-assert len(Quiet().read(event)) == 1      # forwarded through unmatched()
+[event] = Decoder().decode(b"event: web_search.started\ndata: {}\n\n", final=True)
+assert len(Quiet().read(event)) == 1  # forwarded through unmatched()
 with pytest.raises(UnknownEvent):
-    Quiet().read(event, strict=True)      # and still refused under strict
+    Quiet().read(event, strict=True)  # and still refused under strict
 ```
 
 The real test to write is `Responses.names() <= PUBLISHED_EVENTS`: every name the reader claims is
@@ -551,9 +672,23 @@ was handed on the second call:
 import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
-from axio import Agent, MemoryContextStore, StopReason, StreamEvent, TextDelta, Tool, Usage
+from axio import (
+    Agent,
+    MemoryContextStore,
+    StopReason,
+    StreamEvent,
+    TextDelta,
+    Tool,
+    Usage,
+)
 from axio.blocks import ReasoningBlock
-from axio.events import IterationEnd, ReasoningDelta, ReasoningSignature, ToolInputDelta, ToolUseStart
+from axio.events import (
+    IterationEnd,
+    ReasoningDelta,
+    ReasoningSignature,
+    ToolInputDelta,
+    ToolUseStart,
+)
 from axio.messages import Message
 
 
@@ -564,9 +699,13 @@ class Recorder:
         self.responses = responses
         self.sent: list[list[Message]] = []
 
-    def stream(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> AsyncIterator[StreamEvent]:
+    def stream(
+        self, messages: list[Message], tools: list[Tool[Any]], system: str
+    ) -> AsyncIterator[StreamEvent]:
         self.sent.append(list(messages))
-        return self._replay(self.responses[min(len(self.sent) - 1, len(self.responses) - 1)])
+        return self._replay(
+            self.responses[min(len(self.sent) - 1, len(self.responses) - 1)]
+        )
 
     async def _replay(self, events: list[StreamEvent]) -> AsyncIterator[StreamEvent]:
         for event in events:
@@ -579,25 +718,42 @@ async def clock(msg: str) -> str:
 
 
 async def main() -> None:
-    transport = Recorder([
+    transport = Recorder(
         [
-            ReasoningDelta(index=0, delta="The user asked for the time."),
-            # After the reasoning it signs, never before.
-            ReasoningSignature(index=0, signature="opaque-proof"),
-            ToolUseStart(index=0, tool_use_id="call_1", name="clock"),
-            ToolInputDelta(index=0, tool_use_id="call_1", partial_json='{"msg": "now"}'),
-            IterationEnd(iteration=0, stop_reason=StopReason.tool_use, usage=Usage(10, 8, reasoning_tokens=6)),
-        ],
-        [
-            TextDelta(index=0, delta="now"),
-            IterationEnd(iteration=0, stop_reason=StopReason.end_turn, usage=Usage(20, 2)),
-        ],
-    ])
-    agent = Agent(system="", transport=transport, tools=[Tool(name="clock", handler=clock)])
+            [
+                ReasoningDelta(index=0, delta="The user asked for the time."),
+                # After the reasoning it signs, never before.
+                ReasoningSignature(index=0, signature="opaque-proof"),
+                ToolUseStart(index=0, tool_use_id="call_1", name="clock"),
+                ToolInputDelta(
+                    index=0, tool_use_id="call_1", partial_json='{"msg": "now"}'
+                ),
+                IterationEnd(
+                    iteration=0,
+                    stop_reason=StopReason.tool_use,
+                    usage=Usage(10, 8, reasoning_tokens=6),
+                ),
+            ],
+            [
+                TextDelta(index=0, delta="now"),
+                IterationEnd(
+                    iteration=0, stop_reason=StopReason.end_turn, usage=Usage(20, 2)
+                ),
+            ],
+        ]
+    )
+    agent = Agent(
+        system="", transport=transport, tools=[Tool(name="clock", handler=clock)]
+    )
     await agent.run("what time is it", MemoryContextStore())
 
-    replayed = [b for m in transport.sent[1] for b in m.content if isinstance(b, ReasoningBlock)]
-    assert replayed == [ReasoningBlock(text="The user asked for the time.", signature="opaque-proof")]
+    replayed = [
+        b for m in transport.sent[1] for b in m.content if isinstance(b, ReasoningBlock)
+    ]
+    assert replayed == [
+        ReasoningBlock(text="The user asked for the time.", signature="opaque-proof")
+    ]
+
 
 asyncio.run(main())
 ```
@@ -627,20 +783,28 @@ from axio.testing import StubTransport
 
 
 async def main() -> None:
-    transport = StubTransport([[
-        Refusal(index=0, text="I can't help with that.", category="policy"),
-        IterationEnd(iteration=0, stop_reason=StopReason.refusal, usage=Usage(12, 5)),
-    ]])
+    transport = StubTransport(
+        [
+            [
+                Refusal(index=0, text="I can't help with that.", category="policy"),
+                IterationEnd(
+                    iteration=0, stop_reason=StopReason.refusal, usage=Usage(12, 5)
+                ),
+            ]
+        ]
+    )
     agent = Agent(system="", transport=transport)
 
     assert await agent.run("...", MemoryContextStore()) == "I can't help with that."
 
     ends = [
-        e async for e in agent.run_stream("...", MemoryContextStore())
+        e
+        async for e in agent.run_stream("...", MemoryContextStore())
         if isinstance(e, SessionEndEvent)
     ]
     # Terminal, and not an error: the same prompt sent again is declined again.
     assert ends[0].stop_reason is StopReason.refusal
+
 
 asyncio.run(main())
 ```

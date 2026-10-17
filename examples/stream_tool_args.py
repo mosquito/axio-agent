@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import asyncio
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import aiohttp
+from axio.events import Error, SessionEndEvent
+from axio_transport_openai import OPENAI_MODELS, OpenAITransport
 from partial_json_parser import loads as partial_json_loads
 
 from axio import (
@@ -27,8 +29,6 @@ from axio import (
     ToolResult,
     ToolUseStart,
 )
-from axio.events import Error, SessionEndEvent
-from axio_transport_openai import OPENAI_MODELS, OpenAITransport
 
 # ── Tools ────────────────────────────────────────────────────────────
 

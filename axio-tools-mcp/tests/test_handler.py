@@ -14,7 +14,7 @@ from aiohttp_tiny_mcp import (
     TextContent,
     TextResourceContents,
 )
-from aiohttp_tiny_mcp.models import ToolDef
+from aiohttp_tiny_mcp.protocol.models import ToolDef
 from axio.tool import Tool
 
 from axio_tools_mcp.config import MCPServerConfig
@@ -313,3 +313,22 @@ def test_build_tools_prefixes_names_and_keeps_the_schema() -> None:
     assert dict(tools[0].input_schema) == schema
     # A server may omit the description, and the tool name is what is left to say.
     assert tools[1].description == "write"
+
+
+@pytest.mark.parametrize("value", [None, "project", 42])
+async def test_json_schema_type_arrays(value: Any) -> None:
+    """MCP type arrays retain union validation and accept explicit null values."""
+    session = _make_mock_session()
+    session.config = MCPServerConfig(name="backlog", url="https://example.test/mcp")
+    cast(AsyncMock, session.call_tool).return_value = CallToolResult(content=[TextContent(text="ok")])
+    schema = {
+        "type": "object",
+        "properties": {"project": {"type": ["string", "integer", "null"]}},
+        "required": ["project"],
+    }
+    tool = build_tools(session, [ToolDef(name="board", input_schema=schema)])[0]
+    assert tool.input_schema == schema
+    assert await tool(project=value) == "ok"
+    cast(AsyncMock, session.call_tool).assert_awaited_once_with("board", {"project": value})
+    with pytest.raises(Exception, match="project"):
+        await tool(project=[])

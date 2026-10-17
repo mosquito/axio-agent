@@ -140,3 +140,63 @@ list_files = "axio_tools_local.list_files:list_files"
 ## License
 
 MIT
+
+## Local instruction provider
+
+`LocalToolProvider` owns filesystem tools, scoped `AGENTS.md` loading, and local
+Agent Skills discovery. It implements the `axio.tools.providers` contract.
+Applications supply directories explicitly and bind each agent separately.
+
+<!-- name: test_readme_local_provider -->
+```python
+import asyncio
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from axio import Agent, MemoryContextStore
+from axio.testing import StubTransport, make_text_response
+from axio_tools_local.provider import LocalOptions, LocalToolProvider
+
+
+async def main():
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        provider = LocalToolProvider()
+        await provider.init(LocalOptions(cwd=root, roots=(root,), isolated=True))
+        try:
+            agent = Agent(
+                "Follow the project instructions.", StubTransport([make_text_response()]), providers=[provider]
+            )
+            provider.bind(agent)
+            await agent.run("Hello", MemoryContextStore())
+        finally:
+            await provider.close()
+
+
+asyncio.run(main())
+```
+
+Relative tool arguments use the configured `cwd`. `roots` must be existing,
+non-overlapping directories. Binding adds required instructions and hooks without
+changing the base system prompt or replacing caller hooks. Bind copied agents
+separately so their scoped instruction snapshots remain independent.
+
+Unless `isolated=True`, file instructions include global Axio `AGENTS.md` and
+root-to-target `AGENTS.md` files. Explicit `instruction_files` remain enabled in
+isolated mode. The combined byte limit rejects oversized snapshots without
+truncation. A project instruction symlink cannot escape its project root.
+
+Preflight uses each selected tool's `Tool.access` declaration, including tools
+from other providers. New or changed instructions defer the entire batch until
+the model receives the updated content. An instruction edit runs separately from
+other operations in its batch. These checks do not provide filesystem isolation.
+They cannot observe paths hidden inside shell commands, Python code, or MCP calls
+that do not declare their local file effects.
+
+Local skills expose short metadata through `Instruction`. Loading a skill returns
+its full text, a resource reader, and the provider's local execution tools.
+Dependencies are not inferred from Markdown or installed automatically. Tools
+retain their access declarations and remain subject to the agent's guards.
+`reload()` replaces the skill catalog; each bound agent updates it before its next
+model call. Removed skills lose their active text and tools unless those tools
+remain independently configured on the agent.

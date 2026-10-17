@@ -1,5 +1,7 @@
 """The Responses API: the vocabulary it publishes, and the request it takes."""
 
+from __future__ import annotations
+
 import json
 import logging
 from typing import Any
@@ -130,6 +132,34 @@ def test_an_event_outside_the_published_list_is_refused_under_strict() -> None:
         Responses().read(Event(data='{"type":"response.something-new"}'), strict=True)
 
 
+@pytest.mark.parametrize("terminal_output", [{}, {"output": []}])
+@pytest.mark.parametrize("item_id", ["fc-1", ""])
+def test_streamed_tool_calls_survive_empty_terminal_output(terminal_output: dict[str, Any], item_id: str) -> None:
+    reader = Responses()
+    _reads(
+        reader,
+        type="response.output_item.added",
+        output_index=0,
+        item={"type": "function_call", "id": item_id, "call_id": "call-1", "name": "get_weather"},
+    )
+    _reads(reader, type="response.completed", response={"status": "completed", **terminal_output})
+    assert reader.finished().stop_reason is StopReason.tool_use
+
+
+@pytest.mark.parametrize(
+    "status,expected", [("cancelled", StopReason.cancelled), ("content_filter", StopReason.refusal)]
+)
+def test_streamed_tool_calls_do_not_override_terminal_failure(status: str, expected: StopReason) -> None:
+    reader = Responses()
+    _reads(
+        reader,
+        type="response.output_item.added",
+        item={"type": "function_call", "id": "fc-1", "call_id": "call-1", "name": "get_weather"},
+    )
+    _reads(reader, type="response.completed", response={"status": status, "output": []})
+    assert reader.finished().stop_reason is expected
+
+
 def test_an_incomplete_response_reports_max_tokens() -> None:
     # Left unread this ended the turn as end_turn, telling the agent a truncated answer was whole.
     reader = Responses()
@@ -163,6 +193,7 @@ def test_a_refusal_reaches_the_caller_as_a_refusal() -> None:
     assert isinstance(refusal, Refusal)
     assert (refusal.index, refusal.text) == (0, "I cannot help with that")
     assert refusal.raw["delta"] == "I cannot help with that"
+    _reads(reader, type="response.completed", response={"status": "completed"})
     assert reader.finished().stop_reason == StopReason.refusal
 
 

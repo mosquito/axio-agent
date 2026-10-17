@@ -14,10 +14,10 @@ import configparser
 from pathlib import Path
 
 import aiohttp
-
-from axio import Agent, MemoryContextStore, TextDelta
 from axio_transport_codex.oauth import run_oauth_flow
 from axio_transport_codex.transport import CodexTransport
+
+from axio import Agent, MemoryContextStore, TextDelta
 
 CONFIG_PATH = Path.home() / ".config" / "axio-codex-example.ini"
 SECTION = "auth"

@@ -30,18 +30,93 @@ from axio_transport_google import GoogleTransport
 transport = GoogleTransport()
 ```
 
-The transport starts on `gemini-3.1-flash-lite-preview`, the cheapest of the three chat
-models. Switch it before the first call if you want another one.
+The transport starts on the stable `gemini-3.8-flash` model. Switch it before the first
+call if you want another one.
+
+## Antigravity subscription
+
+Select `antigravity` explicitly to use Google OAuth and Antigravity account access:
+
+```bash
+uv run axio-antigravity login
+uv run axio-repl --transport antigravity
+```
+
+`AntigravityTransport` lives in `axio_transport_google.antigravity`. It implements
+completion, streaming, reasoning, and tools. Its catalogue comes from the selected
+account, so use `/model` or `axio-antigravity models` to find model IDs. Developer
+API model IDs are not interchangeable with those IDs. Image/video generation,
+Claude, and Gemini Live are outside this transport's scope.
+
+<!-- name: test_antigravity_public_api -->
+```python
+import aiohttp
+from axio import Agent, MemoryContextStore
+from axio_transport_google.antigravity import AntigravityTransport
+
+
+async def ask_antigravity(prompt: str) -> str:
+    async with aiohttp.ClientSession() as http:
+        transport = AntigravityTransport(session=http)
+        await transport.fetch_models()
+        agent = Agent(system="Answer the question.", transport=transport)
+        return await agent.run(prompt, MemoryContextStore())
+```
+
+The caller owns the HTTP session. `with_model(transport.models[model_id])` returns
+a transport that shares the pinned account session. Token refresh uses the core
+credential store's lock, including across processes. The default file is
+`${XDG_CONFIG_HOME:-$HOME/.config}/axio/antigravity.auth`, with mode `0600`.
+The file is not encrypted. `AntigravitySQLiteCredentials` provides the SQLite
+backend; applications can pass their own compatible store to `AntigravitySession`.
+
+For SSH, `axio-antigravity login --manual` accepts the full redirect URL copied
+from the browser. `accounts`, `select --account ID`, `status`, and `logout` manage
+saved accounts. `logout --revoke` also requests revocation from Google. These
+commands remain usable when project or catalogue discovery fails.
+
+The transport never switches accounts, models, or payment methods to recover from
+quota or permission errors. Missing project discovery requires setup in the
+Antigravity application. Axio does not create Cloud projects. HTTP 429 and server
+failures have bounded retries that respect `Retry-After`. A stream is not retried
+after its first payload.
+
+This is an unofficial internal API. [Google's Antigravity terms](https://antigravity.google/terms)
+restrict third-party OAuth use and permit suspension. API stability is not guaranteed.
+
+### Antigravity in the TUI
+
+Install `axio-tui[google]`, or run `uv run axio` in this workspace. Open
+**Configure Antigravity** in the command palette to sign in or select an account.
+**Use account** reloads the available models. The screen uses the same credential
+store as the REPL and remains available when discovery fails. It also accepts
+pasted browser redirect URLs for SSH sessions. Closing it cancels pending sign-in.
+**Sign out** clears local tokens; Google grant revocation remains an explicit CLI
+operation with `axio-antigravity logout --revoke`.
 
 ## Models
 
 | Model ID | Capabilities | Context | Notes |
 |---|---|---|---|
+| `gemini-3.8-flash` | text, vision, audio, video, tools, reasoning | 1M tokens | Stable; the default |
+| `gemini-3.7-flash` | text, vision, audio, video, tools, reasoning | 1M tokens | Stable; previous generation |
+| `gemini-3.6-flash` | text, vision, audio, video, tools, reasoning | 1M tokens | Stable; previous generation |
+| `gemini-3.5-flash` | text, vision, audio, video, tools, reasoning | 1M tokens | Stable; legacy Flash |
+| `gemini-3.5-flash-lite` | text, vision, audio, video, tools, reasoning | 1M tokens | Stable; lowest-cost 3.5 model |
+| `gemini-3.1-flash-lite` | text, vision, audio, video, tools, reasoning | 1M tokens | Stable; supported until May 2027 |
 | `gemini-3.1-pro-preview` | text, vision, audio, video, tools, reasoning | 1M tokens | Flagship |
-| `gemini-3-flash-preview` | text, vision, audio, video, tools, reasoning | 1M tokens | Fast/cheap |
-| `gemini-3.1-flash-lite-preview` | text, vision, audio, video, tools, reasoning | 1M tokens | Lightest; the default |
-| `gemini-3.1-flash-image-preview` | text, vision, image generation | 1M tokens | Nano Banana |
-| `gemini-3-pro-image-preview` | text, vision, image generation | 1M tokens | Image gen |
+| `gemini-3-flash-preview` | text, vision, audio, video, tools, reasoning | 1M tokens | Preview; migrate to 3.6 or newer |
+| `gemini-2.5-pro` | text, vision, audio, video, tools, reasoning | 1M tokens | Stable |
+| `gemini-2.5-flash` | text, vision, audio, video, tools, reasoning | 1M tokens | Stable |
+| `gemini-2.5-flash-lite` | text, vision, audio, video, tools, reasoning | 1M tokens | Stable |
+| `gemini-3.1-flash-image` | text, vision, reasoning, image generation | 128K tokens | Nano Banana 2 |
+| `gemini-3.1-flash-lite-image` | text, vision, tools, reasoning, image generation | 64K tokens | Nano Banana 2 Lite |
+| `gemini-3-pro-image` | text, vision, reasoning, image generation | 64K tokens | Nano Banana Pro |
+| `gemini-2.5-flash-image` | text, vision, image generation | 64K tokens | Deprecated; shuts down October 2, 2026 |
+
+`ModelSpec` records Standard text-token rates. It cannot represent Google pricing that varies by
+input modality, output modality, context length, or service tier; calculate those cases from the
+provider's billing data instead.
 
 ## Switching models
 
@@ -55,12 +130,7 @@ transport = GoogleTransport()
 transport.model = transport.models["gemini-3-flash-preview"]
 
 # Find the cheapest reasoning model
-transport.model = (
-    transport.models
-    .by_capability(Capability.reasoning)
-    .by_cost()
-    .first()
-)
+transport.model = transport.models.by_capability(Capability.reasoning).by_cost().first()
 ```
 
 ## Constructor parameters
@@ -68,7 +138,7 @@ transport.model = (
 | Parameter | Default | Description |
 |---|---|---|
 | `api_key` | `GEMINI_API_KEY` env var | API key for the Developer API |
-| `model` | `gemini-3.1-flash-lite-preview` | Active `ModelSpec` |
+| `model` | `gemini-3.8-flash` | Active `ModelSpec` |
 | `temperature` | `None` | Sampling temperature (uses model default if unset) |
 | `top_p` | `None` | Nucleus sampling probability |
 | `top_k` | `None` | Top-k sampling |
@@ -93,15 +163,16 @@ What is valid depends on the model family:
 
 | Model | Valid levels |
 |---|---|
+| `gemini-3.8-flash`, `gemini-3.7-flash` | `LOW`, `MEDIUM`, `HIGH` |
 | `-pro` | `LOW`, `MEDIUM`, `HIGH` |
 | `-pro-image` | `HIGH` |
-| `-flash-image` | `MINIMAL`, `HIGH` |
+| `-flash-image`, `-flash-lite-image` | `MINIMAL`, `HIGH` |
 | Flash, Flash-Lite | `MINIMAL`, `LOW`, `MEDIUM`, `HIGH` |
 
 There is no `NONE`. A value the family does not support is silently replaced by its highest
 level, so a misspelling buys the most expensive setting rather than failing. A reasoning model
-left unset also gets `HIGH`. `thinking_budget` is the Gemini 2.5 form. It is not sent for a
-Gemini 3+ model.
+left unset keeps that model's provider default. `thinking_budget` is the Gemini 2.5 form. It is
+not sent for a Gemini 3+ model.
 
 ### Media tool results
 
@@ -171,7 +242,9 @@ from axio_transport_google._generated_types import SafetySetting
 
 transport = GoogleTransport(
     safety_settings=[
-        SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
+        SafetySetting(
+            category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"
+        ),
     ]
 )
 ```
@@ -190,7 +263,7 @@ async def main() -> None:
     transport = GoogleTransport()
     images: list[bytes] = await transport.generate_images(
         "A photorealistic owl sitting on a branch",
-        model="gemini-3.1-flash-image-preview",
+        model="gemini-3.1-flash-image",
         n=1,
     )
     with open("owl.png", "wb") as f:
@@ -246,7 +319,9 @@ from axio.realtime import RealtimeAgent
 
 transport = GeminiLiveTransport()
 
-async with RealtimeAgent(system="You are a helpful assistant.", transport=transport) as agent:
+async with RealtimeAgent(
+    system="You are a helpful assistant.", transport=transport
+) as agent:
     ...
 ```
 
@@ -254,7 +329,10 @@ For Vertex AI realtime, use `VertexLiveTransport`. If you have multiple Vertex
 regions available, the transport can auto-select the nearest one:
 
 ```python
-from axio_transport_google.realtime import VertexLiveTransport, probe_nearest_live_region
+from axio_transport_google.realtime import (
+    VertexLiveTransport,
+    probe_nearest_live_region,
+)
 
 region = await probe_nearest_live_region()
 transport = VertexLiveTransport(location=region)

@@ -22,9 +22,9 @@ from axio import FieldInfo
 # FieldInfo has these fields:
 fi = FieldInfo(
     description="Search query",  # Human-readable description
-    default="MISSING",          # Default value (or MISSING if required)
-    ge=1,                       # Minimum value (≥)
-    le=100,                     # Maximum value (≤)
+    default="MISSING",  # Default value (or MISSING if required)
+    ge=1,  # Minimum value (≥)
+    le=100,  # Maximum value (≤)
 )
 ```
 
@@ -92,7 +92,10 @@ async def lookup(
 
 
 schema = build_tool_schema(lookup)
-assert schema["properties"]["user_id"]["description"] == "The unique identifier of the user"
+assert (
+    schema["properties"]["user_id"]["description"]
+    == "The unique identifier of the user"
+)
 ```
 
 ### `default`
@@ -197,7 +200,9 @@ from axio import Field, Tool
 async def write_file(
     path: Annotated[str, Field(description="File path to write to")],
     content: Annotated[str, Field(description="Content to write to the file")],
-    mode: Annotated[Literal["w", "a"], Field(default="w", description="Write mode: 'w' or 'a'")] = "w",
+    mode: Annotated[
+        Literal["w", "a"], Field(default="w", description="Write mode: 'w' or 'a'")
+    ] = "w",
 ) -> str:
     """Write content to a file."""
     with open(path, mode) as f:
@@ -238,9 +243,22 @@ from axio import Field, Tool
 
 
 async def query_users(
-    status: Annotated[str, Field(default="", description="Filter by status: 'active', 'inactive', or empty for all")],
-    limit: Annotated[int, Field(default=100, ge=1, le=1000, description="Maximum number of rows to return")] = 100,
-    offset: Annotated[int, Field(default=0, ge=0, description="Number of rows to skip")] = 0,
+    status: Annotated[
+        str,
+        Field(
+            default="",
+            description="Filter by status: 'active', 'inactive', or empty for all",
+        ),
+    ],
+    limit: Annotated[
+        int,
+        Field(
+            default=100, ge=1, le=1000, description="Maximum number of rows to return"
+        ),
+    ] = 100,
+    offset: Annotated[
+        int, Field(default=0, ge=0, description="Number of rows to skip")
+    ] = 0,
 ) -> str:
     """Query users from the database."""
     parts = [f"SELECT * FROM users"]

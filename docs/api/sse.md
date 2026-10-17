@@ -42,7 +42,9 @@ reader = Messages()
 assert Messages.names() == {"message.delta"}
 assert reader.read(events[0]) == ["hi"]
 # Not named, so not interpreted - and forwarded rather than dropped.
-assert reader.read(Event(data='{"type": "message.tool.started"}')) == ["<message.tool.started>"]
+assert reader.read(Event(data='{"type": "message.tool.started"}')) == [
+    "<message.tool.started>"
+]
 ```
 
 ## What a `Reader` names, and what it does not

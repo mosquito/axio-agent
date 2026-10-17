@@ -12,7 +12,7 @@ import re
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Literal, Self
+from typing import Any, ClassVar, Literal, Self
 
 import aiohttp
 from axio.blocks import ImageBlock, ProviderBlock, ReasoningBlock, TextBlock, ToolResultBlock, ToolUseBlock
@@ -35,9 +35,10 @@ from axio.schema import strip_title
 from axio.tool import Tool
 from axio.transport import CompletionTransport, EmbeddingTransport
 from axio.types import StopReason, Usage, stop_reason_from
-from axio_responses import Responses, convert_messages, convert_tools
+from axio_responses import Responses, ResponsesAPIError, convert_messages, convert_tools, request_id
 from axio_sse import Payload, Wire, payloads
 
+from .chatgpt import ChatGPTTransport as ChatGPTTransport
 from .realtime import OpenAIRealtimeSession, OpenAIRealtimeTransport  # noqa: F401
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,16 @@ _TT = frozenset({Capability.text, Capability.tool_use})
 
 OPENAI_MODELS: ModelRegistry = ModelRegistry(
     {
-        # GPT-5.6 family (latest, 9 July 2026). The tiers differ only in price, except
+        # https://developers.openai.com/api/docs/models/gpt-6-luna
+        ModelSpec(
+            id="gpt-6-luna",
+            context_window=1_050_000,
+            max_output_tokens=128_000,
+            capabilities=_VRT,
+            input_cost=0.10,
+            output_cost=0.50,
+        ),
+        # GPT-5.6 family (9 July 2026). The tiers differ only in price, except
         # gpt-5.6-cyber, which has a smaller window.
         ModelSpec(
             id="gpt-5.6",
@@ -548,6 +558,13 @@ def _number[T: (int, float)](data: dict[str, Any], key: str, as_type: Callable[[
 
 @dataclass(slots=True)
 class OpenAITransport(CompletionTransport, EmbeddingTransport):
+    display_name: ClassVar[str] = "OpenAI"
+    env_vars: ClassVar[tuple[str, ...]] = ("OPENAI_API_KEY",)
+    supports_temperature: ClassVar[bool] = False
+    supports_max_tokens: ClassVar[bool] = False
+    supports_debug: ClassVar[bool] = False
+    supports_thinking: ClassVar[bool] = False
+
     name: str = "OpenAI"
     #: Which endpoint this server speaks. ``"responses"`` is the one that takes function tools and
     #: reasoning together, and OpenAI recommends it for new work. Left unset it follows
@@ -670,7 +687,7 @@ class OpenAITransport(CompletionTransport, EmbeddingTransport):
 
     async def _parse_responses(self, resp: aiohttp.ClientResponse) -> AsyncIterator[StreamEvent]:
         """Read one Responses stream. The vocabulary lives in axio-responses."""
-        turn = Responses()
+        turn = Responses(status=resp.status, request_id=request_id(resp.headers))
         async for made in turn.over(resp.content.iter_any(), until="[DONE]"):
             yield made
         yield turn.finished()
@@ -813,9 +830,10 @@ class OpenAITransport(CompletionTransport, EmbeddingTransport):
                         return
 
                     body = await resp.text()
-                    if is_retryable(resp.status):
+                    error = ResponsesAPIError.from_http(body, status=resp.status, headers=resp.headers)
+                    if error.retryable:
                         retry_resp = resp
-                        last_exc = StreamError(f"OpenAI API error {resp.status}: {body}")
+                        last_exc = error
                         logger.warning(
                             "Retryable HTTP %d (attempt %d/%d): %s",
                             resp.status,
@@ -825,7 +843,7 @@ class OpenAITransport(CompletionTransport, EmbeddingTransport):
                         )
                     else:
                         logger.error("HTTP %d from %s: %s", resp.status, url, body)
-                        raise StreamError(f"OpenAI API error {resp.status}: {body}")
+                        raise error
             except aiohttp.ClientError as exc:
                 last_exc = StreamError(str(exc))
                 logger.warning("Connection error (attempt %d/%d): %s", attempt, self.max_retries, exc)
@@ -979,6 +997,16 @@ class ThinkingMixin:
     __slots__ = ()
 
     thinking: bool  # declared in the concrete dataclass subclass
+
+    def describe_thinking(self) -> str:
+        return f"Thinking: {'on' if self.thinking else 'off'}. Valid levels: on, off, default."
+
+    def configure_thinking(self, value: str) -> str:
+        setting = value.lower()
+        if setting not in {"on", "off", "default"}:
+            raise ValueError("This transport accepts thinking on, off, or default.")
+        setattr(self, "thinking", setting == "on")
+        return self.describe_thinking()
 
     def build_payload(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> dict[str, Any]:
         payload: dict[str, Any] = super().build_payload(messages, tools, system)  # type: ignore[misc]

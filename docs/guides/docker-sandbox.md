@@ -28,6 +28,7 @@ from axio import Agent, MemoryContextStore
 from axio.testing import StubTransport, make_text_response
 from axio_tools_docker import DockerSandbox
 
+
 async def main() -> None:
     transport = StubTransport([make_text_response("Done.")])
     async with DockerSandbox(image="python:3.12-alpine") as sandbox:
@@ -38,6 +39,7 @@ async def main() -> None:
         )
         result = await agent.run("Print hello from Python.", MemoryContextStore())
         print(result)
+
 
 asyncio.run(main())
 ```
@@ -78,12 +80,14 @@ is only valid inside the `async with` block:
 import asyncio
 from axio_tools_docker import DockerSandbox
 
+
 async def main() -> None:
     async with DockerSandbox(image="alpine:latest") as sandbox:
-        print(sandbox.container_id)   # e.g. "3f2a1b..."
+        print(sandbox.container_id)  # e.g. "3f2a1b..."
         result = await sandbox.exec("uname -r")
         print(result)
     # container removed here
+
 
 asyncio.run(main())
 ```
@@ -101,6 +105,7 @@ session's existing sandbox:
 import asyncio
 from axio_tools_docker import DockerSandbox
 
+
 async def first_session() -> None:
     async with DockerSandbox(
         image="python:3.12-slim",
@@ -109,6 +114,7 @@ async def first_session() -> None:
     ) as sandbox:
         await sandbox.exec("pip install requests")
 
+
 async def second_session() -> None:
     # Attaches to the existing container - requests is already installed
     async with DockerSandbox(name="my-sandbox") as sandbox:
@@ -116,6 +122,7 @@ async def second_session() -> None:
             "python3 -c 'import requests; print(requests.__version__)'"
         )
         print(result)
+
 
 asyncio.run(first_session())
 asyncio.run(second_session())
@@ -142,6 +149,7 @@ Pass `named_volumes=` as a `{container_path: volume_name}` mapping:
 import asyncio
 from axio_tools_docker import DockerSandbox
 
+
 async def main() -> None:
     # First session: write data to the volume
     async with DockerSandbox(
@@ -155,11 +163,12 @@ async def main() -> None:
     async with DockerSandbox(
         image="python:3.12-alpine",
         named_volumes={"/data": "my-project-data"},
-        volumes_remove=True,   # remove the volume on exit
+        volumes_remove=True,  # remove the volume on exit
     ) as sb:
         raw = await sb.read_file_bytes("/data/state.json")
-        print(raw.decode())   # {"count": 1}
+        print(raw.decode())  # {"count": 1}
     # Volume is now removed as well.
+
 
 asyncio.run(main())
 ```
@@ -182,8 +191,8 @@ from axio_tools_docker import DockerSandbox
 sandbox = DockerSandbox(
     image="python:3.12-slim",
     ulimits={
-        "nofile": (1024, 65536),   # open file descriptors: soft 1024, hard 65536
-        "nproc": 512,              # max processes: soft=hard=512
+        "nofile": (1024, 65536),  # open file descriptors: soft 1024, hard 65536
+        "nproc": 512,  # max processes: soft=hard=512
     },
 )
 ```
@@ -242,7 +251,7 @@ memory or process limits.
 from axio_tools_docker import DockerSandbox
 
 sandbox = DockerSandbox(
-    "unix:///var/run/docker.sock",   # Docker daemon URL (positional)
+    "unix:///var/run/docker.sock",  # Docker daemon URL (positional)
     image="python:3.12-slim",
     memory="512m",
     cpus="2.0",

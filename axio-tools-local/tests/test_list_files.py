@@ -84,12 +84,12 @@ class TestListFilesBasic:
 
 class TestListFilesSymlinks:
     async def test_broken_symlink_does_not_crash(self, tmp_cwd: Path) -> None:
-        """Broken symlink must produce a [broken symlink] entry, not an exception."""
+        """A directory listing reports the link itself without following its target."""
         link = tmp_cwd / "dead_link"
         link.symlink_to(tmp_cwd / "nonexistent_target")
         result = await ls()
         assert "dead_link" in result
-        assert "[broken symlink]" in result
+        assert "lrwx" in result
 
     async def test_valid_symlink_to_file(self, tmp_cwd: Path) -> None:
         target = tmp_cwd / "real.txt"
@@ -105,4 +105,4 @@ class TestListFilesSymlinks:
         result = await ls()
         assert "good.txt" in result
         assert "bad_link" in result
-        assert "[broken symlink]" in result
+        assert "lrwx" in result

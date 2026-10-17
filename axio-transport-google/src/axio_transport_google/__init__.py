@@ -10,7 +10,7 @@ import os
 from collections import deque
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
-from typing import Any, Final, Protocol, cast
+from typing import Any, ClassVar, Final, Protocol, cast
 
 import aiohttp
 from axio.blocks import (
@@ -96,8 +96,10 @@ def valid_thinking_levels(model_id: str) -> tuple[str, ...] | None:
         return ("HIGH",)
     if "-pro" in model_id:
         return ("LOW", "MEDIUM", "HIGH")
-    if "-flash-image" in model_id:
+    if "-flash-image" in model_id or "-flash-lite-image" in model_id:
         return ("MINIMAL", "HIGH")
+    if "gemini-3.8-flash" in model_id or "gemini-3.7-flash" in model_id:
+        return ("LOW", "MEDIUM", "HIGH")
     # Flash, Flash-Lite
     return ("MINIMAL", "LOW", "MEDIUM", "HIGH")
 
@@ -124,11 +126,61 @@ _VT = frozenset({Capability.text, Capability.vision, Capability.audio, Capabilit
 _RT = frozenset(
     {Capability.text, Capability.reasoning, Capability.vision, Capability.audio, Capability.video, Capability.tool_use}
 )
-_IMG = frozenset({Capability.text, Capability.vision, Capability.image_generation})
+_IMG = frozenset({Capability.text, Capability.reasoning, Capability.vision, Capability.image_generation})
+_IMG_TOOL = _IMG | {Capability.tool_use}
+_IMG_25 = frozenset({Capability.text, Capability.vision, Capability.image_generation})
 
 GENAI_MODELS: ModelRegistry = ModelRegistry(
     {
         # --- Gemini chat/reasoning models ---
+        ModelSpec(
+            id="gemini-3.8-flash",
+            context_window=1_048_576,
+            max_output_tokens=65_536,
+            capabilities=_RT,
+            input_cost=0.75,
+            output_cost=3.75,
+        ),
+        ModelSpec(
+            id="gemini-3.7-flash",
+            context_window=1_048_576,
+            max_output_tokens=65_536,
+            capabilities=_RT,
+            input_cost=0.75,
+            output_cost=3.75,
+        ),
+        ModelSpec(
+            id="gemini-3.6-flash",
+            context_window=1_048_576,
+            max_output_tokens=65_536,
+            capabilities=_RT,
+            input_cost=0.75,
+            output_cost=3.75,
+        ),
+        ModelSpec(
+            id="gemini-3.5-flash",
+            context_window=1_048_576,
+            max_output_tokens=65_536,
+            capabilities=_RT,
+            input_cost=1.50,
+            output_cost=9.0,
+        ),
+        ModelSpec(
+            id="gemini-3.5-flash-lite",
+            context_window=1_048_576,
+            max_output_tokens=65_536,
+            capabilities=_RT,
+            input_cost=0.30,
+            output_cost=2.50,
+        ),
+        ModelSpec(
+            id="gemini-3.1-flash-lite",
+            context_window=1_048_576,
+            max_output_tokens=65_536,
+            capabilities=_RT,
+            input_cost=0.25,
+            output_cost=1.50,
+        ),
         ModelSpec(
             id="gemini-3.1-pro-preview",
             context_window=1_048_576,
@@ -146,47 +198,64 @@ GENAI_MODELS: ModelRegistry = ModelRegistry(
             output_cost=3.0,
         ),
         ModelSpec(
-            id="gemini-3.1-flash-lite-preview",
+            id="gemini-2.5-pro",
             context_window=1_048_576,
             max_output_tokens=65_536,
             capabilities=_RT,
-            input_cost=0.25,
-            output_cost=1.50,
+            input_cost=1.25,
+            output_cost=10.0,
+        ),
+        ModelSpec(
+            id="gemini-2.5-flash",
+            context_window=1_048_576,
+            max_output_tokens=65_536,
+            capabilities=_RT,
+            input_cost=0.30,
+            output_cost=2.50,
+        ),
+        ModelSpec(
+            id="gemini-2.5-flash-lite",
+            context_window=1_048_576,
+            max_output_tokens=65_536,
+            capabilities=_RT,
+            input_cost=0.10,
+            output_cost=0.40,
         ),
         # --- Nano Banana (Gemini image generation via generateContent) ---
         ModelSpec(
-            id="gemini-3.1-flash-image-preview",
-            context_window=1_048_576,
-            max_output_tokens=8_192,
+            id="gemini-3.1-flash-image",
+            context_window=131_072,
+            max_output_tokens=32_768,
             capabilities=_IMG,
+            input_cost=0.50,
+            output_cost=3.0,
         ),
         ModelSpec(
-            id="gemini-3-pro-image-preview",
-            context_window=1_048_576,
-            max_output_tokens=8_192,
+            id="gemini-3.1-flash-lite-image",
+            context_window=65_536,
+            max_output_tokens=4_096,
+            capabilities=_IMG_TOOL,
+            input_cost=0.25,
+            output_cost=1.50,
+        ),
+        ModelSpec(
+            id="gemini-3-pro-image",
+            context_window=65_536,
+            max_output_tokens=32_768,
             capabilities=_IMG,
+            input_cost=2.0,
+            output_cost=12.0,
+        ),
+        ModelSpec(
+            id="gemini-2.5-flash-image",
+            context_window=65_536,
+            max_output_tokens=32_768,
+            capabilities=_IMG_25,
+            input_cost=0.30,
+            output_cost=2.50,
         ),
     }
 )
-
-
-def _get_anthropic_models() -> ModelRegistry:
-    """Get Anthropic models with 'anthropic/' prefix for Vertex AI routing."""
-    from axio_transport_anthropic import ANTHROPIC_MODELS
-
-    return ModelRegistry(
-        {
-            ModelSpec(
-                id=f"anthropic/{spec.id}",
-                context_window=spec.context_window,
-                max_output_tokens=spec.max_output_tokens,
-                capabilities=spec.capabilities,
-                input_cost=spec.input_cost,
-                output_cost=spec.output_cost,
-            )
-            for spec in ANTHROPIC_MODELS.values()
-        }
-    )
 
 
 #: Reasons that say the turn failed. A call streamed inside one is not a request to run it.
@@ -338,7 +407,7 @@ def _build_tools_json(tools: list[Tool[Any]]) -> list[ToolDict]:
             {
                 "name": tool.name,
                 "description": tool.description,
-                "parameters": schema,
+                "parametersJsonSchema": schema,
             }
         )
     return [{"functionDeclarations": declarations}]
@@ -549,12 +618,15 @@ def _media_event(part: ContentPart, at: int) -> StreamEvent:
 
 @dataclass(slots=True)
 class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport):
+    display_name: ClassVar[str] = "Google GenAI"
+    env_vars: ClassVar[tuple[str, ...]] = ("GEMINI_API_KEY",)
+
     name: str = "Google GenAI"
     api_key: str = ""
     vertexai: bool | None = None
     project: str = ""
     location: str = ""
-    model: ModelSpec = field(default_factory=lambda: GENAI_MODELS["gemini-3.1-flash-lite-preview"])
+    model: ModelSpec = field(default_factory=lambda: GENAI_MODELS["gemini-3.8-flash"])
     models: ModelRegistry = field(default_factory=lambda: ModelRegistry(GENAI_MODELS.values()))
     session: aiohttp.ClientSession | None = field(default=None, repr=False, compare=False)
     max_retries: int = 5
@@ -578,6 +650,13 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport)
     last_usage: Usage | None = field(default=None, repr=False, compare=False)
     # Vertex AI credentials (lazily initialised)
     _credentials: Any = field(default=None, repr=False, compare=False)
+
+    @staticmethod
+    def bind_tools(transport: Any | None) -> None:
+        from . import tools
+
+        if transport is None or tools.transport is None:
+            tools.transport = transport
 
     def __post_init__(self) -> None:
         if isinstance(self.vertexai, str):
@@ -686,10 +765,12 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport)
             levels = valid_thinking_levels(self.model.id)
             if levels is not None:
                 # Gemini 3+: use thinkingLevel (thinkingBudget is not supported)
-                level = (self.thinking_level or "HIGH").upper()
-                if level not in levels:
-                    level = levels[-1]  # fall back to highest supported
-                thinking["thinkingLevel"] = level  # type: ignore[typeddict-item]
+                level = self.thinking_level
+                if level is not None:
+                    level = level.upper()
+                    if level not in levels:
+                        level = levels[-1]  # fall back to highest supported
+                    thinking["thinkingLevel"] = level  # type: ignore[typeddict-item]
             elif self.thinking_budget is not None:
                 # Gemini 2.5: use thinkingBudget (thinkingLevel is not supported)
                 thinking["thinkingBudget"] = self.thinking_budget
@@ -704,37 +785,20 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport)
 
     def stream(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> AsyncIterator[StreamEvent]:
         if self.model.id.startswith("anthropic/"):
-            return self._stream_anthropic(messages, tools, system)
+            raise StreamError(self.model_selection_error(self.model.id))
         return self._do_stream(messages, tools, system)
 
-    async def _stream_anthropic(
-        self, messages: list[Message], tools: list[Tool[Any]], system: str
-    ) -> AsyncIterator[StreamEvent]:
-        from axio_transport_anthropic import ANTHROPIC_MODELS, AnthropicTransport
-
-        bare_id = self.model.id.removeprefix("anthropic/")
-        model_spec = ANTHROPIC_MODELS.get(bare_id) or self.model
-        proxy = AnthropicTransport(
-            vertexai=True,
-            project=self.project,
-            location=self.location,
-            model=model_spec,
-            max_retries=self.max_retries,
-            # Both halves of the policy, or a deliberately patient retry became the Anthropic
-            # transport's own default of five seconds.
-            retry_base_delay=self.retry_base_delay,
-            temperature=self.temperature,
-            top_p=self.top_p,
-            top_k=int(self.top_k) if self.top_k is not None else None,
-            thinking_budget=self.thinking_budget,
-            session=self.session,
-        )
-        # This transport is the one the agent asks, and the proxy reports nothing here. Left at
-        # the last Gemini turn's figure, a Claude turn cut short reported the numbers of a response
-        # served by another provider entirely; left at None, the agent says the figure is missing.
-        self.last_usage = None
-        async for event in proxy.stream(messages, tools, system):
-            yield event
+    @staticmethod
+    def model_selection_error(model_id: str) -> str:
+        if model_id.startswith("anthropic/"):
+            return (
+                "Claude on Vertex requires axio-transport-anthropic[vertexai]. "
+                "Select anthropic-vertex with model "
+                + model_id.removeprefix("anthropic/")
+                + ". Copy the previous Vertex project and location to that transport. "
+                "Existing settings are preserved; no replacement model is selected."
+            )
+        return f"Unknown Google model {model_id!r}. Select an available Gemini model."
 
     def _build_request_body(
         self, messages: list[Message], tools: list[Tool[Any]], system: str
@@ -743,8 +807,7 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport)
         body: GenerateContentRequest = {"contents": _build_contents_json(messages, self._thought_signatures)}
         if system:
             body["systemInstruction"] = {"parts": [{"text": system}]}
-        if tools and Capability.image_generation not in self.model.capabilities:
-            # An image model takes no tools, and sending them is a 400.
+        if tools and Capability.tool_use in self.model.capabilities:
             body["tools"] = _build_tools_json(tools)
         body["generationConfig"] = self._build_generation_config_json()
         if self.safety_settings:
@@ -982,7 +1045,7 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport)
     async def generate_images(self, prompt: str, *, model: str | None = None, n: int = 1) -> list[bytes]:
         """Generate images via Gemini Nano Banana (generateContent with IMAGE response modality)."""
         assert self.session is not None, "aiohttp session required"
-        model_id = model or "gemini-3-pro-image-preview"
+        model_id = model or "gemini-3-pro-image"
         return await self._generate_images_gemini(prompt, model_id=model_id, n=n)
 
     async def _generate_images_gemini(self, prompt: str, *, model_id: str, n: int) -> list[bytes]:
@@ -1165,10 +1228,6 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport)
             logger.warning("fetch_models failed, using defaults", exc_info=True)
             self.models = GENAI_MODELS
 
-        if self.vertexai:
-            for spec in _get_anthropic_models().values():
-                self.models[spec.id] = spec
-
     # ── Serialization ──
 
     def to_dict(self) -> dict[str, Any]:
@@ -1250,7 +1309,10 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport)
 
 @dataclass(slots=True)
 class VertexAITransport(GoogleTransport):
-    """GoogleTransport pre-configured for Vertex AI (includes Anthropic models)."""
+    """GoogleTransport pre-configured for Gemini on Vertex AI."""
+
+    display_name: ClassVar[str] = "Google Vertex AI"
+    env_vars: ClassVar[tuple[str, ...]] = ("GOOGLE_GENAI_USE_VERTEXAI",)
 
     name: str = "Google Vertex AI"
     vertexai: bool | None = True

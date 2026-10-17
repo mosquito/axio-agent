@@ -139,6 +139,7 @@ async def test_fetch():
     result = await tool(url="https://example.com")
     assert "example.com" in result
 
+
 asyncio.run(test_fetch())
 ```
 
@@ -151,10 +152,12 @@ from axio.testing import StubTransport, make_tool_use_response, make_text_respon
 
 
 async def test_agent_with_tool():
-    transport = StubTransport([
-        make_tool_use_response("fetch", tool_input={"url": "..."}),
-        make_text_response("Done"),
-    ])
+    transport = StubTransport(
+        [
+            make_tool_use_response("fetch", tool_input={"url": "..."}),
+            make_text_response("Done"),
+        ]
+    )
     agent = Agent(tools=[], transport=transport)
     result = await agent.run("Fetch example.com", MemoryContextStore())
     assert "Done" in result
@@ -199,6 +202,7 @@ async def test_max_length_guard_denies():
     guard = MaxLengthGuard(max_length=5)
     with pytest.raises(GuardError):
         await guard(_tool, text="this is way too long")
+
 
 asyncio.run(test_max_length_guard_allows())
 asyncio.run(test_max_length_guard_denies())
@@ -378,6 +382,7 @@ async def main() -> None:
     finally:
         await conn.close()
 
+
 asyncio.run(main())
 ```
 
@@ -411,14 +416,18 @@ def cost(usage: Usage) -> float:
 
 
 async def main() -> None:
-    transport = StubTransport([[
-        TextDelta(index=0, delta="done"),
-        IterationEnd(
-            iteration=0,
-            stop_reason=StopReason.end_turn,
-            usage=Usage(1000, 200, cache_read_tokens=800, reasoning_tokens=150),
-        ),
-    ]])
+    transport = StubTransport(
+        [
+            [
+                TextDelta(index=0, delta="done"),
+                IterationEnd(
+                    iteration=0,
+                    stop_reason=StopReason.end_turn,
+                    usage=Usage(1000, 200, cache_read_tokens=800, reasoning_tokens=150),
+                ),
+            ]
+        ]
+    )
     agent = Agent(system="", transport=transport)
 
     total = Usage(0, 0)
@@ -430,7 +439,10 @@ async def main() -> None:
     # were reasoning the caller never saw.
     assert total.uncached_input_tokens == 200
     assert total.answer_tokens == 50
-    assert round(cost(total), 6) == round((200 * 3.0 + 800 * 0.30 + 200 * 15.0) / 1_000_000, 6)
+    assert round(cost(total), 6) == round(
+        (200 * 3.0 + 800 * 0.30 + 200 * 15.0) / 1_000_000, 6
+    )
+
 
 asyncio.run(main())
 ```
@@ -452,10 +464,16 @@ from axio.testing import StubTransport
 
 
 async def main() -> None:
-    transport = StubTransport([[
-        Refusal(index=0, text="I can't help with that.", category="policy"),
-        IterationEnd(iteration=0, stop_reason=StopReason.refusal, usage=Usage(12, 5)),
-    ]])
+    transport = StubTransport(
+        [
+            [
+                Refusal(index=0, text="I can't help with that.", category="policy"),
+                IterationEnd(
+                    iteration=0, stop_reason=StopReason.refusal, usage=Usage(12, 5)
+                ),
+            ]
+        ]
+    )
     agent = Agent(system="", transport=transport)
 
     stream = agent.run_stream("...", MemoryContextStore())
@@ -469,6 +487,7 @@ async def main() -> None:
     assert end is not None and end.stop_reason is StopReason.refusal
     # A decline is a finished turn, not an error: retrying the same prompt cannot succeed.
     assert said == "I can't help with that."
+
 
 asyncio.run(main())
 ```

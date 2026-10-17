@@ -107,7 +107,9 @@ the protocol that issued that proof:
 ```python
 from axio import ReasoningBlock
 
-block = ReasoningBlock(text="step one", signature="sig-abc", id="rs_1", provider="anthropic")
+block = ReasoningBlock(
+    text="step one", signature="sig-abc", id="rs_1", provider="anthropic"
+)
 d = to_dict(block)
 assert d == {
     "type": "reasoning",
@@ -157,6 +159,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 from axio.blocks import ContentBlock
 
+
 @dataclass(slots=True)
 class Message:
     role: Literal["user", "assistant", "system"]
@@ -178,6 +181,7 @@ anywhere. Only two methods are truly abstract and must be overridden:
 from axio import ContextStore
 from axio.messages import Message
 
+
 class MyContextStore(ContextStore):
     def __init__(self) -> None:
         self._messages: list[Message] = []
@@ -198,6 +202,7 @@ class MyContextStore(ContextStore):
     #   add_context_tokens(input, output)  - increments via get/set above
     #   list_sessions()  - returns a single SessionInfo for the current session
 
+
 store = MyContextStore()
 assert store.session_id  # auto-generated UUID hex
 ```
@@ -216,6 +221,7 @@ from axio import MemoryContextStore
 from axio.messages import Message
 from axio.blocks import TextBlock
 
+
 async def main():
     # empty store, or pre-populate with existing messages:
     # ctx = MemoryContextStore([existing_message, ...])
@@ -230,10 +236,11 @@ async def main():
     # fork() creates an independent deep copy - useful for branching
     fork = await ctx.fork()
     await fork.append(Message(role="user", content=[TextBlock(text="(branch)")]))
-    assert len(await ctx.get_history()) == 2   # original unchanged
+    assert len(await ctx.get_history()) == 2  # original unchanged
     assert len(await fork.get_history()) == 3
 
     await ctx.close()
+
 
 asyncio.run(main())
 ```
@@ -255,6 +262,7 @@ from axio_context_sqlite import SQLiteContextStore, connect
 from axio.messages import Message
 from axio.blocks import TextBlock
 
+
 async def main():
     tmp = pathlib.Path(tempfile.mkdtemp()) / "ctx.db"
     conn = await connect(tmp)
@@ -270,6 +278,7 @@ async def main():
         assert forked.session_id != store.session_id
     finally:
         await conn.close()
+
 
 asyncio.run(main())
 ```
@@ -297,12 +306,14 @@ from axio import MemoryContextStore
 from axio.messages import Message
 from axio.blocks import TextBlock
 
+
 async def main():
     messages = [Message(role="user", content=[TextBlock(text="hello")])]
     # Create from existing messages
     ctx = await MemoryContextStore.from_history(messages)
     # Clone another context store
     ctx2 = await MemoryContextStore.from_context(ctx)
+
 
 asyncio.run(main())
 ```
@@ -332,6 +343,7 @@ these values. Custom stores may override `set_context_tokens` and
 import asyncio
 from axio import MemoryContextStore
 
+
 async def main():
     ctx = MemoryContextStore()
     await ctx.add_context_tokens(100, 50)
@@ -339,6 +351,7 @@ async def main():
     in_tok, out_tok = await ctx.get_context_tokens()
     assert in_tok == 300
     assert out_tok == 130
+
 
 asyncio.run(main())
 ```
@@ -406,6 +419,7 @@ name: test_auto_compact_store
 ```python
 from axio import Agent
 from axio.testing import StubTransport, make_text_response
+
 transport = StubTransport([make_text_response("ok")])
 agent = Agent(system="you are helpful", transport=transport)
 ```
@@ -418,14 +432,16 @@ from axio import MemoryContextStore
 from axio.messages import Message
 from axio.blocks import TextBlock
 
+
 async def main():
     store = AutoCompactStore(
         MemoryContextStore(),
-        transport,          # same transport as the agent
-        keep_recent=6,      # keep this many messages verbatim
-        threshold=0.75,     # compact at 75 % of context_window (default)
+        transport,  # same transport as the agent
+        keep_recent=6,  # keep this many messages verbatim
+        threshold=0.75,  # compact at 75 % of context_window (default)
     )
     result = await agent.run("Build a rate limiter", store)
+
 
 asyncio.run(main())
 ```
@@ -439,6 +455,7 @@ It falls back to 128 000 if the transport has no `model` attribute. Pass
 from axio.compaction import AutoCompactStore
 from axio import MemoryContextStore
 from axio.testing import StubTransport
+
 inner_store = MemoryContextStore()
 transport = StubTransport([])
 store = AutoCompactStore(inner_store, transport, max_tokens=60_000)
@@ -474,14 +491,14 @@ compaction logic:
 from axio import ContextStore, CompletionTransport
 from axio.messages import Message
 
+
 async def compact_context(
     context: ContextStore,
     transport: CompletionTransport,
     *,
     keep_recent: int = 6,
     system_prompt: str = "...",  # defaults to a built-in summarization prompt
-) -> list[Message] | None:
-    ...
+) -> list[Message] | None: ...
 ```
 
 Returns the compacted message list, or `None` if the history is too short to
@@ -492,6 +509,7 @@ applies the result.
 name: test_compact_context_usage
 ```python
 from axio.testing import StubTransport, make_text_response
+
 transport = StubTransport([make_text_response("Earlier: user asked about deployment.")])
 ```
 -->
@@ -502,6 +520,7 @@ from axio.compaction import compact_context
 from axio import MemoryContextStore
 from axio.messages import Message
 from axio.blocks import TextBlock
+
 
 async def main():
     ctx = MemoryContextStore()
@@ -517,6 +536,7 @@ async def main():
 
     new_ctx = await MemoryContextStore.from_history(compacted)
     assert len(await new_ctx.get_history()) == 6
+
 
 asyncio.run(main())
 ```

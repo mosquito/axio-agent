@@ -6,7 +6,7 @@ from typing import Any
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal
+from textual.containers import Container, Horizontal, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, OptionList, Select, Static
 
@@ -47,7 +47,7 @@ class MCPServerEditScreen(ModalScreen["MCPServerConfig | None"]):
 
     def compose(self) -> ComposeResult:
         title = "Edit MCP Server" if self._editing else "Add MCP Server"
-        with Container(id="mcp-edit"):
+        with VerticalScroll(id="mcp-edit"):
             yield Static(f"[bold]{title}[/]")
             yield Static("Name:")
             yield Input(
@@ -92,6 +92,8 @@ class MCPServerEditScreen(ModalScreen["MCPServerConfig | None"]):
                 placeholder="e.g. 2025-11-25",
                 id="mcp-protocol",
             )
+            yield Static("Initialization timeout (seconds):")
+            yield Input(value=f"{self._editing.timeout if self._editing else 30:g}", id="mcp-timeout")
             yield Static("Scope:")
             yield Select(
                 [("Global", "global"), ("Project", "project")],
@@ -150,6 +152,12 @@ class MCPServerEditScreen(ModalScreen["MCPServerConfig | None"]):
         protocol_version = self.query_one("#mcp-protocol", Input).value.strip() or None
 
         try:
+            timeout = float(self.query_one("#mcp-timeout", Input).value)
+        except ValueError:
+            self.notify("Timeout must be a positive finite number of seconds", severity="error")
+            return
+
+        try:
             config = MCPServerConfig(
                 name=name,
                 command=command,
@@ -160,7 +168,13 @@ class MCPServerEditScreen(ModalScreen["MCPServerConfig | None"]):
                 protocol_version=protocol_version,
                 # The screen does not show these, so keep what the server already has.
                 env=self._editing.env if self._editing else None,
-                timeout=self._editing.timeout if self._editing else 30.0,
+                env_from=self._editing.env_from if self._editing else {},
+                headers_from=self._editing.headers_from if self._editing else {},
+                enabled=self._editing.enabled if self._editing else True,
+                oauth=self._editing.oauth if self._editing else None,
+                timeout=timeout,
+                cwd=self._editing.cwd if self._editing else None,
+                inherit_env=self._editing.inherit_env if self._editing else True,
             )
         except ValueError as exc:
             self.notify(str(exc), severity="error")

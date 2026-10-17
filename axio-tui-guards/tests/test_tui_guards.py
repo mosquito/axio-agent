@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+import asyncio
+from typing import Any, Literal
 
 import pytest
 from axio.blocks import TextBlock, ToolUseBlock
@@ -11,13 +12,20 @@ from axio.exceptions import GuardError
 from axio.messages import Message
 from axio.testing import StubTransport, make_text_response, make_tool_use_response
 from axio.tool import Tool
-from axio_tui.tools import confirm, status_line
 
 from axio_tui_guards.guards import LLMGuard, PathGuard
 
 # ---------------------------------------------------------------------------
 # Minimal stub handlers - no dependency on axio-tools-local
 # ---------------------------------------------------------------------------
+
+
+async def confirm(verdict: Literal["SAFE", "RISKY", "DENY"], reason: str, category: str) -> str:
+    return verdict
+
+
+async def status_line(message: str) -> str:
+    return "ok"
 
 
 async def fake_read_file(filename: str) -> str:  # pragma: no cover
@@ -186,7 +194,7 @@ class TestLLMGuard:
         with pytest.raises(GuardError, match="denied"):
             await guard.check(_shell_tool, command="sudo reboot")
 
-    async def test_always_allows_category(self) -> None:
+    async def test_legacy_always_does_not_grant_category(self) -> None:
         confirm_input = {"verdict": "RISKY", "reason": "writes", "category": "write_file"}
         transport = StubTransport(
             [
@@ -201,8 +209,8 @@ class TestLLMGuard:
             return "always"
 
         guard = LLMGuard(agent, MemoryContextStore(), prompt_fn=always)
-        await guard.check(_write_tool, file_path="a.txt", content="data")
-        assert "write_file" in guard.allowed
+        with pytest.raises(GuardError, match="User denied"):
+            await guard.check(_write_tool, file_path="a.txt", content="data")
 
     async def test_extract_confirm_from_context(self) -> None:
         guard = LLMGuard.__new__(LLMGuard)
@@ -228,7 +236,7 @@ class TestLLMGuard:
         await ctx.append(Message(role="user", content=[TextBlock(text="check")]))
         await ctx.append(Message(role="assistant", content=[TextBlock(text="no tool call")]))
         confirm_result = await guard.extract_confirm(ctx)
-        assert confirm_result.verdict == "SAFE"
+        assert confirm_result.verdict == "RISKY"
         assert confirm_result.reason == "No verdict provided"
 
 
@@ -245,3 +253,21 @@ def _make_guard_agent(transport: Any) -> Any:
         transport=transport,
         max_iterations=5,
     )
+
+
+@pytest.mark.asyncio
+async def test_cancelled_confirmation_does_not_grant_access() -> None:
+    async def cancelled(message: str) -> str:
+        raise asyncio.CancelledError
+
+    path = PathGuard(prompt_fn=cancelled)
+    with pytest.raises(asyncio.CancelledError):
+        await path(_read_tool, filename="/private/file")
+    assert not path.allowed
+
+    from axio import Agent
+
+    reviewer = Agent(system="", transport=StubTransport([make_text_response("no verdict")]))
+    guard = LLMGuard(reviewer, MemoryContextStore(), prompt_fn=cancelled)
+    with pytest.raises(asyncio.CancelledError):
+        await guard(_read_tool, filename="/private/file")

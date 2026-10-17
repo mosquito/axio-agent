@@ -6,16 +6,69 @@ from collections.abc import Callable
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiohttp_tiny_mcp import CallToolResult, TextContent
-from aiohttp_tiny_mcp.models import ToolDef
+from aiohttp_tiny_mcp.protocol.models import ToolDef
+from pydantic import BaseModel
 
 from axio_tools_mcp.config import MCPServerConfig
 from axio_tools_mcp.registry import MCPRegistry
+
+
+async def test_inspection_masks_connection_values_and_tracks_discovery_failures() -> None:
+    registry = MCPRegistry()
+    config = MCPServerConfig(
+        name="docs",
+        url="https://user:password@example.com:8443/private-token?key=query-token",
+        headers={"Authorization": "Bearer header-token"},
+    )
+    session = _mock_session()
+    session.process = None
+    session.protocol_version = "2025-06-18"
+    session.server_capabilities["resources"] = {}
+    session.list_resources = AsyncMock(side_effect=ValueError("secret discovery payload"))
+    with patch("axio_tools_mcp.registry.MCPSession", side_effect=session_factory(session)):
+        with patch(
+            "axio_tools_mcp.registry.SkillCatalog.discover", new=AsyncMock(side_effect=ValueError("skill secret"))
+        ):
+            await registry.add_server(config)
+    info = registry.inspect_servers()[0]
+    assert info.state == "connected"
+    assert dict(info.details)["Endpoint origin"] == "https://example.com:8443"
+    assert dict(info.details)["Negotiated protocol"] == "2025-06-18"
+    assert info.errors == ("Resource discovery failed: ValueError", "Skill discovery failed: ValueError")
+    text = str(info.details) + str(info.errors)
+    for secret in ("password", "private-token", "query-token", "header-token", "secret discovery", "skill secret"):
+        assert secret not in text
+    registry.inspect_servers()
+    session.list_resources.assert_awaited_once()
+    session.is_connected = False
+    offline = registry.inspect_servers()[0]
+    assert offline.state == "error" and not offline.tools
+    await registry.remove_server("docs")
+    assert registry.inspect_servers() == []
+
+
+async def test_inspection_does_not_expose_connection_exception_values() -> None:
+    registry = MCPRegistry()
+    session = _mock_session()
+    session.connect.side_effect = RuntimeError("connection failed at https://host/token-secret")
+    with patch("axio_tools_mcp.registry.MCPSession", side_effect=session_factory(session)):
+        await registry.add_server(MCPServerConfig(name="broken", command="command-secret", args=["argument-secret"]))
+    info = registry.inspect_servers()[0]
+    assert info.state == "error" and not info.tools
+    assert info.errors == ("Connection failed: RuntimeError",)
+    text = str(info.details) + str(info.errors)
+    assert all(secret not in text for secret in ("token-secret", "command-secret", "argument-secret"))
+
+
+class Nothing(BaseModel):
+    pass
 
 
 def _mock_session(tools: list[ToolDef] | None = None) -> MagicMock:
     if tools is None:
         tools = [ToolDef(name="test", description="Test tool", input_schema={"type": "object", "properties": {}})]
     session = MagicMock()
+    session.server_capabilities = {"tools": {}}
     session.connect = AsyncMock()
     session.list_tools = AsyncMock(return_value=tools)
     session.call_tool = AsyncMock(
@@ -291,3 +344,99 @@ async def test_persistence_roundtrip() -> None:
     # Remove should delete prefix
     await registry.remove_server("persisted")
     mock_db.delete_prefix.assert_awaited_with("mcp.persisted.")
+
+
+async def test_resources_without_tools_are_exposed_and_discarded_on_remove() -> None:
+    from aiohttp_tiny_mcp import Registry
+    from aiohttp_tiny_mcp.testing import serving
+
+    registry = Registry("resources", "1")
+
+    async def guide(args: Nothing) -> str:
+        return "Resource body"
+
+    registry.resource("notes://guide")(guide)
+    async with serving(registry) as url:
+        client = MCPRegistry()
+        await client.add_server(MCPServerConfig(name="notes", url=url))
+        try:
+            tools = {t.name: t for t in client.all_tools}
+            assert "Resource body" in await tools["notes__read_resource"](uri="notes://guide")
+            assert "notes://guide" in client.instructions()
+            await client.remove_server("notes")
+            assert not client.all_tools
+            assert not client.instructions()
+        finally:
+            await client.close()
+
+
+async def test_cancelled_connection_closes_session() -> None:
+    import asyncio
+
+    session = _mock_session()
+    session.connect.side_effect = asyncio.CancelledError()
+    registry = MCPRegistry()
+    with patch("axio_tools_mcp.registry.MCPSession", return_value=session):
+        try:
+            await registry.add_server(MCPServerConfig(name="cancel", command="python"))
+        except asyncio.CancelledError:
+            pass
+        else:
+            raise AssertionError("Cancellation must propagate")
+    session.close.assert_awaited_once()
+
+
+async def test_initialization_deadline_discards_partial_catalog_and_reconnects() -> None:
+    import asyncio
+
+    config = MCPServerConfig(name="slow", command="python", timeout=0.05)
+    session = _mock_session()
+    session.server_capabilities["resources"] = {}
+    session.list_resources = AsyncMock(side_effect=lambda: None)
+
+    async def hang() -> None:
+        await asyncio.Event().wait()
+
+    session.list_resources.side_effect = hang
+    updates: list[str] = []
+    registry = MCPRegistry(on_status=updates.append)
+    db = MagicMock()
+    db.delete_prefix = AsyncMock()
+    db.set = AsyncMock()
+    with patch("axio_tools_mcp.registry.MCPSession", side_effect=session_factory(session)):
+        async with asyncio.timeout(2):
+            tools = await registry.add_server(config, scope=db)
+    assert not tools and not registry.all_tools and not registry.instructions()
+    assert registry.server_status("slow") == "error"
+    assert "timed out after 0.05s" in registry.inspect_servers()[0].errors[0]
+    assert "timeout 0.05s" in updates[0]
+    session.close.assert_awaited_once()
+    db.reset_mock()
+    healthy = _mock_session()
+    healthy.process = None
+    with patch("axio_tools_mcp.registry.MCPSession", side_effect=session_factory(healthy)):
+        await registry.reconnect()
+    assert registry.server_status("slow") == "connected"
+    assert len(registry.all_tools) == 1
+    assert registry.get_server_scope("slow") is db
+    assert registry.server_config("slow") == config
+    db.set.assert_not_called()
+    assert not registry.inspect_servers()[0].errors
+    await registry.close()
+
+
+async def test_tools_catalog_has_initialization_deadline() -> None:
+    import asyncio
+
+    async def hang() -> None:
+        await asyncio.Event().wait()
+
+    session = _mock_session()
+    session.list_tools.side_effect = hang
+    registry = MCPRegistry()
+    with patch("axio_tools_mcp.registry.MCPSession", side_effect=session_factory(session)):
+        async with asyncio.timeout(2):
+            await registry.add_server(MCPServerConfig(name="slow", command="python", timeout=0.05))
+    assert registry.server_status("slow") == "error"
+    assert "timed out after 0.05s" in registry.inspect_servers()[0].errors[0]
+    session.close.assert_awaited_once()

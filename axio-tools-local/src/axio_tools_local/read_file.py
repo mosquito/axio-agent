@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import asyncio
 import os
 
 from axio.blocks import AudioBlock, AudioMediaType, ImageBlock, ImageMediaType, TextBlock, VideoBlock, VideoMediaType
 from axio.field import StrictStr
+from axio.tool_access import file_access, tool_access
 
 from .patch_file import clear_patched
 
@@ -114,6 +117,7 @@ def _read_text(
     return result
 
 
+@tool_access(file_access("read", "filename"))
 async def read_file(
     filename: StrictStr,
     max_chars: int = 32768,

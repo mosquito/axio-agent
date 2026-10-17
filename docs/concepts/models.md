@@ -116,8 +116,8 @@ All query methods return a new `ModelRegistry`, so they can be chained:
 : Sort by input cost (default) or output cost, ascending or descending.
   <!-- name: test_model_registry -->
   ```python
-  cheapest = registry.by_cost()            # cheapest input first
-  priciest = registry.by_cost(desc=True)   # most expensive first
+  cheapest = registry.by_cost()  # cheapest input first
+  priciest = registry.by_cost(desc=True)  # most expensive first
   assert cheapest.ids() == priciest.ids()[::-1]
   ```
 
@@ -134,10 +134,7 @@ All query methods return a new `ModelRegistry`, so they can be chained:
 ```python
 # Find the cheapest vision-capable model with tool use
 model = (
-    registry
-    .by_capability(Capability.vision, Capability.tool_use)
-    .by_cost()
-    .ids()[0]
+    registry.by_capability(Capability.vision, Capability.tool_use).by_cost().ids()[0]
 )
 assert model == "gpt-4o"
 ```
@@ -202,9 +199,9 @@ u = Usage(
     reasoning_tokens=300,
 )
 
-assert u.total_tokens == 1400              # input + output
-assert u.uncached_input_tokens == 150      # input - cache_read - cache_write
-assert u.answer_tokens == 100              # output - reasoning
+assert u.total_tokens == 1400  # input + output
+assert u.uncached_input_tokens == 150  # input - cache_read - cache_write
+assert u.answer_tokens == 100  # output - reasoning
 ```
 
 `Usage` supports `+`, and every field adds. A total accumulated across
@@ -238,7 +235,7 @@ transport:
 model = getattr(transport, "model", None)
 model_caps = getattr(model, "capabilities", None)
 if model_caps is not None and Capability.tool_use not in model_caps:
-    active_tools = []   # embedding or image-gen models: no tools
+    active_tools = []  # embedding or image-gen models: no tools
 ```
 
 This means you can safely point an `Agent` at an embedding or image-generation

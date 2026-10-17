@@ -7,7 +7,7 @@ import dataclasses
 import json
 import logging
 import time
-from collections.abc import AsyncGenerator, AsyncIterator, Iterable, Iterator
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterable, Iterator, Mapping
 from contextlib import aclosing, suppress
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -45,11 +45,15 @@ from .events import (
     VideoOutput,
 )
 from .exceptions import StreamError
+from .instructions import LOAD_INSTRUCTION_TOOL, Instruction, InstructionState, LoadedInstruction
 from .messages import Message
 from .models import Capability
+from .permission import PermissionGuard
+from .plugins import ToolProvider, collect_tools
 from .selector import ToolSelector
 from .stream import AgentStream
 from .tool import Tool
+from .tool_access import Access
 from .transport import CompletionTransport
 from .types import StopReason, Usage
 
@@ -281,9 +285,100 @@ class Agent:
     selector: ToolSelector | None = field(default=None)
     max_iterations: int = field(default=50)
     last_iteration_message: Message | None = field(default=None)
+    before_turn: Callable[[int], Awaitable[None]] | None = field(default=None, kw_only=True)
+    before_tools: Callable[[list[ToolUseBlock], int], Awaitable[list[ToolResultBlock]]] | None = field(
+        default=None, kw_only=True
+    )
+    providers: list[ToolProvider] = field(default_factory=list, kw_only=True)
+    instructions: list[Instruction] = field(default_factory=list, kw_only=True)
+    required_instructions: tuple[str, ...] = field(default=(), kw_only=True)
+    before_turn_hooks: tuple[Callable[[int], Awaitable[None]], ...] = field(default=(), kw_only=True)
+    before_tools_hooks: tuple[Callable[[list[ToolUseBlock], int], Awaitable[list[ToolResultBlock]]], ...] = field(
+        default=(), kw_only=True
+    )
+    system_contributions: tuple[Callable[[], str], ...] = field(default=(), kw_only=True)
+    tool_guards: tuple[PermissionGuard, ...] = field(default=(), kw_only=True)
+    _instruction_state: InstructionState = field(default_factory=InstructionState, init=False, repr=False)
+    _instruction_tool: Tool[Any] | None = field(default=None, init=False, repr=False)
+    _iteration_tools: list[Tool[Any]] | None = field(default=None, init=False, repr=False)
+    _guarded_tools: dict[int, tuple[Tool[Any], tuple[PermissionGuard, ...], Tool[Any]]] = field(
+        default_factory=dict, init=False, repr=False
+    )
+
+    def _catalog(self) -> list[Instruction]:
+        return [*self.instructions, *(item for provider in self.providers for item in provider.get_instructions())]
+
+    def _base_tools(self) -> list[Tool[Any]]:
+        tools = collect_tools(self.providers, tools=self.tools)
+        if not self._catalog():
+            return tools
+        if self._instruction_tool is None:
+            self._instruction_tool = Tool(
+                name=LOAD_INSTRUCTION_TOOL, handler=self._load_instruction_tool, access=self._instruction_access
+            )
+        return [*tools, self._instruction_tool]
+
+    def get_tools(self) -> list[Tool[Any]]:
+        """Return collected tools before selection, including activated instructions."""
+        self._instruction_state.synchronize(self._catalog())
+        return self._apply_tool_guards(
+            self._instruction_state.collect_tools(self._base_tools(), self._instruction_state.loaded.values())
+        )
+
+    def _instruction_access(self, values: Mapping[str, Any]) -> tuple[Access, ...]:
+        id = values.get("id")
+        for instruction in self._catalog():
+            if instruction.id == id:
+                return instruction.load_access()
+        raise ValueError(f"Unknown instruction: {id!r}")
+
+    async def load_instruction(self, id: str) -> LoadedInstruction:
+        """Load provider content and stage it for the next model iteration."""
+        self._instruction_state.synchronize(self._catalog())
+        return await self._instruction_state.load(id, self._base_tools())
+
+    async def _load_instruction_tool(self, id: str) -> str:
+        """Load a listed instruction and make its associated tools available on the next turn."""
+        return (await self.load_instruction(id)).text
+
+    async def _prepare_instructions(self) -> list[Tool[Any]]:
+        self._instruction_state.synchronize(self._catalog())
+        try:
+            for id in self.required_instructions:
+                await self.load_instruction(id)
+            return self._instruction_state.commit(self._base_tools())
+        except BaseException:
+            self._instruction_state.pending.clear()
+            raise
+
+    def _effective_system(self) -> str:
+        parts = (self.system, *(part() for part in self.system_contributions), self._instruction_state.render())
+        return "\n\n".join(filter(None, parts))
+
+    def _apply_tool_guards(self, tools: list[Tool[Any]]) -> list[Tool[Any]]:
+        """Append application guards to every tool, including newly loaded tools."""
+        if not self.tool_guards:
+            self._guarded_tools.clear()
+            return tools
+        cached: dict[int, tuple[Tool[Any], tuple[PermissionGuard, ...], Tool[Any]]] = {}
+        result: list[Tool[Any]] = []
+        for tool in tools:
+            entry = self._guarded_tools.get(id(tool))
+            if entry is None or entry[0] is not tool or entry[1] != self.tool_guards:
+                guards = (*tool.guards, *(guard for guard in self.tool_guards if guard not in tool.guards))
+                guarded = replace(tool, guards=guards)
+                # Guard wrappers share the provider tool's concurrency budget across agents.
+                object.__setattr__(guarded, "_semaphore", tool._semaphore)
+                entry = (tool, self.tool_guards, guarded)
+            cached[id(tool)] = entry
+            result.append(entry[2])
+        self._guarded_tools = cached
+        return result
 
     def copy(self, **overrides: Any) -> Self:
-        """Return a new Agent with *overrides* applied."""
+        """Return a new Agent with fresh instruction state and *overrides* applied."""
+        overrides.setdefault("instructions", list(self.instructions))
+        overrides.setdefault("providers", list(self.providers))
         return dataclasses.replace(self, **overrides)
 
     def run_stream(self, user_message: str, context: ContextStore) -> AgentStream:
@@ -315,10 +410,53 @@ class Agent:
 
     async def dispatch_tools(self, blocks: list[ToolUseBlock], iteration: int) -> list[ToolResultBlock]:
         logger.info("Dispatching %d tool(s): %r", len(blocks), blocks)
-        results = list(await asyncio.gather(*[self._call_one(b) for b in blocks]))
+        runnable, deferred = await self._preflight_tools(blocks, iteration)
+        results = [*deferred, *await asyncio.gather(*[self._call_one(b) for b in runnable])]
         error_count = sum(1 for r in results if r.is_error)
         logger.info("Tools complete: %d total, %d errors", len(results), error_count)
         return results
+
+    async def _preflight_tools(
+        self, blocks: list[ToolUseBlock], iteration: int
+    ) -> tuple[list[ToolUseBlock], list[ToolResultBlock]]:
+        """Get replacement results before any handler in this batch can run.
+
+        The callback can defer all calls or a subset. Each returned result must
+        refer to a distinct call in this batch. Exceptions fail the whole batch;
+        cancellation propagates to the normal interrupted-result handling.
+        """
+        hooks = (*((self.before_tools,) if self.before_tools is not None else ()), *self.before_tools_hooks)
+        if not hooks:
+            return blocks, []
+        try:
+            results: list[ToolResultBlock] = []
+            remaining = blocks
+            for hook in hooks:
+                if not remaining:
+                    break
+                replacement = await hook(remaining, iteration)
+                ids = [result.tool_use_id for result in replacement]
+                deferred_ids = set(ids)
+                if len(deferred_ids) != len(ids) or not deferred_ids <= {block.id for block in remaining}:
+                    raise ValueError("Tool preflight returned duplicate or unknown call IDs")
+                results.extend(replacement)
+                remaining = [block for block in remaining if block.id not in deferred_ids]
+            if self._instruction_state.pending:
+                return [], [
+                    ToolResultBlock(
+                        tool_use_id=block.id,
+                        content="Instructions changed. Review the updated instructions before retrying this batch.",
+                        is_error=True,
+                    )
+                    for block in blocks
+                ]
+        except Exception as error:
+            self._instruction_state.pending.clear()
+            return [], [
+                ToolResultBlock(tool_use_id=block.id, content=f"Tool preflight failed: {error}", is_error=True)
+                for block in blocks
+            ]
+        return remaining, results
 
     async def _dispatch_tools_streaming(
         self,
@@ -328,6 +466,7 @@ class Agent:
     ) -> list[ToolResultBlock]:
         """Like dispatch_tools but pushes ToolOutputDelta events for streaming tools."""
         logger.info("Dispatching %d tool(s) with streaming: %r", len(blocks), blocks)
+        runnable, deferred = await self._preflight_tools(blocks, iteration)
 
         async def _run_one(block: ToolUseBlock) -> ToolResultBlock:
             tool = self._find_tool(block.name)
@@ -345,13 +484,24 @@ class Agent:
                 return ToolResultBlock(tool_use_id=block.id, content=str(exc), is_error=True)
             return ToolResultBlock(tool_use_id=block.id, content=tool.format_stream_result(chunks))
 
-        results = list(await asyncio.gather(*[_run_one(b) for b in blocks]))
+        results = [*deferred, *await asyncio.gather(*[_run_one(b) for b in runnable])]
         error_count = sum(1 for r in results if r.is_error)
         logger.info("Tools complete: %d total, %d errors", len(results), error_count)
         return results
 
     def _find_tool(self, name: str) -> Tool[Any] | None:
-        for tool in self.tools:
+        return self.get_tool(name)
+
+    def get_tool(self, name: str) -> Tool[Any] | None:
+        """Return the dispatchable tool, including its access declaration and guards.
+
+        During a run this uses the current iteration's selected tool set.
+        Preflight hooks can inspect effects without accessing a second registry.
+        """
+        tools = self._iteration_tools
+        if tools is None:
+            tools = self.get_tools()
+        for tool in tools:
             if tool.name == name:
                 return tool
         return None
@@ -679,6 +829,18 @@ class Agent:
 
         try:
             for iteration in range(1, self.max_iterations + 1):
+                try:
+                    if self.before_turn is not None:
+                        await self.before_turn(iteration)
+                    for hook in self.before_turn_hooks:
+                        await hook(iteration)
+                    tools = self._apply_tool_guards(await self._prepare_instructions())
+                    system = self._effective_system()
+                except Exception as exc:
+                    yield Error(exception=exc)
+                    yield SessionEndEvent(stop_reason=StopReason.error, total_usage=total_usage)
+                    session_end_emitted = True
+                    return
                 history = await context.get_history()
                 logger.info("Iteration %d, history length=%d", iteration, len(history))
                 effective_history = (
@@ -691,10 +853,11 @@ class Agent:
                 if model_caps is not None and Capability.tool_use not in model_caps:
                     active_tools: list[Tool[Any]] = []
                 else:
-                    active_tools = list(await self._select_tools(effective_history, self.tools))
+                    active_tools = list(await self._select_tools(effective_history, tools))
+                self._iteration_tools = active_tools
 
                 turn = _Turn()
-                stream = self.transport.stream(effective_history, active_tools, self.system)
+                stream = self.transport.stream(effective_history, active_tools, system)
                 try:
                     # `_consume` closes the stream in its `finally`, which runs only on close.
                     # Left to the collector, a caller that walked away held the response open.
@@ -828,3 +991,6 @@ class Agent:
             if not session_end_emitted:
                 yield SessionEndEvent(stop_reason=StopReason.error, total_usage=total_usage)
             raise
+        finally:
+            self._iteration_tools = None
+            self._instruction_state.pending.clear()

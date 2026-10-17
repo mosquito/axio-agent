@@ -9,7 +9,7 @@ import platform
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 import aiohttp
 from axio.events import (
@@ -18,11 +18,11 @@ from axio.events import (
 from axio.exceptions import StreamError
 from axio.messages import Message
 from axio.models import Capability, ModelRegistry, ModelSpec
-from axio.retry import is_retryable, retry_delay
+from axio.retry import retry_delay
 from axio.schema import strip_title
 from axio.tool import Tool
 from axio.transport import CompletionTransport
-from axio_responses import STOP_REASONS, Responses, convert_messages, convert_tools
+from axio_responses import STOP_REASONS, Responses, ResponsesAPIError, convert_messages, convert_tools, request_id
 
 from .oauth import CLIENT_ID, ORIGINATOR, TOKEN_URL, _decode_jwt_payload
 
@@ -60,6 +60,13 @@ _convert_messages = convert_messages
 
 @dataclass(slots=True)
 class CodexTransport(CompletionTransport):
+    display_name: ClassVar[str] = "ChatGPT (Codex)"
+    env_vars: ClassVar[tuple[str, ...]] = ()
+    supports_temperature: ClassVar[bool] = False
+    supports_max_tokens: ClassVar[bool] = False
+    supports_debug: ClassVar[bool] = False
+    supports_thinking: ClassVar[bool] = False
+
     name: str = "ChatGPT (Codex)"
     api_key: str = ""
     refresh_token: str = ""
@@ -156,7 +163,7 @@ class CodexTransport(CompletionTransport):
 
     async def _parse_sse(self, resp: aiohttp.ClientResponse) -> AsyncIterator[StreamEvent]:
         """Parse Responses API SSE events into axio StreamEvents."""
-        turn = Responses()
+        turn = Responses(status=resp.status, request_id=request_id(resp.headers))
         async for made in turn.over(resp.content.iter_any(), until="[DONE]"):
             yield made
         yield turn.finished()
@@ -211,9 +218,10 @@ class CodexTransport(CompletionTransport):
                         return
 
                     body = await resp.text()
-                    if is_retryable(resp.status):
+                    error = ResponsesAPIError.from_http(body, status=resp.status, headers=resp.headers)
+                    if error.retryable:
                         retry_resp = resp
-                        last_exc = StreamError(f"Codex API error {resp.status}: {body}")
+                        last_exc = error
                         logger.warning(
                             "Retryable HTTP %d (attempt %d/%d): %s",
                             resp.status,
@@ -223,7 +231,7 @@ class CodexTransport(CompletionTransport):
                         )
                     else:
                         logger.error("HTTP %d from %s: %s", resp.status, url, body)
-                        raise StreamError(f"Codex API error {resp.status}: {body}")
+                        raise error
             except aiohttp.ClientError as exc:
                 last_exc = StreamError(str(exc))
                 logger.warning("Connection error (attempt %d/%d): %s", attempt, self.max_retries, exc)

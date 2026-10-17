@@ -6,7 +6,7 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from axio.exceptions import StreamError
 from axio.messages import Message
@@ -22,6 +22,18 @@ _UNSET = ModelSpec(id="<not initialized: call fetch_models() first>", context_wi
 
 @dataclass(slots=True)
 class NebiusTransport(ThinkingMixin, OpenAITransport):
+    default_models: ClassVar[dict[str, str]] = {
+        "chat": "MiniMaxAI/MiniMax-M2.5",
+        "vision": "Qwen/Qwen2.5-VL-72B-Instruct",
+    }
+
+    display_name: ClassVar[str] = "Nebius"
+    env_vars: ClassVar[tuple[str, ...]] = ("NEBIUS_API_KEY",)
+    supports_temperature: ClassVar[bool] = False
+    supports_max_tokens: ClassVar[bool] = False
+    supports_debug: ClassVar[bool] = False
+    supports_thinking: ClassVar[bool] = True
+
     # These point at servers that implement /v1/chat/completions and not /v1/responses.
     api: Literal["responses", "chat"] = field(default="chat", kw_only=True)
     name: str = "Nebius AI Studio"

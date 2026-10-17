@@ -12,3 +12,4 @@ _build/
 .DS_Store
 *.sqlite
 *.db
+.axio/mcp.local.json

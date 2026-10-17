@@ -1,0 +1,18 @@
+[project]
+name = "axio-fixture-transport"
+version = "0.0.1"
+requires-python = ">=3.12"
+dependencies = ["axio"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.entry-points."axio.transport"]
+fixture-plugin = "fixture_transport:plugin"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fixture_transport"]
+
+[project.entry-points."axio.tools.providers"]
+fixture-instructions = "fixture_transport.instructions:Provider"

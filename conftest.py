@@ -7,9 +7,10 @@ any test conftest runs) ensures Python resolves it from the editable install.
 
 import sys
 
-import axio  # noqa: F401
 import axio_transport_anthropic  # noqa: F401
 import axio_transport_openai  # noqa: F401
+
+import axio  # noqa: F401
 
 # Some markdown-pytest examples (e.g. axio/README.md) replace
 # ``axio_transport_openai`` in ``sys.modules`` with a stub for documentation
@@ -18,6 +19,6 @@ import axio_transport_openai  # noqa: F401
 _REAL_AXIO_TRANSPORT_OPENAI = sys.modules["axio_transport_openai"]
 
 
-def pytest_runtest_setup(item):  # noqa: D401, ARG001
+def pytest_runtest_setup(item):
     """Restore real ``axio_transport_openai`` before every test."""
     sys.modules["axio_transport_openai"] = _REAL_AXIO_TRANSPORT_OPENAI

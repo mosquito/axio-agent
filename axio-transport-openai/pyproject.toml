@@ -12,13 +12,17 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 keywords = ["llm", "agent", "ai", "openai", "transport", "openai-compatible"]
-dependencies = ["axio", "axio-responses", "axio-sse", "aiohttp>=3.11"]
+dependencies = ["axio", "axio-responses", "axio-sse", "aiohttp>=3.11", "PyJWT[crypto]>=2.10.1", "yarl>=1.18"]
 
 [project.optional-dependencies]
 tui = ["textual>=2.1.0"]
 examples = ["partial-json-parser>=0.2"]
 
+[project.scripts]
+axio-chatgpt = "axio_transport_openai.cli:main"
+
 [project.entry-points."axio.transport"]
+chatgpt = "axio_transport_openai:ChatGPTTransport"
 openai = "axio_transport_openai:OpenAITransport"
 nebius = "axio_transport_openai.nebius:NebiusTransport"
 openrouter = "axio_transport_openai.openrouter:OpenRouterTransport"
@@ -28,6 +32,7 @@ openai-custom = "axio_transport_openai.custom:OpenAICompatibleTransport"
 openai = "axio_transport_openai:OpenAIRealtimeTransport"
 
 [project.entry-points."axio.transport.settings"]
+chatgpt = "axio_transport_openai.tui.chatgpt:ChatGPTSettingsScreen"
 openai = "axio_transport_openai.tui:OpenAISettingsScreen"
 nebius = "axio_transport_openai.tui:NebiusSettingsScreen"
 openrouter = "axio_transport_openai.tui:OpenRouterSettingsScreen"

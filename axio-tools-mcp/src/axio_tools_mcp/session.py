@@ -12,12 +12,22 @@ from typing import Any
 
 import aiohttp
 from aiohttp_tiny_mcp import CallToolResult, Client, ClientError, StdioClient
-from aiohttp_tiny_mcp.adapter import Adapter
-from aiohttp_tiny_mcp.client_base import BaseClient
-from aiohttp_tiny_mcp.models import Implementation, ToolDef
+from aiohttp_tiny_mcp.client.base import BaseClient
+from aiohttp_tiny_mcp.protocol.adapter import Adapter
+from aiohttp_tiny_mcp.protocol.core import Operation
+from aiohttp_tiny_mcp.protocol.models import (
+    Implementation,
+    ListResourceTemplatesResult,
+    ReadResourceResult,
+    ResourceDef,
+    ResourceTemplateDef,
+    ToolDef,
+)
 from aiohttp_tiny_mcp.protocol.selection import AdapterSet
 
 from .config import MCPServerConfig
+from .oauth import StoredOAuth, open_oauth
+from .timeouts import mcp_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -87,10 +97,13 @@ class MCPSession:
         self.config = config
         self.client: BaseClient | None = None
         self.http: aiohttp.ClientSession | None = None
+        self.oauth: StoredOAuth | None = None
         self.process: asyncio.subprocess.Process | None = None
         self.stderr_task: Task[None] | None = None
         # stdio carries every request on one channel, so calls must not interleave.
         self.lock: asyncio.Lock | None = None
+        self.server_capabilities: dict[str, Any] = {}
+        self.server_instructions = ""
 
     @property
     def is_connected(self) -> bool:
@@ -109,15 +122,17 @@ class MCPSession:
         if wanted not in ADAPTERS.by_version:
             raise ValueError(f"Unsupported MCP protocol version {wanted!r}")
         try:
-            await self.open(wanted)
-        except ClientError as error:
-            # A server that speaks neither revision names the ones it does.
-            second = None if self.config.protocol_version else supported_version(error)
-            await self.close()
-            if second is None:
-                raise
-            logger.info("MCP server %r refused %s and requires %s", self.config.name, wanted, second)
-            await self.open(second)
+            async with mcp_timeout(self.config.timeout, "Connection and handshake"):
+                try:
+                    await self.open(wanted)
+                except ClientError as error:
+                    # A server that speaks neither revision names the ones it does.
+                    second = None if self.config.protocol_version else supported_version(error)
+                    await self.close()
+                    if second is None:
+                        raise
+                    logger.info("MCP server %r refused %s and requires %s", self.config.name, wanted, second)
+                    await self.open(second)
         except BaseException:
             await self.close()
             raise
@@ -129,10 +144,12 @@ class MCPSession:
         if self.config.command is not None:
             self.client = await self.connect_stdio(adapter)
         elif self.config.url is not None:
+            if self.config.oauth is not None:
+                self.oauth = await open_oauth(self.config)
             self.client = self.connect_http(adapter)
         else:
             raise ValueError("No command or url configured")
-        await asyncio.wait_for(self.handshake(), timeout=self.config.timeout)
+        await self.handshake()
 
     async def connect_stdio(self, adapter: Adapter) -> StdioClient:
         """Start the server process and talk to its standard streams."""
@@ -144,6 +161,7 @@ class MCPSession:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=self.environment(),
+            cwd=self.config.cwd,
             limit=STDIO_LINE_LIMIT,
         )
         self.process = process
@@ -158,12 +176,16 @@ class MCPSession:
         assert self.config.url is not None
         timeout = aiohttp.ClientTimeout(connect=self.config.timeout, sock_read=self.config.timeout)
         self.http = aiohttp.ClientSession(headers=self.config.headers or None, timeout=timeout)
-        return Client(self.config.url, adapter, session=self.http, client_info=client_info())
+        return Client(self.config.url, adapter, session=self.http, client_info=client_info(), auth=self.oauth)
 
     async def handshake(self) -> None:
         """Initialize, then follow the server to the revision it answered with."""
         assert self.client is not None
         result = await self.client.initialize()
+        instructions = result.get("instructions")
+        self.server_instructions = instructions if isinstance(instructions, str) else ""
+        capabilities = result.get("capabilities")
+        self.server_capabilities = capabilities if isinstance(capabilities, dict) else {}
         agreed = result.get("protocolVersion")
         if not isinstance(agreed, str) or agreed == self.client.adapter.version:
             return
@@ -180,8 +202,8 @@ class MCPSession:
         self.client.adapter = adapter
 
     def environment(self) -> dict[str, str]:
-        """Return the child environment: this process's, plus the configured extras."""
-        env = dict(os.environ)
+        """Return configured variables, optionally added to the parent environment."""
+        env = dict(os.environ) if self.config.inherit_env else {}
         if self.config.env:
             env.update(self.config.env)
         return env
@@ -223,14 +245,42 @@ class MCPSession:
             raise RuntimeError(f"MCP tool {name!r} requires input this client cannot supply")
         return result
 
+    async def list_resources(self) -> list[ResourceDef]:
+        """List resources using the same connection and stdio lock as tools."""
+        if self.client is None:
+            raise RuntimeError("Not connected")
+        async with self.exclusive():
+            return await self.client.list_resources()
+
+    async def read_resource(self, uri: str) -> ReadResourceResult:
+        """Read a resource from this server without resolving its URI locally."""
+        if self.client is None:
+            raise RuntimeError("Not connected")
+        async with self.exclusive():
+            return await self.client.read_resource(uri)
+
+    async def list_resource_templates(self) -> list[ResourceTemplateDef]:
+        """List every resource template using the connection's pagination and lock."""
+        if self.client is None:
+            raise RuntimeError("Not connected")
+        templates: list[ResourceTemplateDef] = []
+        async with self.exclusive():
+            async for page in self.client.pages(Operation.LIST_RESOURCE_TEMPLATES):
+                templates.extend(ListResourceTemplatesResult.model_validate(page).resource_templates)
+        return templates
+
     async def close(self) -> None:
         """Close the session and release resources."""
         connected = self.client is not None
         self.client = None
+        self.server_capabilities = {}
         self.lock = None
         if self.http is not None:
             await self.http.close()
             self.http = None
+        if self.oauth is not None:
+            await self.oauth.__aexit__()
+            self.oauth = None
         if self.process is not None:
             await stop_process(self.process)
             self.process = None

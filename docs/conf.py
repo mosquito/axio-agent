@@ -1,7 +1,6 @@
 import os
 import sys
 
-
 project = "Axio"
 copyright = "2025, Axio contributors"
 author = "Axio contributors"

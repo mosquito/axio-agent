@@ -2,20 +2,29 @@
 
 from __future__ import annotations
 
-import inspect
-import logging
-from collections.abc import Callable
 from importlib.metadata import entry_points
 from typing import Any, Protocol, runtime_checkable
 
 from axio.permission import PermissionGuard
+from axio.plugins import (
+    ToolLifecycle,
+    load_entry_points,
+)
+from axio.plugins import (
+    discover_guards as core_discover_guards,
+)
+from axio.plugins import (
+    discover_selectors as core_discover_selectors,
+)
+from axio.plugins import (
+    discover_tools as core_discover_tools,
+)
 from axio.tool import Tool
-
-logger = logging.getLogger(__name__)
+from axio.transport import discover_transports as discover_transports
 
 
 @runtime_checkable
-class ToolsPlugin(Protocol):
+class ToolsPlugin(ToolLifecycle, Protocol):
     """Protocol for dynamic tool provider plugins.
 
     Plugins register via the ``axio.tools.settings`` entry point group.
@@ -26,14 +35,7 @@ class ToolsPlugin(Protocol):
     @property
     def label(self) -> str: ...
 
-    async def init(self, config: Any = None, global_config: Any = None) -> None: ...
-
-    @property
-    def all_tools(self) -> list[Tool[Any]]: ...
-
     def settings_screen(self) -> Any: ...
-
-    async def close(self) -> None: ...
 
 
 TOOLS_GROUP = "axio.tools"
@@ -44,109 +46,54 @@ TOOLS_SETTINGS_GROUP = "axio.tools.settings"
 SELECTOR_GROUP = "axio.selector"
 
 
-def _make_tool(ep_name: str, handler: Callable[..., Any]) -> Tool[Any]:
-    """Build a Tool from an entry-point handler (plain async function or callable)."""
-    concurrency: int | None = getattr(handler, "_tool_concurrency", None)
-    return Tool(name=ep_name, handler=handler, concurrency=concurrency)
-
-
 def discover_tools() -> list[Tool[Any]]:
-    """Load handler callables from 'axio.tools' entry points, build Tool objects."""
-    tools: list[Tool[Any]] = []
-    for ep in entry_points(group=TOOLS_GROUP):
-        try:
-            handler = ep.load()
-        except Exception:
-            logger.warning("Failed to load tool entry point %r", ep.name, exc_info=True)
-            continue
-        if not callable(handler):
-            logger.warning("Entry point %r is not callable, skipping", ep.name)
-            continue
-        if not inspect.iscoroutinefunction(handler):
-            logger.warning("Entry point %r is not an async callable, skipping", ep.name)
-            continue
-        tools.append(_make_tool(ep.name, handler))
-    return tools
+    """Return handlers from the shared core catalog."""
+    return list(core_discover_tools(points=entry_points(group=TOOLS_GROUP)).entries.values())
 
 
 def discover_tools_by_package() -> dict[str, list[Tool[Any]]]:
-    """Return tools from 'axio.tools' entry points grouped by distribution package name."""
+    """Group the shared tool catalog by its declaring distribution."""
+    catalog = core_discover_tools(points=entry_points(group=TOOLS_GROUP))
     groups: dict[str, list[Tool[Any]]] = {}
-    for ep in entry_points(group=TOOLS_GROUP):
-        try:
-            handler = ep.load()
-        except Exception:
-            logger.warning("Failed to load tool entry point %r", ep.name, exc_info=True)
-            continue
-        if not callable(handler) or not inspect.iscoroutinefunction(handler):
-            continue
-        pkg = ep.dist.name if ep.dist else "unknown"
-        groups.setdefault(pkg, []).append(_make_tool(ep.name, handler))
+    for name, tool in catalog.entries.items():
+        groups.setdefault(catalog.sources[name].distribution, []).append(tool)
     return groups
 
 
-def discover_transports() -> dict[str, type]:
-    """Load transport classes from 'axio.transport' entry points."""
-    transports: dict[str, type] = {}
-    for ep in entry_points(group=TRANSPORT_GROUP):
-        try:
-            cls = ep.load()
-        except Exception:
-            logger.warning("Failed to load transport entry point %r", ep.name, exc_info=True)
-            continue
-        transports[ep.name] = cls
-    return transports
+def _screen_from_target(name: str, target: Any) -> type:
+    if not isinstance(target, type):
+        raise TypeError("Expected a settings screen class")
+    return target
 
 
 def discover_transport_settings() -> dict[str, type]:
-    """Load settings screens from 'axio.transport.settings' entry points."""
-    screens: dict[str, type] = {}
-    for ep in entry_points(group=TRANSPORT_SETTINGS_GROUP):
-        try:
-            cls = ep.load()
-        except Exception:
-            logger.debug("Settings screen %r unavailable (likely missing textual)", ep.name)
-            continue
-        screens[ep.name] = cls
-    return screens
+    """Load UI screens with the same conflict rules as the core catalog."""
+    return load_entry_points(
+        TRANSPORT_SETTINGS_GROUP,
+        _screen_from_target,
+        points=entry_points(group=TRANSPORT_SETTINGS_GROUP),
+    ).entries
+
+
+def _tools_plugin_from_target(name: str, target: Any) -> ToolsPlugin:
+    plugin = target()
+    if not isinstance(plugin, ToolsPlugin):
+        raise TypeError("Expected a tool provider with a settings screen")
+    return plugin
 
 
 def discover_tools_plugins() -> dict[str, ToolsPlugin]:
-    """Load and instantiate tool plugins from 'axio.tools.settings' entry points."""
-    plugins: dict[str, ToolsPlugin] = {}
-    for ep in entry_points(group=TOOLS_SETTINGS_GROUP):
-        try:
-            cls = ep.load()
-            plugin: ToolsPlugin = cls()
-            plugins[ep.name] = plugin
-        except Exception:
-            logger.debug("Tools plugin %r unavailable", ep.name)
-            continue
-    return plugins
+    """Keep the legacy UI group separate from axio.tools.providers."""
+    return load_entry_points(
+        TOOLS_SETTINGS_GROUP,
+        _tools_plugin_from_target,
+        points=entry_points(group=TOOLS_SETTINGS_GROUP),
+    ).entries
 
 
 def discover_selectors() -> dict[str, type]:
-    """Return {ep_name: cls} from 'axio.selector' entry points."""
-    result: dict[str, type] = {}
-    for ep in entry_points(group=SELECTOR_GROUP):
-        try:
-            result[ep.name] = ep.load()
-        except Exception:
-            logger.warning("Failed to load selector EP %r", ep.name, exc_info=True)
-    return result
+    return dict(core_discover_selectors(points=entry_points(group=SELECTOR_GROUP)).entries)
 
 
 def discover_guards() -> dict[str, type[PermissionGuard]]:
-    """Load guard classes from 'axio.guards' entry points."""
-    guards: dict[str, type[PermissionGuard]] = {}
-    for ep in entry_points(group=GUARDS_GROUP):
-        try:
-            cls = ep.load()
-        except Exception:
-            logger.warning("Failed to load guard entry point %r", ep.name, exc_info=True)
-            continue
-        if not (isinstance(cls, type) and issubclass(cls, PermissionGuard)):
-            logger.warning("Entry point %r is not a PermissionGuard subclass, skipping", ep.name)
-            continue
-        guards[ep.name] = cls
-    return guards
+    return core_discover_guards(points=entry_points(group=GUARDS_GROUP)).entries

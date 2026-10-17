@@ -88,10 +88,12 @@ from axio.testing import StubTransport, make_text_response
 async def main():
     shared_context = MemoryContextStore()
 
-    transport = StubTransport([
-        make_text_response("Research result"),
-        make_text_response("Final summary"),
-    ])
+    transport = StubTransport(
+        [
+            make_text_response("Research result"),
+            make_text_response("Final summary"),
+        ]
+    )
 
     research_agent = Agent(
         system="Research the topic.",
@@ -123,7 +125,15 @@ repeats it.
 import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
-from axio import Agent, MemoryContextStore, StopReason, StreamEvent, TextDelta, Tool, Usage
+from axio import (
+    Agent,
+    MemoryContextStore,
+    StopReason,
+    StreamEvent,
+    TextDelta,
+    Tool,
+    Usage,
+)
 from axio.events import IterationEnd
 from axio.exceptions import StreamError
 from axio.messages import Message
@@ -132,7 +142,9 @@ from axio.messages import Message
 class RetryTransport:
     """Retries the wrapped transport on StreamError, with exponential backoff."""
 
-    def __init__(self, inner: Any, max_retries: int = 3, base_delay: float = 0.01) -> None:
+    def __init__(
+        self, inner: Any, max_retries: int = 3, base_delay: float = 0.01
+    ) -> None:
         self.inner = inner
         self.max_retries = max_retries
         self.base_delay = base_delay
@@ -176,7 +188,9 @@ class Flaky:
         if self.calls < 3:
             raise StreamError("503 Service Unavailable")
         yield TextDelta(index=0, delta="ok")
-        yield IterationEnd(iteration=0, stop_reason=StopReason.end_turn, usage=Usage(1, 1))
+        yield IterationEnd(
+            iteration=0, stop_reason=StopReason.end_turn, usage=Usage(1, 1)
+        )
 
 
 async def main() -> None:
@@ -184,6 +198,7 @@ async def main() -> None:
     agent = Agent(system="", transport=RetryTransport(flaky))
     assert await agent.run("hi", MemoryContextStore()) == "ok"
     assert flaky.calls == 3
+
 
 asyncio.run(main())
 ```
@@ -214,6 +229,7 @@ async def rate_limited_action(data: str) -> str:
     calls.append(now)
     return "done"
 
+
 call_log: list[float] = []
 tool = Tool(name="rate_limited_action", handler=rate_limited_action, context=call_log)
 ```
@@ -231,6 +247,7 @@ from axio import PermissionGuard, GuardError
 
 class ApiKeyGuard(PermissionGuard):
     """Ensure required environment variables are set."""
+
     required_keys = ("OPENAI_API_KEY",)
 
     async def check(self, handler: Any) -> Any:

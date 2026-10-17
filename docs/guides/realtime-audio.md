@@ -46,10 +46,13 @@ async def main() -> None:
     transport = GeminiLiveTransport()
 
     async with (
-        RealtimeAgent(system="You are a helpful assistant.", transport=transport) as agent,
+        RealtimeAgent(
+            system="You are a helpful assistant.", transport=transport
+        ) as agent,
         Microphone() as mic,
         Speaker() as spk,
     ):
+
         async def send_mic() -> None:
             async for chunk in mic:
                 await agent.send(chunk)
@@ -123,6 +126,7 @@ from axio_audio import DuplexAudio
 from axio.events import AudioOutputDelta
 
 async with DuplexAudio(sample_rate=48000, chunk_ms=20) as duplex:
+
     async def consume_mic() -> None:
         async for chunk in duplex.mic_chunks():
             await agent.send(chunk)
@@ -190,8 +194,8 @@ from axio.events import AudioOutputDelta, SpeechStarted
 async for ev in agent.events():
     match ev:
         case SpeechStarted():
-            spk.stop()                 # clear speaker buffer
-            await agent.interrupt()    # cancel tools, stop generation
+            spk.stop()  # clear speaker buffer
+            await agent.interrupt()  # cancel tools, stop generation
         case AudioOutputDelta(data=pcm):
             spk.feed(pcm)
 ```
@@ -222,7 +226,10 @@ For Vertex AI, use `VertexLiveTransport` and optionally call
 `probe_nearest_live_region()` to pick the fastest available region:
 
 ```python
-from axio_transport_google.realtime import VertexLiveTransport, probe_nearest_live_region
+from axio_transport_google.realtime import (
+    VertexLiveTransport,
+    probe_nearest_live_region,
+)
 
 region = await probe_nearest_live_region()
 transport = VertexLiveTransport(location=region, auto_region=True)

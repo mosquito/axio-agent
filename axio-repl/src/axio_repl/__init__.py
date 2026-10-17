@@ -12,20 +12,23 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import importlib.util
 import os
-import re
 import signal
 import sys
-from collections.abc import Callable, Iterator
-from importlib.metadata import entry_points
+from collections.abc import Callable
+from contextlib import AsyncExitStack
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import aiohttp
 from axio.agent import Agent
 from axio.context import MemoryContextStore
+from axio.credentials import CredentialError
 from axio.events import (
     AudioOutput,
+    BlockEnd,
     Citation,
     Error,
     ImageOutput,
@@ -43,16 +46,29 @@ from axio.events import (
     ToolUseStart,
     VideoOutput,
 )
-from axio.field import StrictStr
-from axio.models import Capability, ModelSpec
+from axio.exceptions import StreamError
+from axio.models import Capability, ModelRegistry, ModelSpec
+from axio.plugins import (
+    RefreshableToolProvider,
+    ToolProvider,
+    discover_tool_providers,
+    discover_tools,
+    standalone_tools,
+)
 from axio.tool import Tool
 from axio.tool_args import ToolArgStream
+from axio.transport import TransportEntry, TransportError, discover_transports, select_transport_model
 from axio.types import INCOMPLETE
-from axio_tools_local.list_files import list_files
-from axio_tools_local.patch_file import patch_file
-from axio_tools_local.read_file import read_file
-from axio_tools_local.shell import shell
-from axio_tools_local.write_file import write_file
+
+from .paths import ConfigPaths
+from .presentation import describe_local_skills, describe_mcp, explain_config
+from .unconfigured import UnconfiguredTransport
+
+if TYPE_CHECKING:
+    from .configuration import MCPConfiguration
+
+DEFAULT_MAX_BYTES = 128 * 1024
+
 
 _readline: Any
 try:
@@ -76,135 +92,35 @@ RED = "\033[31m"
 RESET = "\033[0m"
 
 
-# ── Custom search tool ───────────────────────────────────────────────
-
-
-async def search_files(
-    query: StrictStr,
-    path: StrictStr = ".",
-    regex: bool = False,
-    max_results: int = 100,
-) -> str:
-    """Search for text or regex patterns in files under a directory.
-    Returns matching lines with file paths and line numbers."""
-
-    def _search() -> str:
-        base = Path(path).resolve()
-        if not base.exists():
-            return f"error: path not found: {path}"
-
-        try:
-            pattern = re.compile(query) if regex else None
-        except re.error as exc:
-            return f"error: invalid regex: {exc}"
-
-        skip = {".git", ".venv", "__pycache__", "node_modules"}
-        matches: list[str] = []
-
-        files = [base] if base.is_file() else list(_iter_files(base, skip))
-        for file_path in files:
-            if len(matches) >= max_results:
-                break
-            try:
-                text = file_path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            for idx, line in enumerate(text.splitlines(), start=1):
-                found = pattern.search(line) if pattern else (query in line)
-                if found:
-                    matches.append(f"{file_path}:{idx}: {line}")
-                    if len(matches) >= max_results:
-                        break
-
-        if not matches:
-            return f"No matches for {query!r}"
-        return "\n".join(matches)
-
-    return await asyncio.to_thread(_search)
-
-
-def _iter_files(base: Path, skip: set[str]) -> Iterator[Path]:
-    for current_dir, dirs, files in os.walk(base):
-        dirs[:] = [d for d in dirs if d not in skip and not d.startswith(".")]
-        for name in sorted(files):
-            if not name.startswith("."):
-                yield Path(current_dir) / name
-
-
 # ── Tools ────────────────────────────────────────────────────────────
-
-TOOLS: list[Tool[Any]] = [
-    Tool(name="read_file", handler=read_file),
-    Tool(name="write_file", handler=write_file),
-    Tool(name="patch_file", handler=patch_file),
-    Tool(name="list_files", handler=list_files),
-    Tool(name="search_files", handler=search_files),
-    Tool(name="shell", handler=shell),
-]
 
 
 # ── Transport auto-detection ─────────────────────────────────────────
 
 
-def _discover_transports() -> dict[str, Callable[..., Any]]:
-    result: dict[str, Callable[..., Any]] = {}
-    for ep in entry_points(group="axio.transport"):
-        try:
-            result[ep.name] = ep.load()
-        except Exception:
-            pass
-    return result
-
-
-_TRANSPORT_ENV_VARS: dict[str, list[str]] = {
-    "google": ["GEMINI_API_KEY"],
-    "google-vertex": ["GOOGLE_GENAI_USE_VERTEXAI"],
-    "openai": ["OPENAI_API_KEY"],
-    "anthropic": ["ANTHROPIC_API_KEY"],
-    "nebius": ["NEBIUS_API_KEY"],
-    "openrouter": ["OPENROUTER_API_KEY"],
-}
-
-
-def _transport_has_credentials(name: str) -> bool:
-    env_vars = _TRANSPORT_ENV_VARS.get(name, [])
-    return any(os.environ.get(v, "") for v in env_vars)
-
-
-def _select_transport(name: str | None) -> tuple[Callable[..., Any], str]:
-    available = _discover_transports()
+async def _select_transport(name: str | None) -> TransportEntry:
+    catalog = discover_transports()
     if name:
-        if name not in available:
-            print(
-                f"Unknown transport {name!r}. Available: {', '.join(sorted(available))}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        return available[name], ""
-
-    for transport_name, cls in available.items():
-        if _transport_has_credentials(transport_name):
-            return cls, ""
-
-    print("No API key found. Set one of:", file=sys.stderr)
-    for transport_name in available:
-        env_vars = _TRANSPORT_ENV_VARS.get(transport_name, [])
-        if env_vars:
-            print(f"  {', '.join(env_vars)}  ({transport_name})", file=sys.stderr)
-    sys.exit(1)
+        return catalog.require(name)
+    for entry in catalog.entries.values():
+        if not entry.auto_select:
+            continue
+        try:
+            if entry.has_credentials() or (entry.auth is not None and await entry.auth.has_accounts()):
+                return entry
+        except Exception as error:
+            print(f"Transport {entry.name!r} credentials unavailable: {entry.format_error(error)}", file=sys.stderr)
+    hints = [f"{', '.join(entry.env_vars)} ({entry.name})" for entry in catalog.entries.values() if entry.env_vars]
+    accounts = [entry.name for entry in catalog.entries.values() if entry.auth is not None]
+    hint = "Set one of: " + "; ".join(hints) + ". " if hints else ""
+    if accounts:
+        hint += f"Use --transport <name> to sign in: {', '.join(accounts)}. "
+    if not catalog.entries:
+        hint += "Install a transport package. "
+    raise TransportError("No transports with credentials found. " + hint)
 
 
 # ── AGENTS.md & system prompt ────────────────────────────────────────
-
-
-def load_agents_instructions(root: Path) -> str:
-    agents_file = root / "AGENTS.md"
-    if not agents_file.exists():
-        return ""
-    try:
-        return agents_file.read_text(encoding="utf-8", errors="replace").strip()
-    except OSError:
-        return ""
 
 
 def build_system_prompt(
@@ -332,18 +248,58 @@ def setup_history() -> None:
 
 
 async def run_prompt(agent: Agent, ctx: MemoryContextStore, prompt: str) -> None:
+    if isinstance(agent.transport, UnconfiguredTransport):
+        print(agent.transport.reason, file=sys.stderr)
+        return
     in_text = False
+    reasoning_line_start = True
+    reasoning_index: int | None = None
     declined = False
     arg_streams: dict[str, ToolArgStream] = {}
     streamed_tool_ids: set[str] = set()
 
     async for event in agent.run_stream(prompt, ctx):
+        if not reasoning_line_start and (
+            isinstance(
+                event,
+                (
+                    TextDelta,
+                    Refusal,
+                    Citation,
+                    ImageOutput,
+                    AudioOutput,
+                    VideoOutput,
+                    ToolUseStart,
+                    ToolInputDelta,
+                    ToolOutputDelta,
+                    ToolResult,
+                    IterationEnd,
+                    Error,
+                    SessionEndEvent,
+                ),
+            )
+            or isinstance(event, BlockEnd)
+            and event.index == reasoning_index
+            or isinstance(event, ReasoningDelta)
+            and event.index != reasoning_index
+        ):
+            print()
+            reasoning_line_start = True
         match event:
-            case ReasoningDelta(delta=delta):
+            case ReasoningDelta(index=index, delta=delta):
+                if not delta:
+                    continue
                 if in_text:
                     print()
                     in_text = False
-                sys.stdout.write(f"{DIM}> {delta}{RESET}")
+                reasoning_index = index
+                sys.stdout.write(DIM)
+                for line in delta.splitlines(keepends=True):
+                    if reasoning_line_start:
+                        sys.stdout.write("> ")
+                    sys.stdout.write(line)
+                    reasoning_line_start = line.endswith("\n")
+                sys.stdout.write(RESET)
                 sys.stdout.flush()
 
             case TextDelta(delta=delta):
@@ -440,7 +396,8 @@ async def run_prompt(agent: Agent, ctx: MemoryContextStore, prompt: str) -> None
                 declined = False
 
             case Error(exception=exc):
-                print(f"\n{RED}Error: {exc}{RESET}", file=sys.stderr)
+                message = str(getattr(agent.transport, "format_error", str)(exc))
+                print(f"\n{RED}Error: {message}{RESET}", file=sys.stderr)
 
             case SessionEndEvent(stop_reason=reason, total_usage=usage):
                 if in_text:
@@ -542,6 +499,27 @@ def _apply_cli_args(args: object, commands: dict[str, Command]) -> None:
 # ── model ──
 
 
+def _model_listing(models: ModelRegistry) -> str:
+    return "Available models:\n" + ("\n".join(f"  {name}" for name in models.keys()) or "  (none)")
+
+
+def _select_model(transport: Any, model: ModelSpec, entry: TransportEntry | None = None) -> Any:
+    previous = getattr(transport, "reasoning_effort", None)
+    selected = entry.select_model(transport, model) if entry is not None else select_transport_model(transport, model)
+    if previous is not None and getattr(selected, "reasoning_effort", None) is None:
+        print(f"Reasoning effort reset to default: {model.id} does not support {previous!r}.")
+    return selected
+
+
+def _warn_missing_tools(model: ModelSpec, tools: list[Tool[Any]]) -> None:
+    if tools and Capability.tool_use not in model.capabilities:
+        print(
+            f"Tools are disabled for {model.id}: Axio has no declared tool support for this model. "
+            "Select another model with /model.",
+            file=sys.stderr,
+        )
+
+
 def _show_model(transport: Any) -> None:
     model = transport.model
     caps = ", ".join(sorted(c.value for c in model.capabilities))
@@ -550,29 +528,72 @@ def _show_model(transport: Any) -> None:
     print(f"Available: {', '.join(transport.models.keys())}")
 
 
-def _apply_model(
-    transport: Any,
-    agent: Agent,
-    tools: list[Tool[Any]],
-    root: Path,
-    agents_text: str,
-    arg: str,
-) -> None:
-    matches = transport.models.search(arg)
-    if len(matches) == 1:
-        transport.model = next(iter(matches.values()))
-        agent.system = build_system_prompt(root, transport.model, tools, agents_text)
-        print(f"Switched to {BOLD}{transport.model.id}{RESET}")
-    elif len(matches) == 0:
-        print(f"No model matching {arg!r}. Available: {', '.join(transport.models.keys())}")
-    else:
-        print(f"Ambiguous — matches: {', '.join(matches.keys())}")
+def _resolve_model_arg(transport: Any, model_id: str) -> ModelSpec:
+    resolver = getattr(transport, "resolve_model", None)
+    if callable(resolver):
+        return cast(ModelSpec, resolver(model_id))
+    return cast(ModelSpec, transport.models[model_id])
+
+
+@dataclass(slots=True)
+class REPLState:
+    """Own the inputs used to synchronize the agent's configuration."""
+
+    cwd: Path
+    transport: Any
+    providers: list[ToolProvider] = field(default_factory=list)
+    tools: list[Tool[Any]] = field(default_factory=list)
+    entry: TransportEntry | None = None
+    agent: Agent = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.agent = Agent(system="", transport=self.transport, tools=self.tools, providers=self.providers)
+        for provider in self.providers:
+            bind = getattr(provider, "bind", None)
+            if callable(bind):
+                bind(self.agent)
+        self.sync_agent()
+
+    def sync_agent(self) -> None:
+        model = self.transport.model
+        if model is None:
+            raise CredentialError("Select a visible model before starting the agent.")
+        if self.entry is not None:
+            self.entry.bind_tools(self.transport)
+        self.agent.transport = self.transport
+        self.agent.system = build_system_prompt(self.cwd, model, self.agent.get_tools(), "")
+
+    def change_model(self, arg: str) -> None:
+        try:
+            model = _resolve_model_arg(self.transport, arg)
+        except KeyError:
+            matches = self.transport.models.search(arg)
+        else:
+            matches = ModelRegistry([model])
+        if len(matches) == 1:
+            self.transport = _select_model(self.transport, next(iter(matches.values())), self.entry)
+        self.sync_agent()
+        if len(matches) == 1:
+            print(f"Switched to {BOLD}{self.transport.model.id}{RESET}")
+            _warn_missing_tools(self.transport.model, self.agent.get_tools())
+        elif len(matches) == 0:
+            print(f"No model matching {arg!r}.\n{_model_listing(self.transport.models)}", file=sys.stderr)
+        else:
+            print(f"Ambiguous — matches: {', '.join(matches.keys())}")
 
 
 # ── thinking ──
 
 
 def _show_thinking(transport: Any) -> None:
+    describe = getattr(transport, "describe_thinking", None)
+    if callable(describe):
+        print(describe())
+        return
+    if callable(getattr(transport, "supported_thinking_levels", None)):
+        print(f"Reasoning effort: {transport.reasoning_effort or 'default'}")
+        print(f"Valid levels: {', '.join(('default', *transport.supported_thinking_levels(transport.model)))}")
+        return
     level = getattr(transport, "thinking_level", None)
     budget = getattr(transport, "thinking_budget", None)
     get_opts = getattr(transport, "get_thinking_options", None)
@@ -590,6 +611,31 @@ def _show_thinking(transport: Any) -> None:
 
 
 def _apply_thinking(transport: Any, arg: str) -> None:
+    configure = getattr(transport, "configure_thinking", None)
+    if callable(configure):
+        try:
+            print(configure(arg))
+        except ValueError as error:
+            print(str(error), file=sys.stderr)
+        return
+    if not getattr(transport, "supports_thinking", True):
+        print("This transport does not support thinking settings.")
+        return
+    if callable(getattr(transport, "supported_thinking_levels", None)):
+        if arg == "default":
+            transport.reasoning_effort = None
+            print("Reasoning effort: default")
+            return
+        levels = transport.supported_thinking_levels(transport.model)
+        if arg not in levels:
+            print(
+                f"Unsupported reasoning effort {arg!r}. Valid levels: {', '.join(('default', *levels))}.",
+                file=sys.stderr,
+            )
+            return
+        transport.reasoning_effort = arg
+        print(f"Reasoning effort: {arg}")
+        return
     get_opts = getattr(transport, "get_thinking_options", None)
     valid_levels = get_opts() if get_opts else None
     if arg.isdigit():
@@ -620,6 +666,9 @@ def _show_temperature(transport: Any) -> None:
 
 
 def _apply_temperature(transport: Any, arg: str) -> None:
+    if not getattr(transport, "supports_temperature", True):
+        print("This transport does not support temperature.")
+        return
     try:
         val = float(arg)
     except ValueError:
@@ -662,6 +711,9 @@ def _show_max_tokens(transport: Any) -> None:
 
 
 def _apply_max_tokens(transport: Any, arg: str) -> None:
+    if not getattr(transport, "supports_max_tokens", True):
+        print("This transport does not support max output tokens.")
+        return
     model_default = getattr(getattr(transport, "model", None), "max_output_tokens", None)
     if arg == "default":
         transport.max_output_tokens = None
@@ -685,6 +737,9 @@ def _show_debug(transport: Any) -> None:
 
 
 def _apply_debug(transport: Any, arg: str) -> None:
+    if not getattr(transport, "supports_debug", True):
+        print("Request body debugging is not supported for this transport.")
+        return
     val = arg.lower()
     if val == "on":
         transport.debug = True
@@ -702,57 +757,286 @@ def _apply_debug(transport: Any, arg: str) -> None:
 async def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(description="REPL coding assistant (axio)")
+    if sys.argv[1:3] == ["mcp", "import"]:
+        if importlib.util.find_spec("axio_tools_mcp") is None:
+            raise ValueError("MCP is unavailable. Install axio-repl[mcp].")
+        from .mcp_import import import_main
+
+        import_main(sys.argv[3:])
+        return
+
+    parser = argparse.ArgumentParser(
+        description="REPL coding assistant (axio)",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     parser.add_argument("prompt", nargs="?", default=None, help="Single prompt (non-interactive)")
-    parser.add_argument("--transport", default=None, help="Transport name (auto-detected if omitted)")
+    catalog = discover_transports()
+    parser.add_argument(
+        "--transport",
+        choices=sorted(catalog.entries.keys() | catalog.errors.keys()),
+        default=None,
+        help="Transport name (auto-detected if omitted)",
+    )
     parser.add_argument("--model", default=None, help="Model name")
-    parser.add_argument("--temperature", type=float, default=None)
+    parser.add_argument("--account", help="OAuth account ID; defaults to the saved account selection")
+    parser.add_argument("--credentials", type=Path, help="Override the transport's OAuth credential file")
+    parser.add_argument("--temperature", type=float, default=None, help="Sampling temperature")
     parser.add_argument("--thinking", default=None, help="Thinking level or token budget (integer)")
     parser.add_argument("--max-tokens", type=int, default=None, help="Max output tokens")
-    parser.add_argument("--max-iterations", type=int, default=50)
+    parser.add_argument("--max-iterations", type=int, default=50, help="Maximum agent iterations")
     parser.add_argument("--debug", action="store_true", help="Log request/response bodies to stderr")
+    parser.add_argument("--project-root", type=Path, help="Project root containing the working directory")
+    parser.add_argument("--workspace-root", type=Path, action="append", default=[], help="Additional independent root")
+    parser.add_argument(
+        "--isolated", action="store_true", help="Disable automatic instructions, MCP, and local skills"
+    )
+    parser.add_argument(
+        "--skills-dir", type=Path, action="append", default=[], help="Additional local skills directory"
+    )
+    parser.add_argument("--skills-list", action="store_true", help="List local skills without starting a model or MCP")
+    parser.add_argument("--mcp-config", type=Path, action="append", default=[], help="Additional MCP configuration")
+    parser.add_argument(
+        "--config-explain", "--why", action="store_true", help="Explain configuration and check MCP without a model"
+    )
+    parser.add_argument(
+        "--instructions-file", type=Path, action="append", default=[], help="Explicit session instructions"
+    )
+    parser.add_argument(
+        "--instructions-max-bytes", type=int, default=DEFAULT_MAX_BYTES, help="Total instruction byte limit"
+    )
+    parser.add_argument(
+        "--instructions-explain", type=Path, metavar="PATH", help="Show applicable files without a model"
+    )
     args = parser.parse_args()
 
-    transport_cls, _ = _select_transport(args.transport)
-    root = Path.cwd().resolve()
-    agents_text = load_agents_instructions(root)
+    local_available = importlib.util.find_spec("axio_tools_local") is not None
+    mcp_available = importlib.util.find_spec("axio_tools_mcp") is not None
+    local_paths = None
+    instructions = None
+    configuration: dict[str, Any] = {"application": "repl"}
+    try:
+        workspace = ConfigPaths.discover(Path.cwd(), args.project_root, args.workspace_root)
+        if local_available:
+            from axio_tools_local.instructions import load_instructions
+            from axio_tools_local.paths import LocalPaths
+            from axio_tools_local.provider import LocalOptions
+            from axio_tools_local.skills import LocalSkills
+
+            local_paths = LocalPaths.discover(workspace.cwd, workspace.project_root, workspace.roots[1:])
+            instructions = load_instructions(
+                local_paths,
+                args.instructions_explain,
+                isolated=args.isolated,
+                files=args.instructions_file,
+                max_bytes=args.instructions_max_bytes,
+            )
+            configuration["local"] = LocalOptions(
+                workspace.cwd,
+                workspace.roots,
+                args.isolated,
+                tuple(args.instructions_file),
+                tuple(args.skills_dir),
+                args.instructions_max_bytes,
+            )
+        elif args.instructions_file or args.skills_dir or args.instructions_explain or args.skills_list:
+            parser.error("Local instructions and skills are unavailable. Install axio-repl[local].")
+    except ValueError as error:
+        parser.error(str(error))
+    if args.instructions_explain is not None:
+        assert instructions is not None and local_paths is not None
+        print(instructions.explain(local_paths, args.instructions_explain))
+        return
+    if args.skills_list:
+        local_skills = LocalSkills(workspace.cwd, directories=args.skills_dir, isolated=args.isolated)
+        await local_skills.reload()
+        print(describe_local_skills(local_skills))
+        return
+    mcp_projects: tuple[MCPConfiguration, ...] = ()
+    if mcp_available:
+        from axio_tools_mcp.provider import MCPToolProvider
+
+        from .configuration import connection_configs, load_mcp_config
+
+        mcp_projects = load_mcp_config(workspace, files=args.mcp_config, isolated=args.isolated)
+        configuration["mcp"] = connection_configs(mcp_projects)
+    elif args.mcp_config:
+        parser.error("MCP is unavailable. Install axio-repl[mcp].")
+    if args.config_explain:
+        print(explain_config(workspace, mcp_projects, instructions, local_paths))
+        if mcp_available:
+            diagnostic_mcp = MCPToolProvider()
+            try:
+                await diagnostic_mcp.reload(
+                    connection_configs(mcp_projects), reserved={"load_instruction", "read_local_skill"}
+                )
+                print("\nMCP connection check:")
+                print(describe_mcp(diagnostic_mcp.runtime, mcp_projects))
+            finally:
+                await diagnostic_mcp.close()
+        else:
+            print("MCP is unavailable. Install axio-repl[mcp].")
+        return
+
+    if args.transport is None and (args.account or args.credentials):
+        parser.error("--account and --credentials require an explicit --transport")
+    try:
+        entry = await _select_transport(args.transport)
+    except TransportError as error:
+        print(str(error), file=sys.stderr)
+        if args.transport is not None:
+            raise SystemExit(1) from None
+        reason = str(error)
+        entry = TransportEntry.from_target("unconfigured", lambda **kwargs: UnconfiguredTransport(reason))
+    if entry.auth is None and (args.account or args.credentials):
+        parser.error(f"Transport {entry.name!r} does not support account settings")
+    for option in ("temperature", "max_tokens", "debug", "thinking"):
+        value = getattr(args, option)
+        if value is not None and value is not False and not getattr(entry, f"supports_{option}"):
+            parser.error(f"Transport {entry.name!r} does not support --{option.replace('_', '-')}")
     setup_history()
+    if entry.auth is not None:
+        try:
+            await entry.auth.prompt_login_if_needed(args.credentials, args.account)
+        except Exception as error:
+            raise TransportError(entry.format_error(error)) from error
 
-    async with aiohttp.ClientSession() as session:
-        transport = transport_cls(session=session)
-        await transport.fetch_models()
+    async with aiohttp.ClientSession() as session, AsyncExitStack() as stack:
+        try:
+            transport = await stack.enter_async_context(
+                entry.open(session=session, account=args.account, credentials=args.credentials)
+            )
+        except Exception as error:
+            raise TransportError(entry.format_error(error)) from error
+        if args.model is not None:
+            try:
+                model = _resolve_model_arg(transport, args.model)
+            except KeyError:
+                diagnostic = getattr(transport, "model_selection_error", None)
+                detail = diagnostic(args.model) if callable(diagnostic) else f"Unknown model {args.model!r}."
+                parser.error(f"{detail}\n{_model_listing(transport.models)}")
+            transport = _select_model(transport, model, entry)
 
-        if args.model:
-            transport.model = transport.models[args.model]
+        levels_for = getattr(transport, "supported_thinking_levels", None)
+        if callable(levels_for):
+            levels = levels_for(transport.model)
+            default = getattr(transport, "default_reasoning_effort", None)
+            if args.thinking is None and default in levels:
+                transport.reasoning_effort = default
+            elif args.thinking is not None and args.thinking != "default" and args.thinking not in levels:
+                parser.error(
+                    f"Unsupported reasoning effort {args.thinking!r}. Valid levels: {', '.join(('default', *levels))}."
+                )
 
-        # Transport-level commands (available before agent creation).
+        providers = discover_tool_providers()
+        for name, issue in providers.errors.items():
+            print(f"Provider {name!r} unavailable: {issue}", file=sys.stderr)
+        stack.callback(entry.bind_tools, None)
+        for name, provider in list(providers.entries.items()):
+            provider_stack = await stack.enter_async_context(AsyncExitStack())
+            provider_stack.push_async_callback(provider.close)
+            try:
+                await provider.init(config=configuration)
+            except Exception as error:
+                print(f"Provider {name!r} failed: {error}", file=sys.stderr)
+                await provider_stack.aclose()
+                providers.errors[name] = str(error)
+                del providers.entries[name]
+        plain = discover_tools()
+        for name, issue in plain.errors.items():
+            print(f"Tool {name!r} unavailable: {issue}", file=sys.stderr)
+        state = REPLState(
+            workspace.cwd, transport, list(providers.entries.values()), standalone_tools(plain, providers), entry
+        )
+        agent = state.agent
+        agent.max_iterations = args.max_iterations
+
+        def setting(name: str, show: Callable[[Any], None], apply: Callable[[Any, str], None]) -> Command:
+            def change(value: str) -> None:
+                if not getattr(entry, f"supports_{name}"):
+                    print(f"Transport {entry.name!r} does not support {name.replace('_', ' ')}.")
+                    return
+                apply(state.transport, value)
+
+            return Command(lambda: show(state.transport), change)
+
         commands: dict[str, Command] = {
-            "/thinking": Command(lambda: _show_thinking(transport), lambda a: _apply_thinking(transport, a)),
-            "/temperature": Command(lambda: _show_temperature(transport), lambda a: _apply_temperature(transport, a)),
-            "/max-tokens": Command(lambda: _show_max_tokens(transport), lambda a: _apply_max_tokens(transport, a)),
-            "/debug": Command(lambda: _show_debug(transport), lambda a: _apply_debug(transport, a)),
+            "/thinking": setting("thinking", _show_thinking, _apply_thinking),
+            "/temperature": setting("temperature", _show_temperature, _apply_temperature),
+            "/max-tokens": setting("max_tokens", _show_max_tokens, _apply_max_tokens),
+            "/debug": setting("debug", _show_debug, _apply_debug),
         }
         _apply_cli_args(args, commands)
 
-        tools = list(TOOLS)
-        system = build_system_prompt(root, transport.model, tools, agents_text)
-        agent = Agent(
-            system=system,
-            tools=tools,
-            transport=transport,
-            max_iterations=args.max_iterations,
-        )
+        state.sync_agent()
+        _warn_missing_tools(state.transport.model, agent.get_tools())
         ctx = MemoryContextStore()
 
-        # Agent-dependent commands.
-        commands["/model"] = Command(
-            lambda: _show_model(transport),
-            lambda a: _apply_model(transport, agent, tools, root, agents_text, a),
-        )
+        def show_mcp() -> None:
+            if not mcp_available:
+                print("MCP is unavailable. Install axio-repl[mcp].")
+                return
+            from axio_tools_mcp.provider import MCPToolProvider
+
+            active = [provider for provider in state.providers if isinstance(provider, MCPToolProvider)]
+            for provider in active:
+                print(describe_mcp(provider.runtime, mcp_projects))
+            if not active:
+                print("No MCP provider is active.")
+
+        commands["/mcp"] = Command(show_mcp, lambda _: print("Usage: /mcp [reload]"))
+
+        def show_skills() -> None:
+            for provider in state.providers:
+                for instruction in provider.get_instructions():
+                    print(f"{instruction.id}: {instruction.summary}")
+            if not any(provider.get_instructions() for provider in state.providers):
+                print("No instructions or skills available.")
+
+        commands["/skills"] = Command(show_skills, lambda _: print("Usage: /skills [reload]"))
+
+        async def refresh_providers() -> None:
+            for name, provider in providers.entries.items():
+                if isinstance(provider, RefreshableToolProvider):
+                    try:
+                        await provider.refresh(config=configuration)
+                    except Exception as error:
+                        print(f"Provider {name!r} reload failed: {error}", file=sys.stderr)
+
+        commands["/model"] = Command(lambda: _show_model(state.transport), state.change_model)
         commands["/iterations"] = Command(
             lambda: _show_iterations(agent),
             lambda a: _apply_iterations(agent, a),
         )
+
+        async def account_command(user_input: str) -> None:
+            auth = entry.auth
+            assert auth is not None
+            lowered = user_input.lower()
+            if lowered == "/account":
+                print(await auth.describe_accounts(args.credentials, state.transport))
+                return
+            if lowered == "/logout":
+                await auth.logout(state.transport)
+                await ctx.clear()
+                print("Local credentials cleared. Use /login to sign in again.")
+                return
+            selected_id = auth.account_id(state.transport)
+            if lowered == "/login":
+                selected_id = await auth.sign_in(args.credentials, selected_id)
+            else:
+                selected_id = user_input.split(maxsplit=1)[1].strip()
+            selected_transport = await stack.enter_async_context(
+                entry.open(
+                    session=session,
+                    credentials=args.credentials,
+                    account=selected_id,
+                )
+            )
+            await auth.select_account(args.credentials, selected_id)
+            state.transport = selected_transport
+            state.sync_agent()
+            await ctx.clear()
+            print(f"{entry.display_name} account ready. Model: {selected_transport.model.id}. History cleared.")
 
         loop = asyncio.get_event_loop()
         prompt_task: asyncio.Task[None] | None = None
@@ -766,6 +1050,8 @@ async def main() -> None:
 
         try:
             if args.prompt:
+                if isinstance(state.transport, UnconfiguredTransport):
+                    raise TransportError(state.transport.reason)
                 prompt_task = asyncio.create_task(run_prompt(agent, ctx, args.prompt))
                 try:
                     await prompt_task
@@ -776,8 +1062,12 @@ async def main() -> None:
                 return
 
             commands_list = ", ".join(["/help", *commands, "/quit"])
-            label = getattr(transport, "name", "unknown")
+            if entry.auth is not None:
+                commands_list += ", /account [ID], /login, /logout"
+            label = getattr(state.transport, "name", entry.display_name)
             print(f"REPL ready ({label}). Commands: {commands_list}")
+            if mcp_available:
+                show_mcp()
 
             while True:
                 try:
@@ -791,10 +1081,46 @@ async def main() -> None:
                 lowered = user_input.lower()
                 if lowered in {"/quit", "/exit", "/q"}:
                     break
+                if entry.auth is not None and (
+                    lowered in {"/account", "/login", "/logout"} or lowered.startswith("/account ")
+                ):
+                    prompt_task = asyncio.create_task(account_command(user_input))
+                    try:
+                        await prompt_task
+                    except asyncio.CancelledError:
+                        print(f"\n{DIM}[Account command interrupted]{RESET}")
+                    except Exception as error:
+                        print(entry.format_error(error), file=sys.stderr)
+                    finally:
+                        prompt_task = None
+                    continue
                 if lowered == "/help":
-                    tool_list = ", ".join(t.name for t in tools)
+                    tool_list = (
+                        ", ".join(t.name for t in agent.get_tools())
+                        if Capability.tool_use in state.transport.model.capabilities
+                        else "none (tool support is not declared for this model)"
+                    )
                     print(f"Type your request. Tools: {tool_list}")
                     print(f"Commands: {commands_list}")
+                    continue
+                if lowered in {"/skills reload", "/mcp reload"}:
+                    try:
+                        if lowered == "/mcp reload" and mcp_available:
+                            mcp_projects = load_mcp_config(workspace, files=args.mcp_config, isolated=args.isolated)
+                            configuration["mcp"] = connection_configs(mcp_projects)
+                        prompt_task = asyncio.create_task(refresh_providers())
+                        await prompt_task
+                    except asyncio.CancelledError:
+                        print(f"\n{DIM}[Provider reload interrupted]{RESET}")
+                    except ValueError as error:
+                        print(str(error), file=sys.stderr)
+                    finally:
+                        prompt_task = None
+                        state.sync_agent()
+                    if lowered == "/skills reload":
+                        show_skills()
+                    else:
+                        show_mcp()
                     continue
 
                 matched = False
@@ -810,6 +1136,7 @@ async def main() -> None:
                 if matched:
                     continue
 
+                state.sync_agent()
                 prompt_task = asyncio.create_task(run_prompt(agent, ctx, user_input))
                 try:
                     await prompt_task
@@ -826,6 +1153,9 @@ def main_sync() -> None:
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
+    except (TransportError, CredentialError, StreamError, aiohttp.ClientError, OSError, ValueError) as error:
+        print(str(error), file=sys.stderr)
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

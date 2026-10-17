@@ -8,7 +8,7 @@ top-level directories in the monorepo. A uv workspace manages them.
 | Package | Purpose | Entry Point Groups |
 |---------|---------|-------------------|
 | `axio` | Core framework | - |
-| `axio-context-sqlite` | SQLite-backed persistent context store | - |
+| `axio-context-sqlite` | SQLite-backed persistent context store | `axio.context` |
 | `axio-sse` | `text/event-stream` decoder and payload reader | - |
 | `axio-responses` | OpenAI Responses API: request items and stream events | - |
 | `axio-transport-anthropic` | Anthropic Claude transport | `axio.transport`, `axio.transport.settings` |
@@ -17,7 +17,7 @@ top-level directories in the monorepo. A uv workspace manages them.
 | `axio-transport-google` | Google Gemini transport + Gemini Live realtime | `axio.transport`, `axio.transport.realtime`, `axio.transport.settings`, `axio.tools` |
 | `axio-audio` | Microphone and speaker helpers for realtime agents | - |
 | `axio-tools-local` | Filesystem & shell tools | `axio.tools` |
-| `axio-tools-mcp` | MCP tool loader | `axio.tools.settings` |
+| `axio-tools-mcp` | MCP tools and instructions | `axio.tools.providers`, `axio.tools.settings` |
 | `axio-tools-docker` | Docker sandbox tools | - |
 | `axio-repl` | Interactive terminal coding assistant | - |
 | `axio-tui` | Textual chat application | `axio.tools` |
@@ -123,16 +123,19 @@ Dependencies: `axio`, `axio-sse`, `aiohttp>=3.11`
 
 OpenAI HTTP streaming transports. They post with `aiohttp` and read the stream
 through `axio-sse`. The Responses vocabulary itself lives in `axio-responses`.
-Four transports are registered as entry points:
+Five transports are registered as entry points:
 
 | Entry point name | Class | Provider |
 |---|---|---|
 | `openai` | `OpenAITransport` | OpenAI API |
+| `chatgpt` | `ChatGPTTransport` | ChatGPT subscription through the public Responses API |
 | `nebius` | `NebiusTransport` | Nebius AI Studio |
 | `openrouter` | `OpenRouterTransport` | OpenRouter |
 | `openai-custom` | `OpenAICompatibleTransport` | Any OpenAI-compatible endpoint |
 
-Settings screens are registered under `axio.transport.settings` for each.
+Settings screens are registered under `axio.transport.settings` for the four
+API-key transports. ChatGPT account commands and REPL integration are available;
+TUI provides **Configure ChatGPT** with the same credential store.
 `OpenAIRealtimeTransport` is registered under `axio.transport.realtime` as
 `openai`.
 
@@ -150,7 +153,15 @@ declarations the agent needs dispatched. The turn would then read as the model
 simply choosing to call nothing. A declaration whose name matches one already
 there wins.
 
-Dependencies: `axio`, `axio-responses`, `axio-sse`, `aiohttp>=3.11`
+`ChatGPTTransport` uses its own subscription request builder. Sign in with
+`axio-chatgpt login`, then use `axio-repl --transport chatgpt` or open the saved
+registration through `accounts.open_chatgpt()`. Credentials default to
+`$XDG_CONFIG_HOME/axio/chatgpt.auth` or `~/.config/axio/chatgpt.auth`.
+The package binds the shared `axio.credentials` file and SQLite backends to its
+account dataclass. Core also provides the generic store protocol for other backends.
+See {doc}`api/transport-openai` for session and transport APIs.
+
+Dependencies: `axio`, `axio-responses`, `axio-sse`, `aiohttp>=3.11`, `PyJWT[crypto]>=2.10`, `yarl>=1.18`
 
 ### axio-transport-codex
 
@@ -184,7 +195,7 @@ tokens are not inside `promptTokenCount`, and thinking is not inside
 
 See the {doc}`guides/google-transport` guide.
 
-Dependencies: `axio`, `axio-sse`, `axio-transport-anthropic[vertexai]`, `google-auth[urllib3]>=2.0`
+Dependencies: `axio`, `axio-sse`, `aiohttp>=3.11`, `google-auth[urllib3]>=2.0`
 
 `aiohttp` is not declared here. The HTTP client arrives through
 `axio-transport-anthropic`, which this package builds on for Vertex AI
@@ -217,7 +228,7 @@ Filesystem and shell tool handlers for local development:
 | `read_file` | `read_file` | Read file contents |
 | `list_files` | `list_files` | List directory contents |
 
-Dependencies: `axio`
+Dependencies: `axio`, `pyyaml>=6`
 
 ### axio-tools-mcp
 
@@ -227,7 +238,7 @@ returns regular `Tool` objects for explicit use in an agent.
 Entry points:
 - `axio.tools.settings` → `MCPPlugin`
 
-Dependencies: `axio`, `aiohttp-tiny-mcp>=0.3.0`, `aiohttp>=3.11`
+Dependencies: `axio`, `aiohttp-tiny-mcp>=0.3.0,<0.4`, `aiohttp>=3.11`, `pydantic>=2`
 
 ### axio-tools-docker
 
@@ -247,7 +258,7 @@ Dependencies: `axio`, `aiodocker>=0.26`
 
 ### axio-tui
 
-Textual chat application. Stores conversations with `axio-context-sqlite`. Keeps
+Textual chat application. Optionally stores conversations with `axio-context-sqlite`. Keeps
 per-project configuration in a database of its own. Discovers transports, tools,
 guards and settings screens through the entry-point groups above. Optional extras
 name the transports and tool packages it can drive: `anthropic`, `openai`,
@@ -258,7 +269,9 @@ Entry points:
 
 Console script: `axio = "axio_tui.__main__:main"`
 
-Dependencies: `axio`, `axio-context-sqlite`, `textual>=2.1.0`, `textual-serve>=1.1`, `argclass>=1.6`
+Dependencies: `axio`, `textual>=2.1.0`, `textual-serve>=1.1`, `argclass>=1.6`,
+`aiohttp>=3.11`, `aiosqlite>=0.20`, `rich>=13`, `pygments>=2.18`.
+The `history` extra installs `axio-context-sqlite`.
 
 ### axio-tui-guards
 
@@ -270,7 +283,26 @@ points, so the TUI can list them without importing them.
 Entry points:
 - `axio.guards` → `path` (`PathGuard`), `llm` (`LLMGuard`)
 
-Dependencies: `axio`, `axio-tui`
+Dependencies: `axio`. Textual dialogs are available through the `tui` extra.
+
+## Instruction and provider migration
+
+The former assistant package has been removed without compatibility re-exports.
+Use the existing packages directly:
+
+| Responsibility | Owner |
+|---|---|
+| `Instruction`, `LoadedInstruction`, provider discovery, activation | `axio.instructions`, `axio.plugins`, `Agent` |
+| Local paths, `AGENTS.md`, local skills, file search and preflight | `axio_tools_local` |
+| MCP server configuration, sessions, tools and instructions | `axio_tools_mcp` |
+| JSON file selection, configuration layers, commands and screens | REPL/TUI |
+
+Use `LocalToolProvider` with `LocalOptions`, then bind it separately to each agent.
+Use `MCPServerConfig.from_dict(name, parsed_entry)` for decoded MCP JSON. Feed these
+objects to `MCPToolProvider`, or call `await config.connect()` and own its session.
+No workspace object is passed into MCP. Local tools have no MCP dependency.
+Skills use the general instruction contract; their provider loads full content
+and supplies the tools needed to use it.
 
 ## REPL
 
@@ -283,6 +315,36 @@ and workspace-level `AGENTS.md` instructions.
 
 Console script: `axio-repl = "axio_repl:main_sync"`
 
+Use `--transport chatgpt` for a saved ChatGPT subscription account. The
+`axio-chatgpt` command from `axio-transport-openai` manages login, account selection,
+local status, visible models, and logout. `--account` and `--credentials` override
+the account and credential file for one REPL session.
+
 See the {doc}`guides/axio-repl` guide.
 
-Dependencies: `axio`, `axio-tools-local`, `axio-transport-openai`, `aiohttp>=3.11`
+Dependencies: `axio`, `aiohttp>=3.11`. Tools and transports are optional extras.
+
+
+## Package boundaries and installation checks
+
+Core `axio` and `axio-sse` have no required dependencies. Libraries depend on
+core, with shared protocol libraries permitted: Responses uses SSE; OpenAI and
+Codex use Responses; transports may use SSE. Google and Anthropic do not import
+one another. Libraries do not depend on REPL or TUI.
+
+REPL and TUI compose installed integrations through entry points. Their tool,
+transport, guard, and history integrations are optional. Textual remains a
+required dependency of TUI. `axio-tui[history]` adds SQLite conversation storage;
+without it, history is explicitly temporary. TUI configuration remains persistent.
+
+Run `make check-packages` for dependency declarations, entry-point ownership and
+source imports. The check distinguishes imports inside functions, type-checking
+imports and explicitly optional application adapters. Tests and examples are
+integration consumers and do not define library dependency boundaries.
+Control fixtures verify that forbidden imports and dependencies fail the check.
+
+Run `make test-packaging` for isolated wheel installations. This builds local
+wheels, pins every Axio dependency to those wheels, and tests outside the workspace.
+The matrix covers independent libraries, empty REPL/TUI installations, individual
+extras, and separate third-party tool-provider and transport entry points. Use
+`make test-packaging CASES="repl tui"` for a selected subset. CI runs the full matrix.

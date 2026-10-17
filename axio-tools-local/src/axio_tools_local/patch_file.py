@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import os
 import tempfile
@@ -5,6 +7,7 @@ import threading
 from pathlib import Path
 
 from axio.field import StrictStr
+from axio.tool_access import file_access, tool_access
 
 # Tracks absolute paths patched since the last read_file call for that path.
 # Cleared per-path when read_file reads the file; prevents double-patching
@@ -34,6 +37,7 @@ def clear_patched(path: str) -> None:
         _patched_files.discard(path)
 
 
+@tool_access(file_access("write", "file_path"))
 async def patch_file(
     file_path: StrictStr,
     from_line: int,

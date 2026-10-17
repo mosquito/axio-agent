@@ -1,10 +1,15 @@
+from __future__ import annotations
+
 import asyncio
 import os
 import subprocess
 import sys
 import tempfile
 
+from axio.tool_access import Access, tool_access
 
+
+@tool_access(lambda arguments: (Access("execute", arguments.get("cwd", ".")),))
 async def run_python(
     code: str,
     cwd: str = ".",

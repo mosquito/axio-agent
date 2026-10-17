@@ -21,12 +21,14 @@ Schema generation serves two critical functions in the axio framework:
 from axio import Tool, Field
 from typing import Annotated
 
+
 async def search(
     query: Annotated[str, Field(description="Search query")],
     limit: Annotated[int, Field(default=10, ge=1, le=100)] = 10,
 ) -> str:
     """Search the knowledge base."""
     return f"results for {query!r}"
+
 
 tool = Tool(name="search", handler=search)
 # tool.input_schema contains the JSON schema sent to the LLM
@@ -52,6 +54,7 @@ The schema builder maps Python types to JSON Schema types as follows:
 from typing import Literal, Optional, get_type_hints
 from axio.schema import build_tool_schema
 
+
 def example(
     name: str,
     count: int,
@@ -62,6 +65,7 @@ def example(
     description: Optional[str] = None,
 ) -> str:
     return "example"
+
 
 schema = build_tool_schema(example)
 assert schema["type"] == "object"
@@ -93,12 +97,14 @@ from typing import Annotated
 from axio import Field
 from axio.schema import build_tool_schema
 
+
 def constrained(
     username: Annotated[str, Field(description="User identifier")],
     age: Annotated[int, Field(ge=0, le=150)],
     score: Annotated[float, Field(ge=0.0, le=100.0)] = 0.0,
 ) -> str:
     return f"{username}: {age}"
+
 
 schema = build_tool_schema(constrained)
 props = schema["properties"]
@@ -127,13 +133,17 @@ from axio import Field
 from axio.field import MISSING
 from axio.schema import build_tool_schema
 
+
 def required_vs_optional(
-    required_str: str,                        # required
+    required_str: str,  # required
     annotated_required: Annotated[str, Field(description="no default")],  # required
-    optional_default: str = "default",        # optional
-    field_default: Annotated[str, Field(default="field")] = "x",  # optional (Field default)
+    optional_default: str = "default",  # optional
+    field_default: Annotated[
+        str, Field(default="field")
+    ] = "x",  # optional (Field default)
 ) -> str:
     return "test"
+
 
 schema = build_tool_schema(required_vs_optional)
 assert "required_str" in schema.get("required", [])
@@ -151,10 +161,14 @@ assert "field_default" not in schema.get("required", [])
 from axio import Field, Tool
 from typing import Annotated
 
-async def greet(name: Annotated[str, Field(description="Name to greet")],
-                repeat: Annotated[int, Field(default=1, ge=1, le=5)] = 1) -> str:
+
+async def greet(
+    name: Annotated[str, Field(description="Name to greet")],
+    repeat: Annotated[int, Field(default=1, ge=1, le=5)] = 1,
+) -> str:
     """Greet someone by name."""
     return " ".join([f"Hello, {name}!" for _ in range(repeat)])
+
 
 tool = Tool(name="greet", handler=greet)
 
@@ -183,10 +197,15 @@ tool = Tool(name="greet", handler=greet)
 from typing import Annotated, Literal
 from axio import Field
 
-def set_mode(mode: Annotated[Literal["on", "off", "toggle"], Field(description="Power mode")]) -> str:
+
+def set_mode(
+    mode: Annotated[Literal["on", "off", "toggle"], Field(description="Power mode")],
+) -> str:
     return f"Mode set to {mode}"
 
+
 from axio.schema import build_tool_schema
+
 schema = build_tool_schema(set_mode)
 assert schema["properties"]["mode"]["enum"] == ["on", "off", "toggle"]
 assert schema["properties"]["mode"]["description"] == "Power mode"
@@ -199,10 +218,13 @@ assert schema["properties"]["mode"]["description"] == "Power mode"
 from typing import Annotated
 from axio import Field
 
+
 def create_tags(tags: Annotated[list[str], Field(description="List of tags")]) -> str:
     return f"Created tags: {tags}"
 
+
 from axio.schema import build_tool_schema
+
 schema = build_tool_schema(create_tags)
 assert schema["properties"]["tags"]["type"] == "array"
 assert schema["properties"]["tags"]["items"]["type"] == "string"

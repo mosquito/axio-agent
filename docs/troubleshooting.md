@@ -155,10 +155,14 @@ from axio import Agent, MemoryContextStore, Refusal, StopReason, Usage
 from axio.events import IterationEnd, SessionEndEvent
 from axio.testing import StubTransport
 
-transport = StubTransport([[
-    Refusal(index=0, category="safety", blocked_input=True),
-    IterationEnd(0, StopReason.refusal, Usage(10, 0)),
-]])
+transport = StubTransport(
+    [
+        [
+            Refusal(index=0, category="safety", blocked_input=True),
+            IterationEnd(0, StopReason.refusal, Usage(10, 0)),
+        ]
+    ]
+)
 agent = Agent(system="You are helpful.", transport=transport)
 
 

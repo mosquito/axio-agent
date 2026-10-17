@@ -12,9 +12,13 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 keywords = ["llm", "agent", "ai", "tools", "filesystem", "shell"]
-dependencies = ["axio"]
+dependencies = ["axio", "pyyaml>=6"]
+
+[project.entry-points."axio.tools.providers"]
+local = "axio_tools_local.provider:LocalToolProvider"
 
 [project.entry-points."axio.tools"]
+search_files = "axio_tools_local.file_search:search_files"
 shell = "axio_tools_local.shell:shell"
 run_python = "axio_tools_local.run_python:run_python"
 write_file = "axio_tools_local.write_file:write_file"
@@ -56,6 +60,7 @@ dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "mypy>=1.14",
+    "types-pyyaml>=6",
     "ruff>=0.9",
     "pytest-cov>=7.1.0",
     "markdown-pytest>=0.6.0",

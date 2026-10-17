@@ -1,25 +1,35 @@
 """Permission guards for the Axio TUI."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import threading
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from axio.agent import Agent
-from axio.blocks import TextBlock, ToolUseBlock
+from axio.blocks import ToolUseBlock
 from axio.context import ContextStore
 from axio.exceptions import GuardError
-from axio.messages import Message
 from axio.permission import PermissionGuard
 
 if TYPE_CHECKING:
     from axio.tool import Tool
 
-from axio_tui.tools import Confirm
 
 type PromptFn = Callable[[str], Awaitable[str]]
+
+
+@dataclass(frozen=True, slots=True)
+class Confirm:
+    """A structured verdict produced by the guard's reviewer."""
+
+    verdict: Literal["SAFE", "RISKY", "DENY"]
+    reason: str
+    category: str
 
 
 class PathGuard(PermissionGuard):
@@ -50,7 +60,7 @@ class PathGuard(PermissionGuard):
     def _is_denied(self, path: str) -> bool:
         return path in self.denied
 
-    async def check(self, tool: "Tool[Any]", **kwargs: Any) -> dict[str, Any]:
+    async def check(self, tool: Tool[Any], **kwargs: Any) -> dict[str, Any]:
         path, field = self._extract_path(kwargs)
         if path is None or self._is_allowed(path):
             return kwargs
@@ -63,78 +73,63 @@ class PathGuard(PermissionGuard):
         if answer.lower() == "deny":
             self.denied.add(path)
             raise GuardError(f"Path denied: {field}={path!r}")
-        if not answer or answer.lower() == "n":
+        if answer.lower() != "y":
             raise GuardError(f"Path access denied: {field}={path!r}")
-        # "y" or anything else - allow this directory for future calls
+        # Explicit legacy approval grants this directory for future calls
         self.allowed.add(directory)
         return kwargs
 
 
 class LLMGuard(PermissionGuard):
-    """Agent-based guard. User overrides feed back into the context for learning."""
+    """Optional reviewer. The TUI uses review() as advice for its policy prompt."""
 
     def __init__(self, agent: Agent, context: ContextStore, prompt_fn: PromptFn | None = None) -> None:
         self.agent = agent
         self.context = context
-        self.allowed: set[str] = set()
         self._prompt = prompt_fn or ask_user
 
-    async def extract_confirm(self, context: ContextStore) -> Confirm:
-        """Find last confirm tool call from forked context."""
+    async def extract_confirm(self, context: ContextStore, *, since: int = 0) -> Confirm:
+        """Read a validated verdict from the current review only."""
         history = await context.get_history()
-        for msg in reversed(history):
+        for msg in reversed(history[since:]):
             if msg.role == "assistant":
-                for block in msg.content:
+                for block in reversed(msg.content):
                     if isinstance(block, ToolUseBlock) and block.name == "confirm":
                         try:
-                            return Confirm(**block.input)
+                            result = Confirm(**block.input)
+                            if result.verdict not in {"SAFE", "RISKY", "DENY"}:
+                                raise ValueError("Invalid verdict")
+                            if not isinstance(result.reason, str) or not isinstance(result.category, str):
+                                raise ValueError("Invalid review details")
+                            return result
                         except Exception:
                             return Confirm(verdict="RISKY", reason="Unparseable", category="unknown")
-        return Confirm(verdict="SAFE", reason="No verdict provided", category="unknown")
+        return Confirm(verdict="RISKY", reason="No verdict provided", category="unknown")
 
-    async def check(self, tool: "Tool[Any]", **kwargs: Any) -> dict[str, Any]:
-        args_str = json.dumps(kwargs, default=str)
-        if len(args_str) > 2000:
-            args_str = args_str[:2000] + "..."
-
-        description = f"Tool: {tool.name}\nArguments: {args_str}"
-        if self.allowed:
-            description += "\n\nAuto-approved categories (classify as SAFE): " + ", ".join(sorted(self.allowed))
-
-        # Fork so tool-call noise is discarded; user answers persist in the original
+    async def assess(self, tool: Tool[Any], **kwargs: Any) -> Confirm:
+        description = f"Tool: {tool.name}\nArguments: {json.dumps(kwargs, default=str)}"
         forked = await self.context.fork()
-        async for _ in self.agent.run_stream(description, forked):
-            pass
+        since = len(await forked.get_history())
+        try:
+            await self.agent.run(description, forked)
+        except Exception:
+            return Confirm(verdict="RISKY", reason="Review failed", category="unknown")
+        return await self.extract_confirm(forked, since=since)
 
-        confirm = await self.extract_confirm(forked)
+    async def review(self, tool: Tool[Any], **kwargs: Any) -> str:
+        result = await self.assess(tool, **kwargs)
+        return f"{result.verdict}: {result.reason}"
 
-        if confirm.verdict == "SAFE":
+    async def check(self, tool: Tool[Any], **kwargs: Any) -> dict[str, Any]:
+        """Standalone compatibility guard; approval never creates a category grant."""
+        result = await self.assess(tool, **kwargs)
+        if result.verdict == "SAFE":
             return kwargs
-        if confirm.verdict == "DENY":
-            raise GuardError(f"DENIED: {confirm.reason}")
-
-        # RISKY - ask user
-        if confirm.category in self.allowed:
-            return kwargs
-
-        args_repr = json.dumps(kwargs, default=repr)
-        if len(args_repr) > 2000:
-            args_repr = args_repr[:2000] + "..."
-        msg = f"{tool.name}({args_repr})\n\n{confirm.reason}"
-        answer = (await self._prompt(msg)).strip()
-
-        if not answer or answer.lower() == "n":
-            raise GuardError(f"User denied: {confirm.reason}")
-
-        if answer.lower() == "always":
-            self.allowed.add(confirm.category)
-        elif answer.lower() != "y":
-            # Feed user answer back and let it run more turns
-            async for _ in self.agent.run_stream(answer, forked):
-                pass
-            # Persist the user note in original context for future checks
-            await self.context.append(Message(role="user", content=[TextBlock(text=answer)]))
-
+        if result.verdict == "DENY":
+            raise GuardError(f"DENIED: {result.reason}")
+        answer = (await self._prompt(f"{tool.name}({json.dumps(kwargs, default=str)})\n\n{result.reason}")).strip()
+        if answer.lower() != "y":
+            raise GuardError(f"User denied: {result.reason}")
         return kwargs
 
 

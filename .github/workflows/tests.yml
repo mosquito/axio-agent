@@ -113,3 +113,12 @@ jobs:
       - run: uv sync --frozen --all-extras
       - run: uv run pytest -vv --cov=${{ matrix.package.cov }} --cov-report=term-missing
         working-directory: ${{ matrix.package.name }}
+
+  package-boundaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: make check-packages test-packaging

@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="data:,">
+  <title>$title · Axio</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page-bg: #ede8df;
+      --card-bg: #faf8f4;
+      --text: #2d2248;
+      --muted: #71697e;
+      --border: #2d22481a;
+      --shadow: #2d224808;
+      --status-bg: #eaf0e8;
+      --status-text: #426246;
+      --error-bg: #f4e9e3;
+      --error-text: #89513b;
+      --button-bg: #2d2248;
+      --button-text: #faf8f4;
+      --button-hover: #443461;
+      --focus: #b09bd0;
+      --owl-bg: #fff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100svh;
+      display: grid;
+      place-items: center;
+      padding: 28px 20px;
+      background: var(--page-bg);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      width: min(100%, 440px);
+      padding: 28px 28px 36px;
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      background: var(--card-bg);
+      box-shadow: 0 16px 60px var(--shadow);
+      text-align: center;
+    }
+    header { display: flex; align-items: center; justify-content: space-between; }
+    .wordmark { font-size: 23px; font-weight: 750; letter-spacing: -1px; }
+    .label { font-size: 10px; font-weight: 600; letter-spacing: 2px; color: var(--muted); }
+    .mascot {
+      display: grid;
+      place-items: center;
+      width: 96px;
+      height: 96px;
+      margin: 24px auto 20px;
+      border-radius: 50%;
+      background: var(--owl-bg);
+    }
+    .owl { display: block; width: 64px; height: 80px; }
+    h1 { margin: 0; font-size: clamp(25px, 6vw, 32px); letter-spacing: -1px; font-weight: 650; }
+    p { margin: 14px auto 28px; max-width: 260px; font-size: 15px; line-height: 1.65; color: var(--muted); }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 13px;
+      border-radius: 100px;
+      background: var(--status-bg);
+      color: var(--status-text);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .status::before { content: ""; width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: currentColor; }
+    .error .status { background: var(--error-bg); color: var(--error-text); }
+    button {
+      display: block;
+      width: 100%;
+      margin-top: 28px;
+      padding: 13px 20px;
+      border: 1px solid transparent;
+      border-radius: 12px;
+      background: var(--button-bg);
+      color: var(--button-text);
+      font: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { background: var(--button-hover); }
+    button:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+    #close-help { margin-bottom: 0; font-size: 12px; }
+    #close-help:empty { display: none; }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page-bg: #17141e;
+        --card-bg: #231e2d;
+        --text: #f0eaf7;
+        --muted: #b9afc5;
+        --border: #ffffff14;
+        --shadow: #00000020;
+        --status-bg: #273a30;
+        --status-text: #a7cfaf;
+        --error-bg: #44302a;
+        --error-text: #e3b7a5;
+        --button-bg: #c7b5e3;
+        --button-text: #231e2d;
+        --button-hover: #d8c9ed;
+      }
+    }
+    @media (max-width: 360px) { main { padding: 24px 18px 30px; } }
+  </style>
+</head>
+<body>
+  <main class="$state" aria-labelledby="title">
+    <header><span class="wordmark">axio</span><span class="label">MCP SIGN-IN</span></header>
+    <!-- Axio mascot from docs/_static/axio-owl.svg; embedded for offline rendering. -->
+    <div class="mascot">
+    <svg class="owl" width="160" height="200" viewBox="0 0 160 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Axio owl">
+      <defs><clipPath id="lc"><rect x="0" y="0" width="160" height="185"/></clipPath></defs>
+      <polygon points="52,76 44,20 72,64" fill="#2d2248"/>
+      <polygon points="108,76 116,20 88,64" fill="#2d2248"/>
+      <ellipse cx="80" cy="155" rx="46" ry="46" fill="#2d2248"/>
+      <ellipse cx="80" cy="90" rx="46" ry="44" fill="#2d2248"/>
+      <ellipse cx="80" cy="162" rx="26" ry="30" fill="#ede8df"/>
+      <circle cx="62" cy="88" r="15" fill="#ede8df"/>
+      <circle cx="98" cy="88" r="15" fill="#ede8df"/>
+      <circle cx="62" cy="88" r="9" fill="#2d2248"/>
+      <circle cx="98" cy="88" r="9" fill="#2d2248"/>
+      <circle cx="58" cy="84" r="3" fill="white"/>
+      <circle cx="94" cy="84" r="3" fill="white"/>
+      <polygon points="74,103 86,103 80,113" fill="#d4a017"/>
+      <ellipse cx="67" cy="184" rx="12" ry="16" fill="#d4a017" clip-path="url(#lc)"/>
+      <ellipse cx="93" cy="184" rx="12" ry="16" fill="#d4a017" clip-path="url(#lc)"/>
+    </svg>
+    </div>
+    <h1 id="title">$title</h1>
+    <p>$message</p>
+    <div class="status">$status</div>
+    <button id="close-tab" type="button">$button_label</button>
+    <p id="close-help" role="status" aria-live="polite"></p>
+  </main>
+  <script nonce="$nonce">
+    // Remove the one-time authorization parameters from this history entry.
+    history.replaceState(null, "", location.pathname);
+    let autoClose;
+    const closeButton = document.getElementById("close-tab");
+    function closeTab() {
+      clearInterval(autoClose);
+      closeButton.textContent = "Close tab";
+      window.close();
+      setTimeout(() => {
+        document.getElementById("close-help").textContent = "Please close this tab using your browser.";
+      }, 150);
+    }
+    closeButton.addEventListener("click", closeTab);
+    if (document.querySelector("main").classList.contains("success")) {
+      let remaining = 5;
+      autoClose = setInterval(() => {
+        remaining -= 1;
+        if (remaining === 0) closeTab();
+        else closeButton.textContent = "Close tab (" + remaining + ")";
+      }, 1000);
+    }
+  </script>
+</body>
+</html>
