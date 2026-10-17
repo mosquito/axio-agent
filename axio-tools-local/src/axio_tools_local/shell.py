@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import os
 import signal
@@ -5,6 +7,7 @@ import time
 from collections.abc import AsyncGenerator
 
 from axio.field import StrictStr
+from axio.tool_access import Access, tool_access
 
 
 def _kill_process(proc: asyncio.subprocess.Process) -> None:
@@ -121,6 +124,7 @@ async def _shell_stream(
         yield ("stderr", f"[exit code: {returncode}]")
 
 
+@tool_access(lambda arguments: (Access("execute", arguments.get("cwd", ".")),))
 async def shell(
     command: StrictStr,
     timeout: int = 5,

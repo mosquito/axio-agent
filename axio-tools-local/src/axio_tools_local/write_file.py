@@ -1,9 +1,13 @@
+from __future__ import annotations
+
 import asyncio
 import os
 
 from axio.field import StrictStr
+from axio.tool_access import file_access, tool_access
 
 
+@tool_access(file_access("write", "file_path"))
 async def write_file(
     file_path: StrictStr,
     content: str,
