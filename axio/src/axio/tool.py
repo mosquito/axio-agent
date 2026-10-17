@@ -18,6 +18,7 @@ from .exceptions import GuardError, HandlerError
 from .field import MISSING, FieldInfo, get_field_info
 from .permission import PermissionGuard
 from .schema import build_tool_schema
+from .tool_access import AccessDescriptor
 from .types import ToolName
 
 type JSONSchema = dict[str, Any]
@@ -70,6 +71,8 @@ class Tool[T]:
 
     context: T = field(default=MappingProxyType({}), compare=False)  # type: ignore[assignment]
     schema: MappingProxyType[str, Any] = field(default=MappingProxyType({}), repr=False, compare=False)
+    access: AccessDescriptor | None = field(default=None, kw_only=True, repr=False, compare=False)
+    permission_identity: str = field(default="", kw_only=True, repr=False)
     _semaphore: asyncio.Semaphore | None = field(init=False, default=None, repr=False, compare=False)
     _fields: Mapping[str, tuple[Any, FieldInfo]] = field(
         init=False, repr=False, compare=False, default_factory=lambda: MappingProxyType({})
@@ -78,6 +81,8 @@ class Tool[T]:
     _schema_explicit: bool = field(init=False, default=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        if self.access is None:
+            object.__setattr__(self, "access", getattr(self.handler, "__axio_access__", None))
         if not inspect.iscoroutinefunction(self.handler):
             raise TypeError(
                 f"Tool {self.name!r} handler {self.handler!r} must be an async function (coroutinefunction)."
