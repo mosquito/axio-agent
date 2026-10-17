@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, patch
 
 import aiohttp
 from axio.models import Capability, ModelRegistry, ModelSpec
+from axio.transport import TransportCatalog, TransportEntry
 
 from axio_tui.sqlite_config import ProjectConfig
 from axio_tui.transport_registry import TransportRegistry
@@ -87,7 +88,12 @@ def _patch_discover(
     @contextlib.contextmanager
     def _ctx() -> Generator[None, None, None]:
         with (
-            patch("axio_tui.transport_registry.discover_transports", return_value=transports),
+            patch(
+                "axio_tui.transport_registry.discover_transports",
+                return_value=TransportCatalog(
+                    {name: TransportEntry.from_target(name, cls) for name, cls in transports.items()}
+                ),
+            ),
             patch("axio_tui.transport_registry.discover_transport_settings", return_value=settings or {}),
         ):
             yield

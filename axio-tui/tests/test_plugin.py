@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 from axio.permission import PermissionGuard
 from axio.tool import Tool
 
@@ -89,24 +90,24 @@ class TestDiscoverTools:
 
 
 class TestDiscoverTransports:
-    @patch("axio_tui.plugin.entry_points")
+    @patch("importlib.metadata.entry_points")
     def test_loads_transport_class(self, mock_eps: MagicMock) -> None:
         mock_eps.return_value = [_make_entry_point("fake", _FakeTransport)]
         transports = discover_transports()
-        assert transports == {"fake": _FakeTransport}
+        assert transports.entries["fake"].cls is _FakeTransport
 
-    @patch("axio_tui.plugin.entry_points")
+    @patch("importlib.metadata.entry_points")
     def test_skips_on_load_error(self, mock_eps: MagicMock) -> None:
         ep = MagicMock()
         ep.name = "broken"
         ep.load.side_effect = ImportError("no module")
         mock_eps.return_value = [ep]
-        assert discover_transports() == {}
+        assert discover_transports().entries == {}
 
-    @patch("axio_tui.plugin.entry_points")
+    @patch("importlib.metadata.entry_points")
     def test_empty_entry_points(self, mock_eps: MagicMock) -> None:
         mock_eps.return_value = []
-        assert discover_transports() == {}
+        assert discover_transports().entries == {}
 
 
 class TestDiscoverGuards:
@@ -134,3 +135,15 @@ class TestDiscoverGuards:
     def test_empty_entry_points(self, mock_eps: MagicMock) -> None:
         mock_eps.return_value = []
         assert discover_guards() == {}
+
+
+def test_settings_duplicate_keeps_first_declaration(caplog: pytest.LogCaptureFixture) -> None:
+    from axio_tui.plugin import discover_transport_settings
+
+    first, second = object, str
+    with patch(
+        "axio_tui.plugin.entry_points",
+        return_value=[_make_entry_point("fixture", first), _make_entry_point("fixture", second)],
+    ):
+        assert discover_transport_settings() == {"fixture": first}
+    assert "first declaration wins" in caplog.text

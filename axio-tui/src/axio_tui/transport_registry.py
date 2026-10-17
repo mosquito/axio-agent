@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
 
 import aiohttp
 from axio.models import Capability, ModelRegistry, ModelSpec
+from axio.transport import TransportEntry
 
 from .plugin import discover_transport_settings, discover_transports
 from .sqlite_config import ProjectConfig
@@ -29,8 +31,10 @@ class RoleBinding:
 class TransportRegistry:
     """Discovers transports, creates instances, and manages them."""
 
+    _lifetimes: AsyncExitStack = field(default_factory=AsyncExitStack, repr=False)
+    errors: dict[str, str] = field(default_factory=dict)
     _transports: dict[str, Any] = field(default_factory=dict, repr=False)
-    _classes: dict[str, type] = field(default_factory=dict, repr=False)
+    _entries: dict[str, TransportEntry] = field(default_factory=dict, repr=False)
     _screens: dict[str, type] = field(default_factory=dict)
     _saved: dict[str, dict[str, str]] = field(default_factory=dict, repr=False)
     _config: ProjectConfig | None = field(default=None, repr=False)
@@ -45,38 +49,18 @@ class TransportRegistry:
         """Discover transports, create instances for those that initialise successfully."""
         self._session = session
         self._config = global_config or config
-        cls_map = discover_transports()
+        catalog = discover_transports()
+        self._entries = catalog.entries
+        self.errors = dict(catalog.errors)
         self._screens = discover_transport_settings()
 
-        pending: list[tuple[str, Any]] = []
-        for name, cls in cls_map.items():
-            self._classes[name] = cls
-            saved: dict[str, str] = {}
-            if self._config is not None:
-                saved = await self._load_settings(self._config, name)
+        async def open_one(name: str, entry: TransportEntry) -> None:
+            saved = await self._load_settings(self._config, name) if self._config is not None else {}
             self._saved[name] = saved
+            await self._open_entry(name, entry, saved)
 
-            kwargs: dict[str, Any] = {"session": session}
-            for k, v in saved.items():
-                if v:
-                    kwargs[k] = v
-            try:
-                instance = cls(**kwargs)
-            except Exception:
-                logger.warning("Transport %r failed to instantiate, skipping", name, exc_info=True)
-                continue
-            pending.append((name, instance))
-
-        async def _fetch_one(name: str, transport: Any) -> None:
-            if hasattr(transport, "on_auth_refresh"):
-                transport.on_auth_refresh = partial(self._persist_auth, name)
-            try:
-                await transport.fetch_models()
-                self._transports[name] = transport
-            except Exception:
-                logger.warning("Transport %r: fetch_models failed, skipping", name, exc_info=True)
-
-        await asyncio.gather(*[_fetch_one(n, t) for n, t in pending])
+        await asyncio.gather(*(open_one(name, entry) for name, entry in self._entries.items()))
+        self._transports = {name: self._transports[name] for name in self._entries if name in self._transports}
 
         # Bulk-load providers from hub screens that expose load_config()
         # (e.g. CustomHubScreen for openai-custom.* providers)
@@ -90,6 +74,27 @@ class TransportRegistry:
                     self.register_dynamic(f"{screen_name}.{t.name}", t)
             except Exception:
                 logger.warning("Failed to bulk-load providers from %r", screen_name, exc_info=True)
+
+    async def _open_entry(self, name: str, entry: TransportEntry, settings: dict[str, str]) -> None:
+        try:
+            transport = await self._lifetimes.enter_async_context(
+                entry.open(
+                    session=self._session,
+                    on_auth_refresh=partial(self._persist_auth, name),
+                    **{key: value for key, value in settings.items() if value != ""},
+                )
+            )
+        except Exception as error:
+            self._transports.pop(name, None)
+            self.errors[name] = entry.format_error(error)
+            logger.warning("Transport %r is unavailable (%s)", name, type(error).__name__)
+        else:
+            self._transports[name] = transport
+            self.errors.pop(name, None)
+
+    async def close(self) -> None:
+        """Close account sessions after all agent runs have stopped."""
+        await self._lifetimes.aclose()
 
     @staticmethod
     async def _load_settings(config: ProjectConfig, name: str) -> dict[str, str]:
@@ -115,21 +120,8 @@ class TransportRegistry:
 
         self._saved[name] = settings
 
-        # Re-create transport with new settings
-        if name in self._classes and self._session is not None:
-            cls = self._classes[name]
-            kwargs: dict[str, Any] = {"session": self._session}
-            for k, v in settings.items():
-                if v:
-                    kwargs[k] = v
-            transport = cls(**kwargs)
-            if hasattr(transport, "on_auth_refresh"):
-                transport.on_auth_refresh = partial(self._persist_auth, name)
-            try:
-                await transport.fetch_models()
-            except Exception:
-                logger.warning("Transport %r: fetch_models failed after reconfigure", name, exc_info=True)
-            self._transports[name] = transport
+        if name in self._entries and self._session is not None:
+            await self._open_entry(name, self._entries[name], settings)
 
     @property
     def available(self) -> list[str]:
@@ -139,11 +131,16 @@ class TransportRegistry:
     @property
     def discovered(self) -> list[str]:
         """Names of all discovered transports (including those that failed to initialise)."""
-        return list(self._classes)
+        return list(dict.fromkeys([*self._entries, *self.errors]))
 
     def get_transport(self, name: str) -> Any:
         """Return the initialised transport instance by name."""
         return self._transports[name]
+
+    def display_name(self, name: str) -> str:
+        entry = self._entries.get(name)
+        default = entry.display_name if entry is not None else name
+        return str(getattr(self._transports.get(name), "name", default))
 
     def all_models(self, *caps: Capability) -> list[tuple[str, ModelSpec]]:
         """Return (transport_name, ModelSpec) across all transports, optionally filtered."""
@@ -157,26 +154,28 @@ class TransportRegistry:
                 result.append((name, spec))
         return result
 
+    def default_model(self, role: str, capability: Capability) -> RoleBinding | None:
+        for name, entry in self._entries.items():
+            transport = self._transports.get(name)
+            model_id = getattr(entry.cls, "default_models", {}).get(role)
+            if transport is not None and model_id in transport.models:
+                return RoleBinding(name, transport.models[model_id])
+        choices = self.all_models(capability, Capability.tool_use)
+        return RoleBinding(*choices[0]) if choices else None
+
     def make_transport(self, name: str, model: ModelSpec) -> Any:
         """Create a new transport instance for the given name and model."""
-        src = self._transports[name]
-        cls = self._classes[name]
-        kwargs: dict[str, Any] = {
-            "api_key": src.api_key,
-            "model": model,
-            "models": src.models,
-            "session": src.session,
-        }
-        if hasattr(src, "base_url"):
-            kwargs["base_url"] = src.base_url
-        # Apply saved settings that aren't already set
-        for k, v in self._saved.get(name, {}).items():
-            if k not in kwargs and v:
-                kwargs[k] = v
-        transport = cls(**kwargs)
-        if hasattr(transport, "on_auth_refresh"):
-            transport.on_auth_refresh = partial(self._persist_auth, name)
-        return transport
+        return self._entries[name].select_model(self._transports[name], model)
+
+    def bind_tools(self) -> None:
+        self.unbind_tools()
+        for name, entry in self._entries.items():
+            if name in self._transports:
+                entry.bind_tools(self._transports[name])
+
+    def unbind_tools(self) -> None:
+        for entry in self._entries.values():
+            entry.bind_tools(None)
 
     async def _persist_auth(self, name: str, tokens: dict[str, str]) -> None:
         if self._config is None:
@@ -189,14 +188,14 @@ class TransportRegistry:
     def register_dynamic(self, name: str, instance: Any) -> None:
         """Register a dynamically-created transport instance (e.g. custom providers)."""
         self._transports[name] = instance
-        self._classes[name] = type(instance)
+        self._entries[name] = TransportEntry.from_target(name, type(instance))
 
     def unregister_by_prefix(self, prefix: str) -> None:
         """Remove all transports whose names start with *prefix*."""
         names = [n for n in list(self._transports) if n.startswith(prefix)]
         for n in names:
             del self._transports[n]
-            self._classes.pop(n, None)
+            self._entries.pop(n, None)
             self._saved.pop(n, None)
 
     def resolve(self, config_value: str) -> RoleBinding | None:
