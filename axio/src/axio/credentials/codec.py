@@ -6,7 +6,7 @@ import hashlib
 import json
 import math
 import types
-from dataclasses import asdict, fields, is_dataclass
+from dataclasses import MISSING, asdict, fields, is_dataclass
 from enum import Enum
 from typing import Annotated, Any, Literal, Union, cast, get_args, get_origin, get_type_hints
 
@@ -98,11 +98,20 @@ def restore(value: Any, annotation: Any) -> Any:
             raise ValueError
         return {key: restore(item, args[1]) for key, item in value.items()}
     if isinstance(annotation, type) and is_dataclass(annotation) and isinstance(value, dict):
-        declared = {item.name for item in fields(annotation) if item.init}
-        if value.keys() != declared:
+        declared = {item.name: item for item in fields(annotation) if item.init}
+        # Schema additions must explicitly opt into restoring their default from
+        # older records. Ordinary defaults (especially recovery markers) remain
+        # required so a damaged record cannot silently reset security state.
+        optional = {
+            name
+            for name, item in declared.items()
+            if item.metadata.get("credential_optional") is True
+            and (item.default is not MISSING or item.default_factory is not MISSING)
+        }
+        if not value.keys() <= declared.keys() or not declared.keys() - optional <= value.keys():
             raise ValueError
         hints = get_type_hints(annotation, include_extras=True)
-        return annotation(**{name: restore(value[name], hints[name]) for name in declared})
+        return annotation(**{name: restore(item, hints[name]) for name, item in value.items()})
     raise ValueError
 
 

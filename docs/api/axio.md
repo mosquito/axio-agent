@@ -327,6 +327,12 @@ A provider supplies its dataclass and a default filename. Mark exactly one strin
 field with `metadata={"credential_key": True}`. The key can be inside a nested
 dataclass. Use `repr=False` for secret fields.
 
+For an additive schema change, a new field with a default or default factory can
+declare `metadata={"credential_optional": True}`. Older records that omit it then
+use that default. All unmarked fields remain required even if their dataclass has
+a default; missing recovery markers must not silently reset operation state.
+Unknown fields and incorrectly typed values are still rejected.
+
 <!-- name: test_generic_credentials -->
 ```python
 from __future__ import annotations
