@@ -30,7 +30,7 @@ openai = ["axio-transport-openai"]
 codex = ["axio-transport-codex"]
 google = ["axio-transport-google[tui]"]
 local = ["axio-tools-local"]
-mcp = ["axio-tools-mcp[tui]"]
+mcp = ["axio-tools-mcp[tui]", "aiohttp-tiny-mcp~=0.5.8"]
 guards = ["axio-tui-guards[tui]"]
 all = [
     "axio-tui[anthropic,openai,codex,google,local,mcp,guards,history]",

@@ -144,6 +144,16 @@ async def tui():
         await pilot.pause()
         await app._show_mcp()
         await pilot.pause()
+        if 'mcp' in case:
+            await pilot.click('#mcp-manage')
+            await pilot.pause()
+            from axio_tui.mcp_manage import MCPManagementScreen
+            assert isinstance(app.screen, MCPManagementScreen)
+            app.pop_screen()
+            await pilot.pause()
+        else:
+            assert not app.screen.query('#mcp-manage')
+            assert 'axio_tui.mcp_manage' not in sys.modules
         app.pop_screen()
         await pilot.pause()
         await app._new_session()

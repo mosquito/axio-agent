@@ -24,7 +24,7 @@ SHARED = {
 # These application modules are loaded only when their corresponding extra exists.
 OPTIONAL_MODULES = {
     "axio-repl": {"configuration.py", "mcp_import.py"},
-    "axio-tui": {"configuration.py"},
+    "axio-tui": {"configuration.py", "mcp_manage.py"},
 }
 
 

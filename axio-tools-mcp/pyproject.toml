@@ -17,6 +17,7 @@ dependencies = [
     "aiohttp-tiny-mcp~=0.5.8",
     "aiohttp>=3.11",
     "pydantic>=2",
+    "yarl>=1.18",
 ]
 
 [project.optional-dependencies]
