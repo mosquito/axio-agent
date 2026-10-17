@@ -23,14 +23,19 @@ dependencies = [
 tui = ["textual>=2.1.0"]
 
 [project.entry-points."axio.transport"]
+antigravity = "axio_transport_google.antigravity:AntigravityTransport"
 google = "axio_transport_google:GoogleTransport"
 google-vertex = "axio_transport_google:VertexAITransport"
+
+[project.scripts]
+axio-antigravity = "axio_transport_google.antigravity.cli:main"
 
 [project.entry-points."axio.transport.realtime"]
 gemini = "axio_transport_google.realtime:GeminiLiveTransport"
 vertex = "axio_transport_google.realtime:VertexLiveTransport"
 
 [project.entry-points."axio.transport.settings"]
+antigravity = "axio_transport_google.tui.antigravity:AntigravitySettingsScreen"
 google = "axio_transport_google.tui:GoogleSettingsScreen"
 google-vertex = "axio_transport_google.tui:VertexSettingsScreen"
 
@@ -68,6 +73,7 @@ python_version = "3.12"
 
 [dependency-groups]
 dev = [
+    "textual>=2.1.0",
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "mypy>=1.14",
