@@ -12,7 +12,10 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 keywords = ["llm", "agent", "ai", "tui", "textual", "guards", "terminal"]
-dependencies = ["axio", "axio-tui"]
+dependencies = ["axio"]
+
+[project.optional-dependencies]
+tui = ["textual>=2.1.0"]
 
 [project.entry-points."axio.guards"]
 path = "axio_tui_guards.guards:PathGuard"
@@ -47,11 +50,12 @@ strict = true
 python_version = "3.12"
 
 [[tool.mypy.overrides]]
-module = ["axio_tui", "axio_tui.*", "axio_tools_local", "axio_tools_local.*"]
+module = ["textual", "textual.*"]
 ignore_missing_imports = true
 
 [dependency-groups]
 dev = [
+    "textual>=2.1.0",
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "mypy>=1.14",

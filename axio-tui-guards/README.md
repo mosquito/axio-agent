@@ -6,20 +6,24 @@
 
 Permission guard plugins for [axio-tui](https://github.com/mosquito/axio-agent).
 
-Guards intercept tool calls before execution and can allow, modify, or deny them. Ships two guards: a path-access guard that asks the user before touching filesystem locations, and an LLM-based guard that reviews tool calls for safety.
+The TUI applies its built-in permission policy to every agent tool. Read-only file
+access inside the project is automatic. Other operations require explicit rules or
+confirmation. See [TUI permissions](../axio-tui/README.md#tool-permissions).
 
-## Features
-
-- **PathGuard** - intercepts tools that touch the filesystem; prompts the user once per directory and remembers the decision for the session
-- **LLMGuard** - runs a secondary LLM call to review each tool invocation before allowing it
-- **PermissionGuard protocol** - both guards implement `axio.PermissionGuard` and compose cleanly
-- **TUI-aware** - prompts appear as native `axio-tui` dialogs, not blocking stdin reads
+This optional package supplies an LLM reviewer and the legacy standalone PathGuard.
+The TUI uses LLM review as advice in its permission dialog. A SAFE verdict cannot
+replace user approval or override an explicit denial.
 
 ## Installation
 
 ```bash
 pip install axio-tui-guards
 ```
+
+The base package requires only `axio`. Both guards accept an asynchronous
+`prompt_fn` callback and work without Textual or `axio-tui`. The verdict type
+is `axio_tui_guards.guards.Confirm`. Install `axio-tui-guards[tui]` only when
+using the optional Textual dialogs.
 
 Or install as part of the TUI bundle:
 
@@ -31,7 +35,11 @@ pip install "axio-tui[guards]"
 
 ### PathGuard
 
-Intercepts tool calls that contain filesystem paths (`file_path`, `filename`, `directory`, `path`, `cwd`). On the first access to a new directory it asks the user to **allow**, **allow all** (subtree), or **deny**.
+Legacy standalone guard for applications that attach it explicitly. The TUI no longer
+instantiates it: its directory-wide grants cannot distinguish reads from writes.
+New applications should use `axio.permission_policy.PolicyGuard` and provider access
+declarations instead. PathGuard examines only the first recognized path parameter;
+it is not filesystem isolation.
 
 <!--
 name: test_readme_path_guard
@@ -51,7 +59,7 @@ async def shell(command: str, cwd: str = ".") -> str:
 from axio_tui_guards.guards import PathGuard
 from axio.tool import Tool
 
-guard = PathGuard()  # uses TUI prompt_fn by default
+guard = PathGuard()  # defaults to console input; applications can pass prompt_fn
 
 tool = Tool(
     name="write_file",
@@ -61,14 +69,19 @@ tool = Tool(
 )
 ```
 
-Decision caching:
-- **Allow** - grants access to the parent directory for the current session
-- **Allow all** - grants access to the directory and all subdirectories
-- **Deny** - blocks this path; raises `GuardError` immediately on retry
+Legacy decisions: `y` grants the inferred directory and its descendants for this
+instance, `n` denies once, and `deny` remembers an exact path denial. No decision
+persists across process restarts. This API remains for compatibility only.
 
 ### LLMGuard
 
-Uses a secondary LLM call to review the tool handler arguments before execution. If the reviewer deems the call unsafe it raises `GuardError` with the reason.
+`review()` returns advice for the TUI's unified permission prompt. Missing or invalid
+verdicts and review failures require explicit permission. Categories never create
+stored grants.
+
+When used directly as a standalone `PermissionGuard`, `check()` accepts SAFE,
+rejects DENY, and asks for an explicit `y` on RISKY. This standalone API does not
+replace the TUI policy.
 
 <!-- name: test_readme_llm_guard -->
 ```python
@@ -83,7 +96,7 @@ guard = LLMGuard(agent=reviewer, context=MemoryContextStore())
 
 ### Composing guards
 
-Guards are applied in order - attach both for layered protection:
+Guards are applied in order. Existing standalone applications can still compose them:
 
 <!--
 name: test_readme_composing

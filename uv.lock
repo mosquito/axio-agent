@@ -1018,7 +1018,11 @@ version = "0.2.3"
 source = { editable = "axio-tui-guards" }
 dependencies = [
     { name = "axio" },
-    { name = "axio-tui" },
+]
+
+[package.optional-dependencies]
+tui = [
+    { name = "textual" },
 ]
 
 [package.dev-dependencies]
@@ -1029,13 +1033,15 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "textual" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "axio", editable = "axio" },
-    { name = "axio-tui", editable = "axio-tui" },
+    { name = "textual", marker = "extra == 'tui'", specifier = ">=2.1.0" },
 ]
+provides-extras = ["tui"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1045,6 +1051,7 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "ruff", specifier = ">=0.9" },
+    { name = "textual", specifier = ">=2.1.0" },
 ]
 
 [[package]]
