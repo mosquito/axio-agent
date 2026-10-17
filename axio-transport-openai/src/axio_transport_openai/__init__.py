@@ -39,6 +39,9 @@ from axio_responses import Responses, ResponsesAPIError, convert_messages, conve
 from axio_sse import Payload, Wire, payloads
 
 from .chatgpt import ChatGPTTransport as ChatGPTTransport
+from .chatgpt_images import ChatGPTImageTransport as ChatGPTImageTransport
+from .chatgpt_models import CHATGPT_IMAGE_MODELS as CHATGPT_IMAGE_MODELS
+from .chatgpt_models import ChatGPTImageModel as ChatGPTImageModel
 from .realtime import OpenAIRealtimeSession, OpenAIRealtimeTransport  # noqa: F401
 
 logger = logging.getLogger(__name__)

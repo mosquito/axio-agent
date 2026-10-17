@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from axio.models import Capability, ModelSpec
+from axio.models import Capability, ModelRegistry, ModelSpec
 
 # These are capabilities of the implemented transport, not assertions about a model.
 SUPPORTED_CAPABILITIES = frozenset({Capability.text, Capability.vision, Capability.reasoning, Capability.tool_use})
@@ -30,6 +30,23 @@ class ChatGPTModel(ModelSpec):
     display_name: str = ""
     visibility: str = ""
     metadata: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}), repr=False, compare=False)
+
+
+@dataclass(frozen=True, slots=True)
+class ChatGPTImageModel(ChatGPTModel):
+    """A native ChatGPT Images model, separate from completion catalog metadata.
+
+    Token budgets and token prices do not describe image generation. Availability
+    is checked by the image endpoint for the selected account on each request.
+    """
+
+    capabilities: frozenset[Capability] = frozenset({Capability.image_generation})
+    context_window: int = 0
+    max_output_tokens: int = 0
+    visibility: str = "list"
+
+
+CHATGPT_IMAGE_MODELS = ModelRegistry([ChatGPTImageModel("gpt-image-2", display_name="GPT Image 2")])
 
 
 def supported_reasoning_efforts(model: ModelSpec | None) -> tuple[str, ...]:

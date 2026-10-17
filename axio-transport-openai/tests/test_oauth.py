@@ -31,6 +31,8 @@ from axio_transport_openai.credential_stores import FileCredentialStore
 from axio_transport_openai.credentials import CredentialRecord, save_account
 from axio_transport_openai.oauth import (
     CALLBACK_PATH,
+    CODEX_CLIENT_ID,
+    CODEX_SCOPES,
     DYNAMIC_CLIENT_ID,
     PLAN_SCOPE,
     RESOURCE,
@@ -102,8 +104,14 @@ class FakeOAuth:
         params = dict(request.query)
         self.authorizations.append(params)
         assert params["response_type"] == "code"
-        assert params["resource"] == RESOURCE
-        assert params["scope"] == SCOPES
+        if params["client_id"] == CODEX_CLIENT_ID:
+            assert "resource" not in params and "ext_agent_host_id" not in params
+            assert params["scope"] == CODEX_SCOPES
+            assert params["id_token_add_organizations"] == "true"
+            assert params["codex_cli_simplified_flow"] == "true"
+        else:
+            assert params["resource"] == RESOURCE
+            assert params["scope"] == SCOPES
         assert params["code_challenge_method"] == "S256"
         callback = {
             "state": params["state"],
@@ -121,18 +129,27 @@ class FakeOAuth:
         raise web.HTTPFound(self.callback_url)
 
     async def token(self, request: web.Request) -> web.Response:
-        assert request.content_type == "application/x-www-form-urlencoded"
         assert "Authorization" not in request.headers
-        form = {key: str(value) for key, value in (await request.post()).items()}
+        if request.content_type == "application/json":
+            form = await request.json()
+            assert form["client_id"] == CODEX_CLIENT_ID and form["grant_type"] == "refresh_token"
+        else:
+            assert request.content_type == "application/x-www-form-urlencoded"
+            form = {key: str(value) for key, value in (await request.post()).items()}
         self.exchanges.append(form)
         assert form["client_id"] == self.client_id
-        assert form["resource"] == RESOURCE
+        native = form["client_id"] == CODEX_CLIENT_ID
+        resource_fields = set() if native else {"resource"}
+        if native:
+            assert "resource" not in form
+        else:
+            assert form["resource"] == RESOURCE
         params = self.authorizations[-1]
         if form["grant_type"] == "refresh_token":
-            assert set(form) == {"grant_type", "client_id", "refresh_token", "resource"}
+            assert set(form) == {"grant_type", "client_id", "refresh_token"} | resource_fields
             assert form["refresh_token"] == "refresh-secret"
         else:
-            assert set(form) == {"grant_type", "code", "client_id", "code_verifier", "redirect_uri", "resource"}
+            assert set(form) == {"grant_type", "code", "client_id", "code_verifier", "redirect_uri"} | resource_fields
             assert form["grant_type"] == "authorization_code"
             assert form["redirect_uri"] == params["redirect_uri"]
             assert form["code"] == f"code-{len(self.authorizations)}"
@@ -172,7 +189,7 @@ class FakeOAuth:
                 "id_token": token,
                 "access_token": "opaque-access-secret",
                 "refresh_token": "refresh-secret",
-                "scope": SCOPES,
+                "scope": CODEX_SCOPES if native else SCOPES,
                 "token_type": "Bearer",
                 "expires_in": 3600,
                 **self.token_changes,
@@ -233,8 +250,8 @@ async def test_terminal_signin_shared_refresh_and_transport_restart(
 ) -> None:
     credentials = tmp_path / "credentials" / "chatgpt.auth"
 
-    def oauth_client(http: aiohttp.ClientSession, host_id: str) -> ChatGPTOAuth:
-        return ChatGPTOAuth(http, host_id, issuer=server.issuer)
+    def oauth_client(http: aiohttp.ClientSession, host_id: str, *, codex: bool = False) -> ChatGPTOAuth:
+        return ChatGPTOAuth(http, host_id, issuer=server.issuer, codex=codex)
 
     async def browser(self: auth.TerminalAuthorization, url: str) -> None:
         await server.browser(url)
@@ -866,8 +883,8 @@ async def test_manual_terminal_sign_in_end_to_end(
     original_input = auth.CallbackInput
     original_open = auth.TerminalAuthorization.open
 
-    def client(session: aiohttp.ClientSession, host_id: str) -> ChatGPTOAuth:
-        return ChatGPTOAuth(session, host_id, issuer=server.issuer)
+    def client(session: aiohttp.ClientSession, host_id: str, *, codex: bool = False) -> ChatGPTOAuth:
+        return ChatGPTOAuth(session, host_id, issuer=server.issuer, codex=codex)
 
     async def open_remote(self: auth.TerminalAuthorization, url: str) -> None:
         await original_open(self, url)
@@ -912,3 +929,122 @@ async def test_sign_in_timeout_cancels_manual_input(server: FakeOAuth, oauth: Ch
     with pytest.raises(TimeoutError):
         await oauth.sign_in(open_browser=display, read_callback=read_callback, timeout=0.05)
     assert stopped.is_set()
+
+
+@pytest.fixture
+def native_oauth(server: FakeOAuth, oauth: ChatGPTOAuth) -> ChatGPTOAuth:
+    server.client_id = CODEX_CLIENT_ID
+    server.claim_changes["https://api.openai.com/auth"] = {"chatgpt_account_id": "workspace-1"}
+    return replace(oauth, codex=True)
+
+
+def unused_port() -> int:
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        return int(listener.getsockname()[1])
+
+
+async def test_native_login_refresh_and_workspace_isolation(
+    server: FakeOAuth, native_oauth: ChatGPTOAuth, tmp_path: Path
+) -> None:
+    account = await native_oauth.sign_in(port=unused_port())
+    assert account.client_id == "codex:workspace-1:subject-1"
+    assert account.codex_account_id == "workspace-1"
+    assert account.tokens is not None and account.tokens.codex and account.tokens.plan_enabled
+    assert PLAN_SCOPE not in account.tokens.scopes
+    store = FileCredentialStore(tmp_path / "native.auth")
+    await save_account(store, account)
+    async with store.lock(account.client_id):
+        record = await store.load(account.client_id)
+    assert record is not None and record.account == account
+    # Reopening a session does not need a native flag: the saved registration determines the route.
+    reopened = replace(native_oauth, codex=False)
+    renewed = await reopened.refresh(account)
+    assert renewed.client_id == account.client_id and renewed.codex_account_id == account.codex_account_id
+    assert renewed.tokens is not None and renewed.tokens.codex
+    assert server.exchanges[-1]["client_id"] == CODEX_CLIENT_ID
+    assert "resource" not in server.exchanges[-1]
+    returning = await reopened.sign_in(account, port=unused_port())
+    assert returning.client_id == account.client_id
+    server.claim_changes["https://api.openai.com/auth"] = {"chatgpt_account_id": "workspace-2"}
+    with pytest.raises(OAuthValidationError, match="workspace"):
+        await reopened.refresh(account)
+    with pytest.raises(OAuthValidationError, match="workspace"):
+        await reopened.sign_in(account, port=unused_port())
+    other = await native_oauth.sign_in(port=unused_port())
+    assert other.client_id != account.client_id
+    await save_account(store, other)
+    assert len(await store.list_records()) == 2
+
+
+@pytest.mark.parametrize(
+    "claims",
+    [
+        {"nonce": "wrong"},
+        {"aud": "wrong"},
+        {"iss": "https://wrong.test"},
+        {"https://api.openai.com/auth": {}},
+        {"https://api.openai.com/auth": None},
+    ],
+)
+async def test_native_identity_is_verified(
+    server: FakeOAuth, native_oauth: ChatGPTOAuth, claims: dict[str, Any]
+) -> None:
+    server.claim_changes.update(claims)
+    with pytest.raises(OAuthValidationError):
+        await native_oauth.sign_in(port=unused_port())
+    await assert_callback_closed(server)
+
+
+async def test_native_signature_is_verified(server: FakeOAuth, native_oauth: ChatGPTOAuth) -> None:
+    server.bad_signature = True
+    with pytest.raises(OAuthValidationError):
+        await native_oauth.sign_in(port=unused_port())
+
+
+@pytest.mark.parametrize("expiry", [None, "soon", True, 0, float("inf")])
+async def test_native_invalid_token_expiry_rejected(
+    server: FakeOAuth, native_oauth: ChatGPTOAuth, expiry: Any
+) -> None:
+    server.token_changes["expires_in"] = expiry
+    with pytest.raises(OAuthValidationError):
+        await native_oauth.sign_in(port=unused_port())
+
+
+def test_native_access_jwt_only_supplies_expiry() -> None:
+    received = time.time()
+    access = jwt.encode({"exp": received + 3600, "sub": "untrusted"}, "s" * 32, algorithm="HS256")
+    tokens = ChatGPTOAuth._codex_tokens(
+        {"id_token": "verified-separately", "access_token": access, "refresh_token": "refresh"}, received
+    )
+    assert tokens.expires_at == pytest.approx(received + 3600)
+    assert tokens.codex and tokens.plan_enabled
+    with pytest.raises(OAuthValidationError, match="expiry"):
+        ChatGPTOAuth._codex_tokens({"id_token": "id", "access_token": "not-a-jwt"}, received)
+
+
+async def test_native_cli_persists_selected_registration(
+    server: FakeOAuth, native_oauth: ChatGPTOAuth, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def oauth_client(http: aiohttp.ClientSession, host_id: str, *, codex: bool = False) -> ChatGPTOAuth:
+        assert codex
+        return ChatGPTOAuth(http, host_id, issuer=server.issuer, codex=codex)
+
+    async def browser(self: auth.TerminalAuthorization, url: str) -> None:
+        await server.browser(url)
+
+    monkeypatch.setattr(auth, "ChatGPTOAuth", oauth_client)
+    monkeypatch.setattr(auth.TerminalAuthorization, "open", browser)
+    path = tmp_path / "native.auth"
+    await cli.run(
+        cli.parser().parse_args(
+            ["login", "--codex", "--credentials", str(path), "--port", str(unused_port()), "--timeout", "5"]
+        )
+    )
+    store = FileCredentialStore(path)
+    selected = await store.selected_account()
+    assert selected == "codex:workspace-1:subject-1"
+    async with store.lock(selected):
+        saved = await store.load(selected)
+    assert saved is not None and saved.account.codex_account_id == "workspace-1"
+    assert saved.account.tokens is not None and saved.account.tokens.codex

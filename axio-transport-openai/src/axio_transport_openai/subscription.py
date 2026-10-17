@@ -22,6 +22,10 @@ from axio_responses import (
 
 from .session import ChatGPTSession
 
+CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
+# Native catalog protocol version verified against openai/codex rust-v0.163.0.
+CODEX_CLIENT_VERSION = "0.163.0"
+
 
 @dataclass(frozen=True, slots=True)
 class ChatGPTResponses:
@@ -36,7 +40,7 @@ class ChatGPTResponses:
 
     account: ChatGPTSession
     http: aiohttp.ClientSession
-    base_url: str = "https://api.openai.com/v1"
+    base_url: str | None = None
     max_attempts: int = 3
     retry_base_delay: float = 2.0
 
@@ -46,6 +50,10 @@ class ChatGPTResponses:
         if not math.isfinite(self.retry_base_delay) or self.retry_base_delay < 0:
             raise ValueError("retry_base_delay must be finite and nonnegative.")
 
+    def url(self, path: str, headers: dict[str, str]) -> str:
+        base = self.base_url or (CODEX_BASE_URL if "ChatGPT-Account-ID" in headers else "https://api.openai.com/v1")
+        return f"{base.rstrip('/')}/{path}"
+
     async def fetch_models(self) -> Any:
         """Read the selected account's catalog without an inference quota gate.
 
@@ -54,12 +62,13 @@ class ChatGPTResponses:
         or credential replacement is attempted after an admission error.
         """
         for attempt in range(1, self.max_attempts + 1):
-            token = await self.account.access_token()
+            headers = await self.account.request_headers()
             response: aiohttp.ClientResponse | None = None
             try:
                 async with self.http.get(
-                    f"{self.base_url.rstrip('/')}/models",
-                    headers={"Authorization": f"Bearer {token}"},
+                    self.url("models", headers),
+                    headers=headers,
+                    params={"client_version": CODEX_CLIENT_VERSION} if "ChatGPT-Account-ID" in headers else None,
                     allow_redirects=False,
                 ) as response:
                     if response.status != 200:
@@ -93,13 +102,13 @@ class ChatGPTResponses:
         for attempt in range(1, self.max_attempts + 1):
             if self.account.plan_usage_error is not None:
                 raise self.account.plan_usage_error
-            token = await self.account.access_token()
-            headers = {"Authorization": f"Bearer {token}", "Accept": "text/event-stream"}
+            headers = await self.account.request_headers()
+            headers["Accept"] = "text/event-stream"
             sent = False
             response: aiohttp.ClientResponse | None = None
             try:
                 async with self.http.post(
-                    f"{self.base_url.rstrip('/')}/responses",
+                    self.url("responses", headers),
                     json=payload,
                     headers=headers,
                     allow_redirects=False,

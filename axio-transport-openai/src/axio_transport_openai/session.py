@@ -57,6 +57,7 @@ class ChatGPTSession:
         self.retry_delay = retry_delay
         self.last_error: OAuthError | CredentialError | None = None
         self.plan_usage_error: ResponsesAPIError | None = None
+        self._codex_account_id: str | None = None
         self._worker: asyncio.Task[None] | None = None
         self._starting = asyncio.Lock()
         self._requests: set[asyncio.Task[ChatGPTAccount]] = set()
@@ -122,6 +123,28 @@ class ChatGPTSession:
 
     async def access_token(self) -> str:
         """Get a current plan token, reloading credentials under the process lock."""
+        account = await self._access_account()
+        assert account.tokens is not None and account.tokens.access_token is not None
+        return account.tokens.access_token
+
+    @property
+    def supports_images(self) -> bool:
+        """Whether the last validated credentials use native ChatGPT authorization."""
+        return self._codex_account_id is not None
+
+    async def request_headers(self, *, images: bool = False) -> dict[str, str]:
+        """Resolve token and workspace together from the pinned registration."""
+        account = await self._access_account()
+        assert account.tokens is not None and account.tokens.access_token is not None
+        if images and account.codex_account_id is None:
+            raise SignInRequired("Image generation requires native ChatGPT sign-in: axio-chatgpt login --codex.")
+        headers = {"Authorization": f"Bearer {account.tokens.access_token}"}
+        if account.codex_account_id is not None:
+            headers["ChatGPT-Account-ID"] = account.codex_account_id
+            headers["originator"] = "axio"
+        return headers
+
+    async def _access_account(self) -> ChatGPTAccount:
         self._check_open()
         task = asyncio.create_task(self._current())
         self._requests.add(task)
@@ -129,8 +152,8 @@ class ChatGPTSession:
             account = await complete_operation(task)
         finally:
             self._requests.discard(task)
-        assert account.tokens is not None and account.tokens.access_token is not None
-        return account.tokens.access_token
+        self._codex_account_id = account.codex_account_id
+        return account
 
     def _refresh_at(self, account: ChatGPTAccount) -> float:
         tokens = account.tokens

@@ -1,4 +1,4 @@
-"""ChatGPT subscription CompletionTransport over the public Responses API."""
+"""ChatGPT subscription completion and image generation with shared OAuth sessions."""
 
 from __future__ import annotations
 
@@ -26,9 +26,16 @@ from axio.types import Usage
 from axio_responses import ResponsesAPIError, convert_messages, convert_tools
 
 from .app_auth import ChatGPTAuth
-from .chatgpt_models import ChatGPTModel, parse_models, supported_reasoning_efforts
+from .chatgpt_images import ChatGPTImageTransport
+from .chatgpt_models import (
+    CHATGPT_IMAGE_MODELS,
+    ChatGPTImageModel,
+    ChatGPTModel,
+    parse_models,
+    supported_reasoning_efforts,
+)
 from .session import ChatGPTSession
-from .subscription import ChatGPTResponses
+from .subscription import CODEX_BASE_URL, ChatGPTResponses
 
 
 def validate_block(block: ContentBlock, role: str, model: ModelSpec) -> None:
@@ -143,13 +150,15 @@ class ChatGPTTransport:
         session: aiohttp.ClientSession,
         model: str | None = None,
         model_specs: Iterable[ModelSpec] = (),
-        base_url: str = "https://api.openai.com/v1",
+        base_url: str | None = None,
+        image_base_url: str = CODEX_BASE_URL,
         max_attempts: int = 3,
         retry_base_delay: float = 2.0,
         reasoning_effort: str | None = None,
         reasoning_summary: Literal["auto", "concise", "detailed"] = "auto",
     ) -> None:
         self._executor = ChatGPTResponses(account, session, base_url, max_attempts, retry_base_delay)
+        self.image_base_url = image_base_url
         self._model_id = model
         known = {spec.id: spec for spec in model_specs}
         self._catalog = _Catalog(known)
@@ -167,12 +176,12 @@ class ChatGPTTransport:
 
     @property
     def models(self) -> ModelRegistry:
-        """Visible models in server order; empty until a successful catalog request."""
+        """Visible server models followed by native image presets; empty until fetched."""
         return self._catalog.models
 
     @property
     def catalog(self) -> tuple[ChatGPTModel, ...]:
-        """All returned entries, including visibility and display names."""
+        """Server entries and native image presets, with visibility and display names."""
         return self._catalog.entries
 
     @property
@@ -190,6 +199,9 @@ class ChatGPTTransport:
         self.models.clear()
         body = await self._executor.fetch_models()
         entries = parse_models(body, self._catalog.known)
+        if self.account.supports_images:
+            image_models = tuple(m for m in CHATGPT_IMAGE_MODELS.values() if isinstance(m, ChatGPTImageModel))
+            entries = tuple(e for e in entries if e.id not in CHATGPT_IMAGE_MODELS) + image_models
         self._catalog.entries = entries
         for entry in entries:
             if entry.visibility == "list":
@@ -259,6 +271,7 @@ class ChatGPTTransport:
             model=model,
             model_specs=self._catalog.known.values(),
             base_url=self._executor.base_url,
+            image_base_url=self.image_base_url,
             max_attempts=self._executor.max_attempts,
             retry_base_delay=self._executor.retry_base_delay,
             reasoning_effort=self.reasoning_effort,
@@ -270,7 +283,9 @@ class ChatGPTTransport:
         selected = self.model
         if selected is None:
             raise ValueError("Select a visible model from the current ChatGPT account catalog.")
-        return build_chatgpt_payload(
+        if Capability.image_generation in selected.capabilities:
+            raise ValueError("Use generate_images() with a ChatGPT image model.")
+        payload = build_chatgpt_payload(
             messages,
             tools,
             system,
@@ -278,6 +293,33 @@ class ChatGPTTransport:
             reasoning_effort=self.reasoning_effort,
             reasoning_summary=self.reasoning_summary,
         )
+        if self.account.supports_images:
+            # Native Codex uses top-level function declarations, unlike plan sharing.
+            if tools:
+                payload["input"] = payload["input"][1:]
+                payload["tools"] = convert_tools(tools)
+            payload["tool_choice"] = "auto"
+        return payload
+
+    def image_transport(self, model: str | ModelSpec = "gpt-image-2") -> ChatGPTImageTransport:
+        """Create a standalone generator sharing this account and HTTP session."""
+        return ChatGPTImageTransport(
+            account=self.account, session=self.session, model=model, base_url=self.image_base_url
+        )
+
+    async def generate_images(self, prompt: str, *, model: str | None = None, n: int = 1) -> list[bytes]:
+        """Generate with the selected image model, or the default GPT Image model."""
+        selected = self.model
+        model_id = (
+            model
+            if model is not None
+            else (
+                selected.id
+                if selected is not None and Capability.image_generation in selected.capabilities
+                else "gpt-image-2"
+            )
+        )
+        return await self.image_transport(model_id).generate_images(prompt, n=n)
 
     async def stream(
         self, messages: list[Message], tools: list[Tool[Any]], system: str

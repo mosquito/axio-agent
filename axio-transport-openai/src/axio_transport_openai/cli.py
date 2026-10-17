@@ -79,6 +79,7 @@ def parser() -> argparse.ArgumentParser:
     login.add_argument("--manual", action="store_true", help="Use a printed URL and pasted callback over SSH.")
     login.add_argument("--port", type=int, default=0)
     login.add_argument("--timeout", type=float, default=300)
+    login.add_argument("--codex", action="store_true", help="Use native ChatGPT authorization with image generation.")
     accounts = commands.add_parser("accounts", parents=[common], help="List saved registrations without tokens.")
     accounts.add_argument("--json", action="store_true")
     select = commands.add_parser("select", parents=[common], help="Choose an account for new sessions.")
@@ -104,6 +105,7 @@ async def run(args: argparse.Namespace) -> int:
             manual=args.manual,
             port=args.port,
             timeout=args.timeout,
+            **({"codex": True} if args.codex else {}),
         )
         await store.select_account(account.client_id)
         print(f"Signed in and selected: {account.client_id}")

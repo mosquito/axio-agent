@@ -34,11 +34,13 @@ away the calls the agent is there to dispatch.
 
 ## ChatGPT subscription
 
-`ChatGPTTransport` uses a pinned `ChatGPTSession` and the public Responses endpoint.
+`ChatGPTTransport` uses a pinned `ChatGPTSession`. Ordinary sign-in uses the public
+Responses endpoint; `axio-chatgpt login --codex` uses native ChatGPT OAuth and the
+Codex backend for completion and image generation.
 It discovers visible models for that account, builds subscription-compatible requests,
 and delegates HTTP/SSE recovery to `ChatGPTResponses`. Model copies share the account
 session and catalog; account changes create a separate catalog. Subscription prices
-are unknown (`NaN`). All catalog models receive function tools. Vision, reasoning,
+are unknown (`NaN`). All server completion models receive function tools. Vision, reasoning,
 and context limits come from the API metadata instead of the API-key registry.
 
 Install `axio-transport-openai` and run `axio-chatgpt login`
@@ -94,7 +96,53 @@ It also accepts `client_id=` for an explicit account. Selection changes affect
 future sessions only. TUI **Configure ChatGPT** provides sign-in, registration selection,
 permission status and sign-out. The registry opens managed account sessions and calls
 `with_model()` for model copies; generic config stores only account references.
-Codex OAuth uses a separate transport and credential flow.
+The native sign-in mode saves credentials in the same Axio store. It does not
+import the separate `axio-transport-codex` transport's credentials.
+
+### Images
+
+Authorize with `axio-chatgpt login --codex` before generating images. Native login
+uses port 1455 by default; `--manual` supports SSH. The ordinary public plan-sharing
+token is not accepted by the native image endpoint. The account's authorization
+mode is persisted and determines routing after restart.
+
+`ChatGPTImageTransport` implements `ImageGenTransport`. Its `models` registry is
+`CHATGPT_IMAGE_MODELS`, currently containing `gpt-image-2` as a `ChatGPTImageModel`
+with `Capability.image_generation`. Native `ChatGPTTransport.fetch_models()` also
+appends these image presets to the completion catalog. They describe implemented
+image support, not guaranteed account entitlement. Filter completion choices by
+`Capability.text` and image choices by `Capability.image_generation`.
+
+<!-- name: test_chatgpt_image_generation -->
+```python
+import aiohttp
+from axio_transport_openai import ChatGPTImageTransport
+from axio_transport_openai.chatgpt_images import image_media_type
+from axio_transport_openai.session import ChatGPTSession
+
+
+async def draw(account: ChatGPTSession, http: aiohttp.ClientSession) -> tuple[bytes, str]:
+    generator = ChatGPTImageTransport(account=account, session=http)
+    images = await generator.generate_images("An owl reading a book", quality="low")
+    return images[0], image_media_type(images[0])
+```
+
+For an open completion transport, `chatgpt.image_transport()` returns this class
+with the same sessions. `chatgpt.with_model("gpt-image-2").generate_images(prompt)`
+also returns image bytes. Image models reject `stream()` calls.
+
+One image per request (`n=1`) is supported. The standalone generator accepts
+`size` (`auto`, `1024x1024`, `1536x1024`, `1024x1536`), `quality` (`auto`, `low`,
+`medium`, `high`), and `transparent_background`. Native output is PNG. Editing,
+output format selection, partial images, and seeds are not exposed.
+
+The protocol follows [Codex CLI rust-v0.163.0](https://github.com/openai/codex/tree/rust-v0.163.0)
+and posts to `/backend-api/codex/images/generations` on ChatGPT. Backend access
+and quotas depend on the account. `ChatGPTImageError` preserves API diagnostics;
+invalid results raise an error. Quota errors pause the shared account session.
+Generation POSTs are never automatically replayed, including after server errors
+or cancellation. A connection failure can leave the server outcome unknown.
+The caller owns both sessions, and closing them retains credentials.
 
 ```{eval-rst}
 .. autoclass:: axio_transport_openai.ChatGPTTransport
@@ -102,6 +150,14 @@ Codex OAuth uses a separate transport and credential flow.
 
 .. autoclass:: axio_transport_openai.chatgpt_models.ChatGPTModel
    :members:
+
+.. autoclass:: axio_transport_openai.ChatGPTImageModel
+   :members:
+
+.. autoclass:: axio_transport_openai.ChatGPTImageTransport
+   :members:
+
+.. autofunction:: axio_transport_openai.chatgpt_images.image_media_type
 
 .. autofunction:: axio_transport_openai.chatgpt.build_chatgpt_payload
 
