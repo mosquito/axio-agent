@@ -26,6 +26,7 @@ from axio.agent import Agent
 from axio.context import MemoryContextStore
 from axio.events import (
     AudioOutput,
+    BlockEnd,
     Citation,
     Error,
     ImageOutput,
@@ -333,17 +334,55 @@ def setup_history() -> None:
 
 async def run_prompt(agent: Agent, ctx: MemoryContextStore, prompt: str) -> None:
     in_text = False
+    reasoning_line_start = True
+    reasoning_index: int | None = None
     declined = False
     arg_streams: dict[str, ToolArgStream] = {}
     streamed_tool_ids: set[str] = set()
 
     async for event in agent.run_stream(prompt, ctx):
+        if not reasoning_line_start and (
+            isinstance(
+                event,
+                (
+                    TextDelta,
+                    Refusal,
+                    Citation,
+                    ImageOutput,
+                    AudioOutput,
+    BlockEnd,
+                    VideoOutput,
+                    ToolUseStart,
+                    ToolInputDelta,
+                    ToolOutputDelta,
+                    ToolResult,
+                    IterationEnd,
+                    Error,
+                    SessionEndEvent,
+                ),
+            )
+            or isinstance(event, BlockEnd)
+            and event.index == reasoning_index
+            or isinstance(event, ReasoningDelta)
+            and event.index != reasoning_index
+        ):
+            print()
+            reasoning_line_start = True
         match event:
-            case ReasoningDelta(delta=delta):
+            case ReasoningDelta(index=index, delta=delta):
+                if not delta:
+                    continue
                 if in_text:
                     print()
                     in_text = False
-                sys.stdout.write(f"{DIM}> {delta}{RESET}")
+                reasoning_index = index
+                sys.stdout.write(DIM)
+                for line in delta.splitlines(keepends=True):
+                    if reasoning_line_start:
+                        sys.stdout.write("> ")
+                    sys.stdout.write(line)
+                    reasoning_line_start = line.endswith("\n")
+                sys.stdout.write(RESET)
                 sys.stdout.flush()
 
             case TextDelta(delta=delta):
