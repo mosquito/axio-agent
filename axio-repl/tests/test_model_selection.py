@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from axio.models import Capability, ModelRegistry, ModelSpec
+from axio.transport import TransportCatalog, TransportEntry
 
+import axio_repl as repl
 from axio_repl import REPLState, _resolve_model_arg
 
 _BASE_MODEL = ModelSpec(
@@ -51,3 +55,26 @@ def test_change_model_accepts_resolved_variant(capsys: pytest.CaptureFixture[str
     assert "z-ai/glm-4.7:nitro" in state.agent.system
     captured = capsys.readouterr()
     assert "Switched to" in captured.out
+
+
+async def test_startup_resolves_variant_before_selecting_transport(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    transport = _VariantTransport()
+    entry = TransportEntry.from_target("fixture", lambda **settings: transport)
+    monkeypatch.setattr(repl, "discover_transports", lambda: TransportCatalog({entry.name: entry}))
+    monkeypatch.setattr(repl, "setup_history", lambda: None)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        sys, "argv", ["axio-repl", "--isolated", "--transport", "fixture", "--model", "z-ai/glm-4.7:nitro", "hello"]
+    )
+    prompt = AsyncMock()
+    monkeypatch.setattr(repl, "run_prompt", prompt)
+
+    await repl.main()
+
+    prompt.assert_awaited_once()
+    agent = prompt.call_args.args[0]
+    assert agent.transport.model.id == "z-ai/glm-4.7:nitro"
+    assert agent.transport.model.context_window == _BASE_MODEL.context_window
+    assert transport.model is _BASE_MODEL
