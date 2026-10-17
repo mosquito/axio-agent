@@ -7,6 +7,7 @@ API: the public ``/v1/responses`` endpoint and the ChatGPT backend Codex uses.
 
 from __future__ import annotations
 
+from .errors import Recovery, ResponsesAPIError, ResponsesIncompleteError, ResponsesInterruptedError, request_id
 from .reader import (
     Annotation,
     AnnotationAdded,
@@ -37,6 +38,11 @@ from .request import STOP_REASONS, convert_messages, convert_tools, tool_output
 
 __all__ = [
     "STOP_REASONS",
+    "Recovery",
+    "ResponsesAPIError",
+    "ResponsesIncompleteError",
+    "ResponsesInterruptedError",
+    "request_id",
     "Annotation",
     "AnnotationAdded",
     "AnnotationSource",

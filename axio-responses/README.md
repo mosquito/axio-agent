@@ -8,8 +8,8 @@ The OpenAI Responses API as [axio](https://github.com/mosquito/axio-agent) speak
 in, `StreamEvent`s out.
 
 Both halves live here rather than in a transport because two transports speak this API — the public
-`/v1/responses` endpoint and the ChatGPT backend Codex uses. It knows nothing about HTTP and opens
-no connection.
+`/v1/responses` endpoint and the ChatGPT backend Codex uses. It opens no connection and has no
+HTTP client dependency.
 
 ## Installation
 
@@ -61,7 +61,7 @@ from axio_responses import Responses
 
 
 async def stream(resp: aiohttp.ClientResponse) -> AsyncIterator[StreamEvent]:
-    turn = Responses()
+    turn = Responses(status=resp.status, request_id=resp.headers.get("x-request-id"))
     async for made in turn.over(resp.content.iter_any(), until="[DONE]"):
         yield made
     yield turn.finished()
@@ -69,6 +69,39 @@ async def stream(resp: aiohttp.ClientResponse) -> AsyncIterator[StreamEvent]:
 
 Events axio has no type for — the API's own hosted tools, its audio, its bookkeeping — travel as
 `ProviderEvent` under the provider's own name rather than being dropped.
+
+### Errors and recovery
+
+`ResponsesAPIError` extends `axio.exceptions.StreamError`. It preserves `code`, `param`, the
+actual HTTP `status`, `request_id`, and `body`. HTTP failures also retain `raw_body`; SSE failures
+retain `event_type`. A stream error can have HTTP status 200. Missing fields remain `None`.
+Bodies such as `{"detail": "..."}`, lists, and plain text retain their original shape.
+Diagnostic text is not used as an error code.
+
+`recovery` distinguishes quota, authentication, permission, invalid requests, temporary failures,
+and unknown failures. `retryable` describes the provider failure only. A caller must also enforce
+an attempt limit and prevent replay after emitting events. Subscription quota errors are not
+retryable. Authentication errors do not, by themselves, prove token revocation.
+
+`ResponsesInterruptedError` means no terminal event arrived, including after a refusal delta.
+Known `response.incomplete` reasons still produce their existing `IterationEnd` stop reasons.
+An unknown incomplete reason raises `ResponsesIncompleteError` with the original event body.
+`AgentStream` collectors preserve these exception types and fields.
+
+<!-- name: test_readme_structured_error -->
+```python
+from axio_responses import Recovery, ResponsesAPIError
+
+error = ResponsesAPIError.from_http(
+    '{"error":{"code":"subscription_sharing_usage_limit_exceeded","param":"model"}}',
+    status=429,
+    headers={"x-request-id": "req-example"},
+)
+assert error.recovery is Recovery.quota
+assert not error.retryable
+assert error.param == "model"
+assert error.request_id == "req-example"
+```
 
 ### Holding it against the schema
 

@@ -791,14 +791,11 @@ def _tool_call_response_sse_no_output(
     return lines
 
 
-async def test_parse_sse_empty_output_reports_end_turn(
+async def test_parse_sse_empty_output_preserves_streamed_tool_use(
     fake_server: tuple[FakeCodexServer, str],
     transport: CodexTransport,
 ) -> None:
-    """Streamed function_call items but response.completed with empty output → transport reports end_turn.
-
-    The agent loop handles this by dispatching tools based on content, not stop_reason.
-    """
+    """Streamed function calls require dispatch even when terminal output is empty."""
     server, _ = fake_server
     args = json.dumps({"location": "Paris"})
     server.responses.append(_tool_call_response_sse_no_output("call_xyz", "get_weather", args))
@@ -811,5 +808,40 @@ async def test_parse_sse_empty_output_reports_end_turn(
 
     ends = [e for e in events if isinstance(e, IterationEnd)]
     assert len(ends) == 1
-    # Transport faithfully reports what the API said - agent handles the mismatch
-    assert ends[0].stop_reason == StopReason.end_turn
+    assert ends[0].stop_reason == StopReason.tool_use
+    assert ends[0].usage.input_tokens == 15
+    assert ends[0].usage.output_tokens == 8
+
+
+async def test_quota_429_does_not_retry_and_keeps_diagnostics(
+    fake_server: tuple[FakeCodexServer, str],
+    transport: CodexTransport,
+) -> None:
+    from axio_responses import ResponsesAPIError
+
+    server, _ = fake_server
+    body = {"error": {"code": "subscription_sharing_usage_limit_exceeded", "message": "limit", "param": "model"}}
+    server.status_code = 429
+    server.error_body = json.dumps(body)
+    with pytest.raises(ResponsesAPIError) as raised:
+        await _collect(transport.stream([], [], ""))
+    assert len(server.received_payloads) == 1
+    assert raised.value.body == body
+    assert raised.value.code == body["error"]["code"]
+    assert raised.value.param == "model" and raised.value.status == 429
+
+
+async def test_failed_stream_preserves_structured_error(
+    fake_server: tuple[FakeCodexServer, str],
+    transport: CodexTransport,
+) -> None:
+    from axio_responses import ResponsesAPIError
+
+    server, _ = fake_server
+    body = {"type": "response.failed", "response": {"error": {"code": "subscription_sharing_usage_unavailable"}}}
+    server.responses.append(_sse_event({"type": "response.output_text.delta", "delta": "partial"}) + _sse_event(body))
+    with pytest.raises(ResponsesAPIError) as raised:
+        await _collect(transport.stream([], [], ""))
+    assert len(server.received_payloads) == 1
+    assert raised.value.body == body and raised.value.status == 200
+    assert raised.value.code == "subscription_sharing_usage_unavailable"

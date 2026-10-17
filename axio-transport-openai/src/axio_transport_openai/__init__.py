@@ -35,7 +35,7 @@ from axio.schema import strip_title
 from axio.tool import Tool
 from axio.transport import CompletionTransport, EmbeddingTransport
 from axio.types import StopReason, Usage, stop_reason_from
-from axio_responses import Responses, convert_messages, convert_tools
+from axio_responses import Responses, ResponsesAPIError, convert_messages, convert_tools, request_id
 from axio_sse import Payload, Wire, payloads
 
 from .realtime import OpenAIRealtimeSession, OpenAIRealtimeTransport  # noqa: F401
@@ -670,7 +670,7 @@ class OpenAITransport(CompletionTransport, EmbeddingTransport):
 
     async def _parse_responses(self, resp: aiohttp.ClientResponse) -> AsyncIterator[StreamEvent]:
         """Read one Responses stream. The vocabulary lives in axio-responses."""
-        turn = Responses()
+        turn = Responses(status=resp.status, request_id=request_id(resp.headers))
         async for made in turn.over(resp.content.iter_any(), until="[DONE]"):
             yield made
         yield turn.finished()
@@ -813,9 +813,10 @@ class OpenAITransport(CompletionTransport, EmbeddingTransport):
                         return
 
                     body = await resp.text()
-                    if is_retryable(resp.status):
+                    error = ResponsesAPIError.from_http(body, status=resp.status, headers=resp.headers)
+                    if error.retryable:
                         retry_resp = resp
-                        last_exc = StreamError(f"OpenAI API error {resp.status}: {body}")
+                        last_exc = error
                         logger.warning(
                             "Retryable HTTP %d (attempt %d/%d): %s",
                             resp.status,
@@ -825,7 +826,7 @@ class OpenAITransport(CompletionTransport, EmbeddingTransport):
                         )
                     else:
                         logger.error("HTTP %d from %s: %s", resp.status, url, body)
-                        raise StreamError(f"OpenAI API error {resp.status}: {body}")
+                        raise error
             except aiohttp.ClientError as exc:
                 last_exc = StreamError(str(exc))
                 logger.warning("Connection error (attempt %d/%d): %s", attempt, self.max_retries, exc)

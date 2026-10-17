@@ -27,10 +27,10 @@ from axio.events import (
     ToolInputDelta,
     ToolUseStart,
 )
-from axio.exceptions import StreamError
 from axio.types import StopReason, Usage, stop_reason_from
 from axio_sse import Payload, Reader, Wire, on
 
+from .errors import ResponsesAPIError, ResponsesIncompleteError, ResponsesInterruptedError
 from .request import PROVIDER, STOP_REASONS
 
 logger = logging.getLogger("axio.responses")
@@ -84,6 +84,7 @@ class IncompleteDetails(Wire):
 class ResponseError(Wire):
     message: str = ""
     code: str = ""
+    param: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,16 +127,19 @@ class Created(Wire, name="response.created"):
 @dataclass(frozen=True, slots=True)
 class Completed(Wire, name="response.completed"):
     response: ResponseObject = field(default_factory=ResponseObject)
+    raw: Payload = field(default_factory=Payload)
 
 
 @dataclass(frozen=True, slots=True)
 class Incomplete(Wire, name="response.incomplete"):
     response: ResponseObject = field(default_factory=ResponseObject)
+    raw: Payload = field(default_factory=Payload)
 
 
 @dataclass(frozen=True, slots=True)
 class Failed(Wire, name="response.failed"):
     response: ResponseObject = field(default_factory=ResponseObject)
+    raw: Payload = field(default_factory=Payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +148,8 @@ class StreamFailure(Wire, name="error"):
 
     message: str = ""
     code: str = ""
+    param: str | None = None
+    raw: Payload = field(default_factory=Payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,9 +228,13 @@ class Responses(Reader[StreamEvent]):
     One instance reads one response. Its state is the usage, the stop reason and the id map.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, status: int | None = None, request_id: str | None = None) -> None:
+        self.status = status
+        self.request_id = request_id
+        self.terminal_event: Payload | None = None
         self.usage = Usage(0, 0)
         self.stop_reason: StopReason | None = None
+        self.has_tool_calls = False
         # item_id -> call_id, so a ToolInputDelta carries the id ToolUseStart announced.
         self.call_ids: dict[str, str] = {}
 
@@ -306,6 +316,7 @@ class Responses(Reader[StreamEvent]):
         if item.type != "function_call":
             logger.info("Output item added: type=%s", item.type)
             return
+        self.has_tool_calls = True
         if item.id:
             self.call_ids[item.id] = item.call_id
         logger.info("Tool call started: %s (call_id=%s, item_id=%s)", item.name, item.call_id, item.id)
@@ -321,26 +332,35 @@ class Responses(Reader[StreamEvent]):
 
     @on(Completed)
     def _completed(self, wire: Completed) -> None:
+        self.terminal_event = wire.raw
         response = wire.response
         self._count(response.usage)
         # Not `or "completed"`: a missing or wrongly typed status reads as the empty string here,
         # and coercing it to success made an envelope that never said it finished into a whole
         # answer. Unnamed, it falls to the raise below with the empty string as its name.
         status = response.status
-        if self.stop_reason == StopReason.refusal:
+        if self.stop_reason == StopReason.refusal and status == "completed":
             # The status enum has no refusal member, so a declined response still completes.
             pass
         elif status not in STOP_REASONS:
             # Not a finished answer, whatever else it is. Returned as IterationEnd(error) the
             # caller is told only `Transport stopped with: error`, and the status is what they can
             # act on.
-            raise StreamError(f"Responses completed with an unknown status: {status!r}")
+            raise ResponsesAPIError(
+                f"Responses completed with an unknown status: {status!r}",
+                status=self.status,
+                request_id=self.request_id,
+                body=dict(wire.raw),
+                event_type="response.completed",
+                code=response.error.code or None,
+                param=response.error.param,
+            )
         else:
             self.stop_reason = STOP_REASONS[status]
-            # A finished response still holding a call wants the tool run first. Only a
-            # finished one: rewritten, a cancelled or filtered turn passes the dispatch gate.
-            if self.stop_reason is StopReason.end_turn and any(
-                item.type == "function_call" for item in response.output
+            # Subscription streams can leave terminal output empty after streaming calls.
+            # Preserve cancellation and refusal; only completed turns can request dispatch.
+            if self.stop_reason is StopReason.end_turn and (
+                self.has_tool_calls or any(item.type == "function_call" for item in response.output)
             ):
                 self.stop_reason = StopReason.tool_use
         logger.info(
@@ -355,6 +375,7 @@ class Responses(Reader[StreamEvent]):
     def _incomplete(self, wire: Incomplete) -> None:
         """A response the API cut short. Left unread it ends the turn as ``end_turn``, which tells
         the agent a truncated answer is a whole one."""
+        self.terminal_event = wire.raw
         self._count(wire.response.usage)
         reason = wire.response.incomplete_details.reason
         self.stop_reason = stop_reason_from(reason, STOP_REASONS, provider="Responses")
@@ -371,16 +392,16 @@ class Responses(Reader[StreamEvent]):
 
     @on(Failed)
     def _failed(self, wire: Failed) -> None:
-        message = wire.response.error.message or "Unknown error"
-        logger.error("Response failed: %s", message)
-        raise StreamError(f"Responses API error: {message}")
+        raise ResponsesAPIError.from_body(
+            dict(wire.raw), status=self.status, request_id=self.request_id, event_type="response.failed"
+        )
 
     @on(StreamFailure)
     def _errored(self, wire: StreamFailure) -> None:
-        """Left unread the turn simply stopped and reported a normal finish."""
-        message = wire.message or "Unknown error"
-        logger.error("Stream error: %s (code=%s)", message, wire.code or "none")
-        raise StreamError(f"Responses API error: {message}")
+        """Preserve the stream's explicit error, including code and parameter."""
+        raise ResponsesAPIError.from_body(
+            dict(wire.raw), status=self.status, request_id=self.request_id, event_type="error"
+        )
 
     # ── named, and deliberately not read ─────────────────────────────────────────────────────
 
@@ -446,8 +467,12 @@ class Responses(Reader[StreamEvent]):
         cut. Reported as ``end_turn``, a truncated answer is stored and returned as a whole one.
         So it is raised, the way a transport reports any other broken stream.
         """
-        if self.stop_reason is None:
-            raise StreamError("Responses stream ended without response.completed, response.incomplete or an error")
+        if self.terminal_event is None or self.stop_reason is None:
+            raise ResponsesInterruptedError(
+                "Responses stream ended without response.completed, response.incomplete or an error",
+                status=self.status,
+                request_id=self.request_id,
+            )
         stop = self.stop_reason
         logger.debug(
             "Stream complete: stop_reason=%s, input_tokens=%d, output_tokens=%d",
@@ -456,5 +481,11 @@ class Responses(Reader[StreamEvent]):
             self.usage.output_tokens,
         )
         if stop is StopReason.error:
-            raise StreamError("Responses stopped with an error the reader did not name")
+            raise ResponsesIncompleteError(
+                "Responses stopped with an error the reader did not name",
+                status=self.status,
+                request_id=self.request_id,
+                body=dict(self.terminal_event),
+                event_type=self.terminal_event.string("type"),
+            )
         return IterationEnd(iteration=0, stop_reason=stop, usage=self.usage)

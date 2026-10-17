@@ -51,6 +51,8 @@ class AgentStream:
                         event.stop_reason,
                     )
                 if isinstance(event, Error):
+                    if isinstance(event.exception, StreamError):
+                        raise event.exception
                     raise StreamError(str(event.exception)) from event.exception
                 if isinstance(event, TextDelta):
                     parts.append(event.delta)
@@ -68,6 +70,8 @@ class AgentStream:
         try:
             async for event in self:
                 if isinstance(event, Error):
+                    if isinstance(event.exception, StreamError):
+                        raise event.exception
                     raise StreamError(str(event.exception)) from event.exception
                 if isinstance(event, SessionEndEvent):
                     result = event

@@ -141,3 +141,16 @@ async def test_a_run_that_hit_max_iterations_raises_rather_than_answering() -> N
 
     with pytest.raises(StreamError, match="max_iterations"):
         await agent.run("go", MemoryContextStore())
+
+
+@pytest.mark.parametrize("collector", ["get_final_text", "get_session_end"])
+async def test_collectors_preserve_provider_error_subclasses(collector: str) -> None:
+    class ProviderError(StreamError):
+        code = "quota"
+
+    error = ProviderError("limit")
+    stream = AgentStream(_make_gen([Error(error)]))
+    with pytest.raises(ProviderError) as raised:
+        await getattr(stream, collector)()
+    assert raised.value is error
+    assert stream._closed
