@@ -19,9 +19,11 @@ tui = ["textual>=2.1.0"]
 
 [project.entry-points."axio.transport"]
 anthropic = "axio_transport_anthropic:AnthropicTransport"
+anthropic-vertex = "axio_transport_anthropic:VertexAITransport"
 
 [project.entry-points."axio.transport.settings"]
 anthropic = "axio_transport_anthropic.tui:AnthropicSettingsScreen"
+anthropic-vertex = "axio_transport_anthropic.tui.settings:VertexSettingsScreen"
 
 [project.urls]
 Documentation = "https://docs.axio-agent.com"
@@ -55,6 +57,7 @@ python_version = "3.12"
 
 [dependency-groups]
 dev = [
+    "textual>=2.1.0",
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "mypy>=1.14",

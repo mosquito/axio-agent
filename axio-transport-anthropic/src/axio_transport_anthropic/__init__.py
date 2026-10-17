@@ -11,7 +11,7 @@ import logging
 import os
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass, field
-from typing import Any, Final, Literal, Protocol, Self, cast
+from typing import Any, ClassVar, Final, Literal, Protocol, Self, cast
 
 import aiohttp
 from axio.blocks import (
@@ -618,6 +618,11 @@ def _number[T: (int, float)](data: dict[str, Any], key: str, as_type: Callable[[
 
 @dataclass(slots=True)
 class AnthropicTransport(CompletionTransport):
+    display_name: ClassVar[str] = "Anthropic"
+    env_vars: ClassVar[tuple[str, ...]] = ("ANTHROPIC_API_KEY",)
+    supports_max_tokens: ClassVar[bool] = False
+    supports_debug: ClassVar[bool] = False
+
     name: str = "Anthropic"
     base_url: str = field(default_factory=lambda: os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1"))
     api_key: str = field(default_factory=lambda: os.environ.get("ANTHROPIC_API_KEY", ""))
@@ -873,3 +878,14 @@ class AnthropicTransport(CompletionTransport):
             return dataclasses.replace(built, model=spec)
         logger.warning("Saved model %r is in no registry this transport has; taking the default", saved)
         return built
+
+
+@dataclass(slots=True)
+class VertexAITransport(AnthropicTransport):
+    """Claude on Vertex AI, selected independently from Google's Gemini transport."""
+
+    display_name: ClassVar[str] = "Anthropic Vertex AI"
+    env_vars: ClassVar[tuple[str, ...]] = ("GOOGLE_CLOUD_PROJECT",)
+    auto_select: ClassVar[bool] = False
+    name: str = "Anthropic Vertex AI"
+    vertexai: bool = True

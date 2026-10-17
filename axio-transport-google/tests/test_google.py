@@ -25,7 +25,7 @@ from axio.blocks import (
 from axio.events import IterationEnd, Refusal, TextDelta, ToolInputDelta, ToolUseStart
 from axio.exceptions import StreamError
 from axio.messages import Message
-from axio.models import Capability, ModelRegistry
+from axio.models import Capability, ModelRegistry, ModelSpec
 from axio.testing import assert_stream_contract
 from axio.tool import Tool
 from axio.types import StopReason
@@ -40,7 +40,6 @@ from axio_transport_google import (
     UsageMetadata,
     _build_contents_json,
     _build_tools_json,
-    _get_anthropic_models,
     _tool_name_from_id,
     _Turn,
     _usage,
@@ -346,12 +345,12 @@ def test_genai_models_registry() -> None:
     assert "gemini-3.1-flash-lite-preview" in GENAI_MODELS
 
 
-def test_vertexai_anthropic_models_registry() -> None:
-    models = _get_anthropic_models()
-    assert isinstance(models, ModelRegistry)
-    assert "anthropic/claude-sonnet-4-6" in models
-    assert "anthropic/claude-opus-4-6" in models
-    assert "anthropic/claude-haiku-4-5" in models
+def test_vertexai_rejects_legacy_anthropic_model_without_substitution() -> None:
+    transport = GoogleTransport(vertexai=True, model=ModelSpec("anthropic/claude-sonnet-4-6"))
+    with pytest.raises(StreamError, match="anthropic-vertex"):
+        transport.stream([], [], "")
+    assert transport.model.id == "anthropic/claude-sonnet-4-6"
+    assert all(not name.startswith("anthropic/") for name in GENAI_MODELS.keys())
 
 
 # ---------------------------------------------------------------------------

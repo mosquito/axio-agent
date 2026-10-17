@@ -107,3 +107,16 @@ transport = AnthropicTransport(
 ## License
 
 MIT
+
+
+## Vertex entry point
+
+Install `axio-transport-anthropic[vertexai]` to use Claude through Vertex without
+the Google transport package. Select `--transport anthropic-vertex` in REPL, or
+Anthropic Vertex AI in TUI. Set `GOOGLE_CLOUD_PROJECT` and optionally
+`GOOGLE_CLOUD_LOCATION`, or enter project and location in TUI settings.
+`axio_transport_anthropic.VertexAITransport` also accepts these fields directly.
+This entry point requires explicit selection and uses Google ADC.
+
+When migrating from Google Vertex, remove `anthropic/` from the model ID and
+copy project and location. Existing Google settings remain unchanged.

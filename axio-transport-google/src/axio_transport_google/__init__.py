@@ -10,7 +10,7 @@ import os
 from collections import deque
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
-from typing import Any, Final, Protocol, cast
+from typing import Any, ClassVar, Final, Protocol, cast
 
 import aiohttp
 from axio.blocks import (
@@ -168,25 +168,6 @@ GENAI_MODELS: ModelRegistry = ModelRegistry(
         ),
     }
 )
-
-
-def _get_anthropic_models() -> ModelRegistry:
-    """Get Anthropic models with 'anthropic/' prefix for Vertex AI routing."""
-    from axio_transport_anthropic import ANTHROPIC_MODELS
-
-    return ModelRegistry(
-        {
-            ModelSpec(
-                id=f"anthropic/{spec.id}",
-                context_window=spec.context_window,
-                max_output_tokens=spec.max_output_tokens,
-                capabilities=spec.capabilities,
-                input_cost=spec.input_cost,
-                output_cost=spec.output_cost,
-            )
-            for spec in ANTHROPIC_MODELS.values()
-        }
-    )
 
 
 #: Reasons that say the turn failed. A call streamed inside one is not a request to run it.
@@ -549,6 +530,9 @@ def _media_event(part: ContentPart, at: int) -> StreamEvent:
 
 @dataclass(slots=True)
 class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport):
+    display_name: ClassVar[str] = "Google GenAI"
+    env_vars: ClassVar[tuple[str, ...]] = ("GEMINI_API_KEY",)
+
     name: str = "Google GenAI"
     api_key: str = ""
     vertexai: bool | None = None
@@ -578,6 +562,13 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport)
     last_usage: Usage | None = field(default=None, repr=False, compare=False)
     # Vertex AI credentials (lazily initialised)
     _credentials: Any = field(default=None, repr=False, compare=False)
+
+    @staticmethod
+    def bind_tools(transport: Any | None) -> None:
+        from . import tools
+
+        if transport is None or tools.transport is None:
+            tools.transport = transport
 
     def __post_init__(self) -> None:
         if isinstance(self.vertexai, str):
@@ -704,37 +695,20 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport)
 
     def stream(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> AsyncIterator[StreamEvent]:
         if self.model.id.startswith("anthropic/"):
-            return self._stream_anthropic(messages, tools, system)
+            raise StreamError(self.model_selection_error(self.model.id))
         return self._do_stream(messages, tools, system)
 
-    async def _stream_anthropic(
-        self, messages: list[Message], tools: list[Tool[Any]], system: str
-    ) -> AsyncIterator[StreamEvent]:
-        from axio_transport_anthropic import ANTHROPIC_MODELS, AnthropicTransport
-
-        bare_id = self.model.id.removeprefix("anthropic/")
-        model_spec = ANTHROPIC_MODELS.get(bare_id) or self.model
-        proxy = AnthropicTransport(
-            vertexai=True,
-            project=self.project,
-            location=self.location,
-            model=model_spec,
-            max_retries=self.max_retries,
-            # Both halves of the policy, or a deliberately patient retry became the Anthropic
-            # transport's own default of five seconds.
-            retry_base_delay=self.retry_base_delay,
-            temperature=self.temperature,
-            top_p=self.top_p,
-            top_k=int(self.top_k) if self.top_k is not None else None,
-            thinking_budget=self.thinking_budget,
-            session=self.session,
-        )
-        # This transport is the one the agent asks, and the proxy reports nothing here. Left at
-        # the last Gemini turn's figure, a Claude turn cut short reported the numbers of a response
-        # served by another provider entirely; left at None, the agent says the figure is missing.
-        self.last_usage = None
-        async for event in proxy.stream(messages, tools, system):
-            yield event
+    @staticmethod
+    def model_selection_error(model_id: str) -> str:
+        if model_id.startswith("anthropic/"):
+            return (
+                "Claude on Vertex requires axio-transport-anthropic[vertexai]. "
+                "Select anthropic-vertex with model "
+                + model_id.removeprefix("anthropic/")
+                + ". Copy the previous Vertex project and location to that transport. "
+                "Existing settings are preserved; no replacement model is selected."
+            )
+        return f"Unknown Google model {model_id!r}. Select an available Gemini model."
 
     def _build_request_body(
         self, messages: list[Message], tools: list[Tool[Any]], system: str
@@ -1165,10 +1139,6 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport)
             logger.warning("fetch_models failed, using defaults", exc_info=True)
             self.models = GENAI_MODELS
 
-        if self.vertexai:
-            for spec in _get_anthropic_models().values():
-                self.models[spec.id] = spec
-
     # ── Serialization ──
 
     def to_dict(self) -> dict[str, Any]:
@@ -1250,7 +1220,10 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport)
 
 @dataclass(slots=True)
 class VertexAITransport(GoogleTransport):
-    """GoogleTransport pre-configured for Vertex AI (includes Anthropic models)."""
+    """GoogleTransport pre-configured for Gemini on Vertex AI."""
+
+    display_name: ClassVar[str] = "Google Vertex AI"
+    env_vars: ClassVar[tuple[str, ...]] = ("GOOGLE_GENAI_USE_VERTEXAI",)
 
     name: str = "Google Vertex AI"
     vertexai: bool | None = True

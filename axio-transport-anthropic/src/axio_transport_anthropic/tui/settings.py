@@ -65,3 +65,31 @@ class AnthropicSettingsScreen(ModalScreen[dict[str, str] | None]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+
+class VertexSettingsScreen(AnthropicSettingsScreen):
+    """Configure Claude's Vertex project and location without Gemini dependencies."""
+
+    def compose(self) -> ComposeResult:
+        with Container(id="anthropic-settings"):
+            yield Static("[bold]Anthropic Vertex AI Settings[/]")
+            yield Static("Project (or GOOGLE_CLOUD_PROJECT):", classes="field-label")
+            yield Input(value=self._settings.get("project", ""), id="project")
+            yield Static("Location (or GOOGLE_CLOUD_LOCATION; default: global):", classes="field-label")
+            yield Input(value=self._settings.get("location", ""), id="location")
+            with Horizontal(classes="settings-buttons"):
+                yield Button("Save", id="btn-save", variant="primary")
+                yield Button("Cancel", id="btn-cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#project", Input).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-save":
+            result = dict(self._settings)
+            result["project"] = self.query_one("#project", Input).value.strip()
+            result["location"] = self.query_one("#location", Input).value.strip()
+            result["vertexai"] = "true"
+            self.dismiss(result)
+        else:
+            self.dismiss(None)

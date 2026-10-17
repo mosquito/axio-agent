@@ -748,6 +748,7 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "textual" },
 ]
 
 [package.metadata]
@@ -768,6 +769,7 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "ruff", specifier = ">=0.9" },
+    { name = "textual", specifier = ">=2.1.0" },
 ]
 
 [[package]]
@@ -821,9 +823,9 @@ name = "axio-transport-google"
 version = "0.1.0"
 source = { editable = "axio-transport-google" }
 dependencies = [
+    { name = "aiohttp" },
     { name = "axio" },
     { name = "axio-sse" },
-    { name = "axio-transport-anthropic", extra = ["vertexai"] },
     { name = "google-auth", extra = ["urllib3"] },
 ]
 
@@ -843,9 +845,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", specifier = ">=3.11" },
     { name = "axio", editable = "axio" },
     { name = "axio-sse", editable = "axio-sse" },
-    { name = "axio-transport-anthropic", extras = ["vertexai"], editable = "axio-transport-anthropic" },
     { name = "google-auth", extras = ["urllib3"], specifier = ">=2.0" },
     { name = "textual", marker = "extra == 'tui'", specifier = ">=2.1.0" },
 ]
