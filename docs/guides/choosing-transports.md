@@ -247,4 +247,5 @@ discovery alone does not attach tools or providers to an `Agent`.
 
 TUI settings screens remain a separate UI integration. They are not needed to
 discover or use a transport from core. See {doc}`../api/axio` for the catalogs
-and lifecycle helpers, and {doc}`writing-transports` to register your own provider.
+and lifecycle helpers, {doc}`plugin-discovery` for all entry-point registrations,
+and {doc}`writing-transports` to implement your own transport.

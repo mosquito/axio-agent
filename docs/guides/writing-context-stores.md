@@ -295,8 +295,21 @@ Method summary:
 
 ## Registering a context store
 
-Context stores are not discovered through entry points. They are ordinary
-Python classes that you instantiate yourself and pass to the `Agent`.
+You can instantiate a `ContextStore` directly and pass it to the `Agent`.
+Applications can also discover backend factories through `axio.context`.
+A backend implements `async init(path)`, `create(session_id=None)`, and
+`async close()`; it creates stores and owns their shared resources. Register
+the backend factory, not the store class:
+
+```toml
+[project.entry-points."axio.context"]
+example = "example_store:Backend"
+```
+
+Use `axio.plugins.discover_context_backends()` to load these factories.
+Discovery constructs backends but leaves initialization and cleanup to the
+application. TUI uses this group for conversation history. See
+{doc}`plugin-discovery` for registration and lifecycle details.
 
 ### Passing to Agent
 

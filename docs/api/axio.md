@@ -165,6 +165,9 @@ instructions are loaded by the application-controlled preflight path.
 
 ## Provider discovery
 
+See {doc}`../guides/plugin-discovery` for all entry-point groups, installation
+and registration examples, lifecycle contracts, and discovery diagnostics.
+
 `axio.plugins` loads installed entry points into `PluginCatalog`. Each catalog
 retains entries, load errors, and the declaring distribution. The first
 declaration reserves its name even when loading fails. `require(name)` reports
@@ -178,6 +181,7 @@ The groups have separate contracts:
 | `axio.tools.providers` | A zero-argument `ToolProvider` factory |
 | `axio.guards` | A `PermissionGuard` subclass |
 | `axio.selector` | A `ToolSelector` class |
+| `axio.context` | A zero-argument `ContextBackend` factory |
 | `axio.transport` | A transport class or plugin, through `discover_transports()` |
 
 A tool provider implements `init(config=None, global_config=None)`, `close()`,

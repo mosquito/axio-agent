@@ -101,6 +101,9 @@ transports instead declare `stream` as a plain `def` returning a call to a separ
 
 ## Register a transport for applications
 
+See {doc}`plugin-discovery` for how installed metadata is loaded and how the
+transport groups differ from tool providers and UI integrations.
+
 Custom applications, REPL, and TUI use `axio.transport.discover_transports()` from
 core. See {doc}`choosing-transports` for selecting and opening an installed provider
 in user code. Install the provider package in the same Python environment as the
