@@ -32,6 +32,7 @@ openai-custom = "axio_transport_openai.custom:OpenAICompatibleTransport"
 openai = "axio_transport_openai:OpenAIRealtimeTransport"
 
 [project.entry-points."axio.transport.settings"]
+chatgpt = "axio_transport_openai.tui.chatgpt:ChatGPTSettingsScreen"
 openai = "axio_transport_openai.tui:OpenAISettingsScreen"
 nebius = "axio_transport_openai.tui:NebiusSettingsScreen"
 openrouter = "axio_transport_openai.tui:OpenRouterSettingsScreen"
