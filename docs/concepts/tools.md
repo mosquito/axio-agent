@@ -12,10 +12,12 @@ call is different. It is one request from the model to invoke that Tool.
 from pathlib import Path
 from axio import Tool
 
+
 async def write_file(path: str, content: str) -> str:
     """Write content to a file at the given path."""
     Path(path).write_text(content)
     return f"Wrote {len(content)} bytes to {path}"
+
 
 tool = Tool(name="write_file", handler=write_file)
 ```
@@ -32,12 +34,14 @@ Use `Annotated` + `Field` to add descriptions, defaults, or numeric bounds:
 from typing import Annotated
 from axio import Tool, Field
 
+
 async def search(
     query: Annotated[str, Field(description="Search query")],
     limit: Annotated[int, Field(default=10, ge=1, le=100)] = 10,
 ) -> str:
     """Search the knowledge base."""
     return f"results for {query!r} (limit={limit})"
+
 
 tool = Tool(name="search", handler=search)
 result_default = search.__defaults__
@@ -59,8 +63,8 @@ from axio import Tool, CONTEXT, Field
 
 
 async def search(
-        query: Annotated[str, Field(description="Search query")],
-        limit: Annotated[int, Field(default=10, ge=1, le=100)] = 10,
+    query: Annotated[str, Field(description="Search query")],
+    limit: Annotated[int, Field(default=10, ge=1, le=100)] = 10,
 ) -> str:
     """Search a list of documents."""
     documents: list[str] = CONTEXT.get()
@@ -106,11 +110,11 @@ Every handler function is wrapped in a `Tool` frozen dataclass:
 class Tool[T]:
     name: str
     handler: Callable[..., Awaitable[Any]]
-    description: str = ""       # defaults to handler.__doc__
+    description: str = ""  # defaults to handler.__doc__
     guards: tuple[PermissionGuard, ...] = ()
     concurrency: int | None = None
-    context: T = ...            # default: empty mapping
-    schema: MappingProxyType[str, Any] = ...   # default: built from the handler
+    context: T = ...  # default: empty mapping
+    schema: MappingProxyType[str, Any] = ...  # default: built from the handler
 ```
 
 `handler`
@@ -241,6 +245,7 @@ of available tools before each LLM call.
 name: test_tool_selector_protocol
 ```python
 from axio import PermissionGuard
+
 ToolName = str
 ```
 -->

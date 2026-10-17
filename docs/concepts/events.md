@@ -469,10 +469,14 @@ import asyncio
 from axio import Agent, IterationEnd, MemoryContextStore, Refusal, StopReason, Usage
 from axio.testing import StubTransport
 
-transport = StubTransport([[
-    Refusal(index=0, text="I can't help with that.", category="policy"),
-    IterationEnd(0, StopReason.refusal, Usage(12, 4)),
-]])
+transport = StubTransport(
+    [
+        [
+            Refusal(index=0, text="I can't help with that.", category="policy"),
+            IterationEnd(0, StopReason.refusal, Usage(12, 4)),
+        ]
+    ]
+)
 agent = Agent(system="You are helpful.", transport=transport)
 
 answer = asyncio.run(agent.run("...", MemoryContextStore()))

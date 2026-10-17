@@ -12,9 +12,11 @@ sequences instead of calling a real LLM:
 ```python
 from axio.testing import StubTransport, make_text_response
 
-transport = StubTransport([
-    make_text_response("Hello!"),
-])
+transport = StubTransport(
+    [
+        make_text_response("Hello!"),
+    ]
+)
 assert len(transport._responses) == 1
 assert transport._call_count == 0
 ```
@@ -47,7 +49,7 @@ events = make_text_response(text="Hello world", iteration=1)
 assert events == [
     TextDelta(index=0, delta="Hello world"),
     IterationEnd(
-        iteration=1, 
+        iteration=1,
         stop_reason=StopReason.end_turn,
         usage=Usage(input_tokens=10, output_tokens=5),
     ),
@@ -140,10 +142,12 @@ from axio.testing import (
 
 
 async def test_agent_calls_tool():
-    transport = StubTransport([
-        make_tool_use_response("echo", tool_input={"text": "hello"}),
-        make_text_response("Done!"),
-    ])
+    transport = StubTransport(
+        [
+            make_tool_use_response("echo", tool_input={"text": "hello"}),
+            make_text_response("Done!"),
+        ]
+    )
     agent = Agent(
         system="You are a test agent.",
         tools=[make_echo_tool()],
@@ -151,6 +155,7 @@ async def test_agent_calls_tool():
     )
     result = await agent.run("Say hello", make_ephemeral_context())
     assert result == "Done!"
+
 
 asyncio.run(test_agent_calls_tool())
 ```
@@ -168,7 +173,15 @@ a transport author tests reasoning replay, and how anyone tests that the selecto
 import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
-from axio import Agent, MemoryContextStore, StopReason, StreamEvent, TextDelta, Tool, Usage
+from axio import (
+    Agent,
+    MemoryContextStore,
+    StopReason,
+    StreamEvent,
+    TextDelta,
+    Tool,
+    Usage,
+)
 from axio.blocks import TextBlock
 from axio.events import IterationEnd
 from axio.messages import Message
@@ -182,10 +195,14 @@ class Recorder:
         self.sent: list[list[Message]] = []
         self.offered: list[list[Tool[Any]]] = []
 
-    def stream(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> AsyncIterator[StreamEvent]:
+    def stream(
+        self, messages: list[Message], tools: list[Tool[Any]], system: str
+    ) -> AsyncIterator[StreamEvent]:
         self.sent.append(list(messages))
         self.offered.append(list(tools))
-        return self._replay(self.responses[min(len(self.sent) - 1, len(self.responses) - 1)])
+        return self._replay(
+            self.responses[min(len(self.sent) - 1, len(self.responses) - 1)]
+        )
 
     async def _replay(self, events: list[StreamEvent]) -> AsyncIterator[StreamEvent]:
         for event in events:
@@ -193,10 +210,16 @@ class Recorder:
 
 
 async def main() -> None:
-    transport = Recorder([[
-        TextDelta(index=0, delta="hi"),
-        IterationEnd(iteration=0, stop_reason=StopReason.end_turn, usage=Usage(10, 2)),
-    ]])
+    transport = Recorder(
+        [
+            [
+                TextDelta(index=0, delta="hi"),
+                IterationEnd(
+                    iteration=0, stop_reason=StopReason.end_turn, usage=Usage(10, 2)
+                ),
+            ]
+        ]
+    )
     agent = Agent(system="", transport=transport)
     await agent.run("hello", MemoryContextStore())
 
@@ -205,6 +228,7 @@ async def main() -> None:
     # The user turn is already in the history the transport is handed, and the agent prefixes
     # it with a local timestamp.
     assert said.endswith("hello")
+
 
 asyncio.run(main())
 ```
@@ -223,20 +247,28 @@ from axio.testing import StubTransport
 
 
 async def main() -> None:
-    transport = StubTransport([[
-        Refusal(index=0, text="I can't help with that.", category="policy"),
-        IterationEnd(iteration=0, stop_reason=StopReason.refusal, usage=Usage(12, 5)),
-    ]])
+    transport = StubTransport(
+        [
+            [
+                Refusal(index=0, text="I can't help with that.", category="policy"),
+                IterationEnd(
+                    iteration=0, stop_reason=StopReason.refusal, usage=Usage(12, 5)
+                ),
+            ]
+        ]
+    )
     agent = Agent(system="", transport=transport)
 
     # get_final_text() collects refusal text, so this is no longer the empty string.
     assert await agent.run("...", MemoryContextStore()) == "I can't help with that."
 
     ends = [
-        e async for e in agent.run_stream("...", MemoryContextStore())
+        e
+        async for e in agent.run_stream("...", MemoryContextStore())
         if isinstance(e, SessionEndEvent)
     ]
     assert ends[0].stop_reason is StopReason.refusal
+
 
 asyncio.run(main())
 ```
@@ -273,7 +305,7 @@ class Reply(Reader[StreamEvent], by=EVENT_NAME):
 # One direction only. The reader is meant to be a subset: it names what it interprets.
 assert Reply.names() <= PUBLISHED
 
-[event] = Decoder().decode(b'event: something.new\ndata: {}\n\n', final=True)
+[event] = Decoder().decode(b"event: something.new\ndata: {}\n\n", final=True)
 with pytest.raises(UnknownEvent):
     Reply().read(event, strict=True)
 ```
@@ -299,6 +331,7 @@ async def test_word_count():
     result = await tool(text="one two three")
     assert "3" in result
 
+
 asyncio.run(test_word_count())
 ```
 
@@ -320,6 +353,7 @@ async def test_word_count_tool():
     tool = Tool(name="word_count", handler=word_count)
     result = await tool(text="one two three")
     assert "3" in result
+
 
 asyncio.run(test_word_count_tool())
 ```
@@ -364,6 +398,7 @@ async def test_guard_denies_long_input():
     with pytest.raises(GuardError):
         await guard.check(_tool, text="this is way too long")
 
+
 asyncio.run(test_guard_allows_short_input())
 asyncio.run(test_guard_denies_long_input())
 ```
@@ -385,6 +420,7 @@ async def test_context_append_and_history():
     history = await ctx.get_history()
     assert len(history) == 1
     assert history[0].role == "user"
+
 
 asyncio.run(test_context_append_and_history())
 ```

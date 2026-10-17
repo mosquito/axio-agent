@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import asyncio
 
-from axio import Agent, MemoryContextStore, TextDelta
 from axio.testing import StubTransport, make_text_response, make_tool_use_response
 
+from axio import Agent, MemoryContextStore, TextDelta
 
 # ── Tool ─────────────────────────────────────────────────────────────────────
 

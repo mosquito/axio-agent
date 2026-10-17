@@ -94,6 +94,7 @@ async def main():
     assert history[0].role == "user"
     assert history[1].role == "assistant"
 
+
 asyncio.run(main())
 ```
 
@@ -147,6 +148,7 @@ async def main():
 
     await store.clear()
     assert len(await store.get_history()) == 0
+
 
 asyncio.run(main())
 ```
@@ -204,6 +206,7 @@ async def main():
     # Original is unchanged.
     assert len(await store.get_history()) == 1
     assert len(await forked.get_history()) == 2
+
 
 asyncio.run(main())
 ```
@@ -272,6 +275,7 @@ async def main():
     assert in_tok == 300
     assert out_tok == 125
 
+
 asyncio.run(main())
 ```
 
@@ -311,10 +315,13 @@ from axio.testing import StubTransport, make_text_response
 class MinimalStore(ContextStore):
     def __init__(self) -> None:
         self._messages: list[Message] = []
+
     async def append(self, message: Message) -> None:
         self._messages.append(message)
+
     async def get_history(self) -> list[Message]:
         return list(self._messages)
+
 
 transport = StubTransport([make_text_response("ok")])
 ```
@@ -330,9 +337,11 @@ agent = Agent(
     transport=transport,
 )
 
+
 async def main():
     result = await agent.run("Hello", store)
     assert result == "ok"
+
 
 asyncio.run(main())
 ```
@@ -349,6 +358,7 @@ and can share that connection across many session instances:
 import asyncio
 from axio_context_sqlite import SQLiteContextStore, connect
 
+
 async def main():
     conn = await connect("./my_db.sqlite")
     try:
@@ -356,6 +366,7 @@ async def main():
         # pass store to Agent.run(...)
     finally:
         await conn.close()
+
 
 asyncio.run(main())
 ```

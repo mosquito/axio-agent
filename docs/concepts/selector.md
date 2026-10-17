@@ -100,8 +100,7 @@ class KeywordSelector:
             return tools  # Default to all if not a user message
 
         text = "".join(
-            block.text for block in latest.content
-            if hasattr(block, "text")
+            block.text for block in latest.content if hasattr(block, "text")
         ).lower()
 
         # Match any keyword
@@ -116,11 +115,13 @@ class KeywordSelector:
 
 
 # Usage
-selector = KeywordSelector({
-    "write_file": ["file", "write", "save", "create"],
-    "read_file": ["file", "read", "open", "load"],
-    "search": ["search", "find", "query"],
-})
+selector = KeywordSelector(
+    {
+        "write_file": ["file", "write", "save", "create"],
+        "read_file": ["file", "read", "open", "load"],
+        "search": ["search", "find", "query"],
+    }
+)
 ```
 
 ### Permission-based filtering
@@ -230,6 +231,7 @@ async def _run():
     context = MemoryContextStore()
     result = await agent.run("echo hello", context)
     return result
+
 
 asyncio.run(_run())
 ```

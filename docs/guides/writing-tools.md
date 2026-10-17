@@ -142,6 +142,7 @@ name: test_word_count_tool
 ```python
 from axio import Agent, MemoryContextStore
 from axio.testing import StubTransport, make_text_response
+
 my_transport = StubTransport([make_text_response("ok")])
 context = MemoryContextStore()
 ```
@@ -163,6 +164,7 @@ Attach guards to control when the tool can run:
 name: test_tool_with_guard
 ```python
 from axio import Tool
+
 
 async def word_count(text: str) -> str:
     """Count words."""
@@ -190,6 +192,7 @@ Limit how many instances of your tool can run simultaneously:
 async def web_fetch(url: str) -> str:
     """Fetch a URL."""
     ...
+
 
 tool = Tool(
     name="web_fetch",

@@ -64,9 +64,10 @@ Available transports (each in its own installable package):
 |---|---|---|
 | {class}`~axio_transport_anthropic.AnthropicTransport` | `axio-transport-anthropic` | Anthropic Claude models |
 | {class}`~axio_transport_openai.OpenAITransport` | `axio-transport-openai` | OpenAI and OpenAI-compatible APIs |
+| {class}`~axio_transport_openai.ChatGPTTransport` | `axio-transport-openai` | ChatGPT subscription through public Responses, with an explicit account session |
 | {class}`~axio_transport_google.GoogleTransport` | `axio-transport-google` | Gemini Developer API |
 | {class}`~axio_transport_google.VertexAITransport` | `axio-transport-google` | Gemini and Anthropic on Vertex AI |
-| {class}`~axio_transport_codex.CodexTransport` | `axio-transport-codex` | ChatGPT via OAuth |
+| {class}`~axio_transport_codex.CodexTransport` | `axio-transport-codex` | Codex OAuth through the ChatGPT backend |
 
 `OpenAITransport` speaks two endpoints. Its `api` field picks between them, and
 defaults to `"responses"` (`/v1/responses`). The OpenAI-compatible subclasses -
@@ -123,6 +124,7 @@ class MyContextStore(ContextStore):
     #   get_context_tokens()               - returns (0, 0) by default
     #   add_context_tokens(input, output)  - increments via get/set above
     #   list_sessions()     - returns a single SessionInfo for the current session
+
 
 store = MyContextStore()
 assert store.session_id  # auto-generated UUID hex
@@ -339,8 +341,7 @@ async def example():
 
     transport: TTSTransport = ...  # your implementation
     audio_chunks = [
-        chunk
-        async for chunk in transport.synthesize("Hello world", voice="alloy")
+        chunk async for chunk in transport.synthesize("Hello world", voice="alloy")
     ]
     audio_data = b"".join(audio_chunks)
     assert isinstance(audio_data, bytes)

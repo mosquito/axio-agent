@@ -7,7 +7,12 @@ import pathlib
 import re
 
 #: Directive to whether its target names a module or something inside one.
-_DIRECTIVES = {"automodule": True, "autoclass": False, "autofunction": False, "autodata": False}
+_DIRECTIVES = {
+    "automodule": True,
+    "autoclass": False,
+    "autofunction": False,
+    "autodata": False,
+}
 
 
 def _resolves(directive: str, target: str) -> bool:
@@ -23,7 +28,9 @@ def _resolves(directive: str, target: str) -> bool:
 
 def test_every_autodoc_target_can_be_imported() -> None:
     # A directive naming something that moved renders an empty page and says nothing about it.
-    pattern = re.compile(r"^\.\. (automodule|autoclass|autofunction|autodata):: ([\w.]+)", re.M)
+    pattern = re.compile(
+        r"^\.\. (automodule|autoclass|autofunction|autodata):: ([\w.]+)", re.MULTILINE
+    )
     missing = [
         f"{page.name}: {target}"
         for page in pathlib.Path(__file__).parent.rglob("*.md")

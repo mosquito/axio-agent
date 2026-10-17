@@ -216,7 +216,7 @@ multiple polecats in one response:
 ```python
 class SlingContext(TypedDict):
     db: aiosqlite.Connection
-    queue: Channel[int]   # aiochannel.Channel
+    queue: Channel[int]  # aiochannel.Channel
 
 
 async def sling(
@@ -261,7 +261,7 @@ worker_tasks = [
     for i in range(num_polecats)
 ]
 # ... run Mayor ...
-polecat_queue.close()           # workers exit their async-for loop cleanly
+polecat_queue.close()  # workers exit their async-for loop cleanly
 await asyncio.gather(*worker_tasks, return_exceptions=True)
 ```
 
@@ -388,13 +388,13 @@ Default model assignments in `__main__.py`:
 
 ```python
 role_models: dict[str, ModelSpec] = {
-    "default":  transport.models["MiniMaxAI/MiniMax-M2.5"],
-    "mayor":    transport.models["Qwen/Qwen3-235B-A22B-Instruct-2507"],
-    "polecat":  transport.models["Qwen/Qwen3.5-397B-A17B"],
-    "witness":  transport.models["openai/gpt-oss-120b"],
+    "default": transport.models["MiniMaxAI/MiniMax-M2.5"],
+    "mayor": transport.models["Qwen/Qwen3-235B-A22B-Instruct-2507"],
+    "polecat": transport.models["Qwen/Qwen3.5-397B-A17B"],
+    "witness": transport.models["openai/gpt-oss-120b"],
     "refinery": transport.models["openai/gpt-oss-120b"],
     # analyst runs many instances in parallel - use a fast model
-    "analyst":  transport.models["deepseek-ai/DeepSeek-V3.2"],
+    "analyst": transport.models["deepseek-ai/DeepSeek-V3.2"],
 }
 ```
 

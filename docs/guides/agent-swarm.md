@@ -88,6 +88,7 @@ from axio.transport import DummyCompletionTransport
 ROLES_DIR = Path(__file__).parent
 ROLE_NAMES = [p.stem for p in sorted(ROLES_DIR.glob("*.toml"))]
 
+
 def make_orchestrator(roster: str) -> Agent:
     return Agent(
         max_iterations=200,
@@ -124,8 +125,8 @@ async with DockerSandbox(
     image="python:3.12-slim",
     volumes={"/workspace": str(workspace)},
     workdir="/workspace",
-    name=sandbox_name,   # reattach to the same container on resume
-    remove=False,        # keep container alive between sessions
+    name=sandbox_name,  # reattach to the same container on resume
+    remove=False,  # keep container alive between sessions
 ) as sandbox:
     toolbox = {t.name: t for t in sandbox.tools}
     # toolbox == {"read_file": Tool(...), "write_file": Tool(...),
@@ -139,7 +140,7 @@ calling `load_agents()`:
 
 ```python
 toolbox["analyze"] = make_analyze_tool(toolbox, ...)
-toolbox["notes"]   = make_notes_tool(workspace)
+toolbox["notes"] = make_notes_tool(workspace)
 roles = load_agents(ROLES_DIR, toolbox=toolbox)
 # roles == {"architect": ("Designs system...", Agent(...)), "backend_dev": (...), ...}
 ```
@@ -205,7 +206,7 @@ async def delegate(
     context: DelegateContext = CONTEXT.get()
     ...
     stream = specialist.run_stream(
-        f"Workspace: {WORKDIR}\n\n{task}",   # WORKDIR = "/workspace"
+        f"Workspace: {WORKDIR}\n\n{task}",  # WORKDIR = "/workspace"
         specialist_ctx,
     )
 ```
@@ -244,8 +245,10 @@ async def analyze(
     tb = context["toolbox"]
     read_tools = [tb[k] for k in ("list_files", "read_file") if k in tb]
     analyst = ANALYST.copy(
-        transport=transport_for("analyst", context["transport"], context["role_models"]),
-        tools=read_tools,   # docker-bound tools from the shared sandbox
+        transport=transport_for(
+            "analyst", context["transport"], context["role_models"]
+        ),
+        tools=read_tools,  # docker-bound tools from the shared sandbox
         max_iterations=10,
     )
     stream = analyst.run_stream(
@@ -297,9 +300,9 @@ class RoleGuard(PermissionGuard):
         self._renderer = renderer
 
     async def check(self, tool: Tool[Any], **kwargs: Any) -> dict[str, Any]:
-        async with self._renderer._lock:   # same lock as on_event
+        async with self._renderer._lock:  # same lock as on_event
             self._renderer._print_tool_call(self._role, self._tool_name, kwargs)
-        return kwargs                      # return to allow; raise GuardError to deny
+        return kwargs  # return to allow; raise GuardError to deny
 ```
 
 `SwarmRenderer` exposes a factory method passed into `run_swarm()`:
@@ -356,8 +359,10 @@ match event:
         ...
     case IterationEnd():
         u = event.usage
-        self._print(f"[dim]  iter {event.iteration} · {event.stop_reason} "
-                    f"· ↑{u.input_tokens} ↓{u.output_tokens}[/dim]")
+        self._print(
+            f"[dim]  iter {event.iteration} · {event.stop_reason} "
+            f"· ↑{u.input_tokens} ↓{u.output_tokens}[/dim]"
+        )
     case SessionEndEvent():
         ...
 ```
@@ -407,13 +412,13 @@ Model assignment in `__main__.py` - edit `role_models` to change per-role models
 
 ```python
 role_models: dict[str, ModelSpec] = {
-    "default":          transport.models["MiniMaxAI/MiniMax-M2.5"],
-    "architect":        transport.models["Qwen/Qwen3-235B-A22B-Instruct-2507"],
+    "default": transport.models["MiniMaxAI/MiniMax-M2.5"],
+    "architect": transport.models["Qwen/Qwen3-235B-A22B-Instruct-2507"],
     "security_engineer": transport.models["openai/gpt-oss-120b"],
-    "project_manager":  transport.models["openai/gpt-oss-120b"],
-    "challenger":       transport.models["zai-org/GLM-5"],
+    "project_manager": transport.models["openai/gpt-oss-120b"],
+    "challenger": transport.models["zai-org/GLM-5"],
     # analyst runs many instances in parallel - use a fast model
-    "analyst":          transport.models["deepseek-ai/DeepSeek-V3.2"],
+    "analyst": transport.models["deepseek-ai/DeepSeek-V3.2"],
 }
 ```
 

@@ -43,9 +43,11 @@ name: test_multimodal_send_image
 ```python
 import builtins as _b
 import io
+
 _real_open = _b.open
 _b.open = lambda p, m="r", **kw: (
-    io.BytesIO(b"fake_png") if "screenshot.png" in str(p) and "b" in m
+    io.BytesIO(b"fake_png")
+    if "screenshot.png" in str(p) and "b" in m
     else _real_open(p, m, **kw)
 )
 ```
@@ -63,16 +65,20 @@ async def main() -> None:
     image_data = open("screenshot.png", "rb").read()
 
     context = MemoryContextStore()
-    await context.append(Message(
-        role="user",
-        content=[
-            TextBlock(text="What is shown in this screenshot?"),
-            ImageBlock(media_type="image/png", data=image_data),
-        ],
-    ))
+    await context.append(
+        Message(
+            role="user",
+            content=[
+                TextBlock(text="What is shown in this screenshot?"),
+                ImageBlock(media_type="image/png", data=image_data),
+            ],
+        )
+    )
 
     transport = StubTransport([make_text_response("A terminal window.")])
-    agent = Agent(system="You are a helpful visual assistant.", tools=[], transport=transport)
+    agent = Agent(
+        system="You are a helpful visual assistant.", tools=[], transport=transport
+    )
     reply = await agent.run("Describe it in detail.", context)
     assert reply == "A terminal window."
 
@@ -117,7 +123,7 @@ from axio.testing import StubTransport, make_tool_use_response, make_text_respon
 
 async def capture_chart() -> list[TextBlock | ImageBlock]:
     """Capture the current chart as an image."""
-    chart_bytes = b"\x89PNG..."   # real implementation would render a chart
+    chart_bytes = b"\x89PNG..."  # real implementation would render a chart
     return [
         TextBlock(text="Chart captured."),
         ImageBlock(media_type="image/png", data=chart_bytes),
@@ -125,10 +131,12 @@ async def capture_chart() -> list[TextBlock | ImageBlock]:
 
 
 async def main() -> None:
-    transport = StubTransport([
-        make_tool_use_response("capture_chart", "t1", {}),
-        make_text_response("The chart shows an upward trend."),
-    ])
+    transport = StubTransport(
+        [
+            make_tool_use_response("capture_chart", "t1", {}),
+            make_text_response("The chart shows an upward trend."),
+        ]
+    )
     agent = Agent(
         system="You are a data analyst.",
         tools=[Tool(name="capture_chart", handler=capture_chart)],

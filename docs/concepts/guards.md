@@ -54,6 +54,7 @@ async def main():
         kwargs = await guard(_tool, **kwargs)
     assert kwargs["text"] == "hello"
 
+
 asyncio.run(main())
 ```
 
@@ -65,9 +66,11 @@ name: test_tool_with_guards
 ```python
 from axio.permission import AllowAllGuard
 
+
 async def write_file(path: str, content: str) -> str:
     """Write content to a file."""
     return "ok"
+
 
 # Application-specific guards can be supplied by external packages
 # For testing, you can use AllowAllGuard as a placeholder:

@@ -20,9 +20,7 @@ class MaxLengthGuard(PermissionGuard):
     async def check(self, tool: Tool[Any], **kwargs: Any) -> dict[str, Any]:
         for name, value in kwargs.items():
             if isinstance(value, str) and len(value) > self.max_length:
-                raise GuardError(
-                    f"Field '{name}' exceeds {self.max_length} characters"
-                )
+                raise GuardError(f"Field '{name}' exceeds {self.max_length} characters")
         return kwargs
 ```
 
@@ -41,13 +39,16 @@ name: test_attaching_guards
 from typing import Any
 from axio import Tool, PermissionGuard, GuardError
 
+
 async def write_file(path: str, content: str) -> str:
     """Write content to a file."""
     return "ok"
 
+
 class MaxLengthGuard(PermissionGuard):
     def __init__(self, max_length: int = 10000) -> None:
         self.max_length = max_length
+
     async def check(self, tool: Tool[Any], **kwargs: Any) -> dict[str, Any]:
         return kwargs
 ```
@@ -111,12 +112,15 @@ name: test_composing_guards
 ```python
 from axio.permission import AllowAllGuard
 
+
 async def shell(command: str) -> str:
     """Run a shell command."""
     return command
 
+
 AllowedCommandGuard = AllowAllGuard
 PathGuard = AllowAllGuard
+
 
 class LLMRiskGuard(AllowAllGuard):
     pass
@@ -131,8 +135,8 @@ tool = Tool(
     handler=shell,
     guards=(
         AllowedCommandGuard(),  # Fast: check against allowlist
-        PathGuard(),            # Fast: validate file paths
-        LLMRiskGuard(),         # Slow: LLM assessment (only if fast checks pass)
+        PathGuard(),  # Fast: validate file paths
+        LLMRiskGuard(),  # Slow: LLM assessment (only if fast checks pass)
     ),
 )
 assert tool.name == "shell"
