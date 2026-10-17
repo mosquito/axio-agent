@@ -14,6 +14,9 @@ classifiers = [
 keywords = ["llm", "agent", "ai", "sqlite", "context", "storage"]
 dependencies = ["axio", "aiosqlite>=0.20"]
 
+[project.entry-points."axio.context"]
+sqlite = "axio_context_sqlite.plugin:SQLiteContextBackend"
+
 [project.urls]
 Documentation = "https://docs.axio-agent.com"
 Homepage = "https://github.com/mosquito/axio-agent"
