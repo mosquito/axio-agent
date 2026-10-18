@@ -15,17 +15,24 @@ loop:
 1. Send conversation history to the transport.
 2. Collect `StreamEvent` values as they arrive, forwarding every one of them to
    the consumer and folding text, refusals and reasoning into the turn.
-3. When the model issues tool calls - dispatch all of them **concurrently** via
-   `asyncio.gather`, append the results, and loop.
-4. Otherwise store the turn and let the stop reason decide. `end_turn` and
-   `refusal` end the run, `pause_turn` resumes it, and anything else ends it
-   with an `Error`.
+3. When a completed turn requests tools, preflight the batch, dispatch valid
+   calls concurrently, append the results, and loop.
+4. Otherwise store the turn and let the stop reason decide. `end_turn` completes
+   the run, `pause_turn` resumes it, and refusal or incomplete generation ends
+   with its own reason. Transport failures produce an `Error`.
 
 Derive a configured agent with `agent.copy(**overrides)` rather than mutating
 one.
 
 The agent is deliberately thin. It has no opinions about retries, rate limits,
 or logging. Those belong to the transport or the application layer.
+
+### Instructions and skills
+
+{doc}`Instructions <instructions>` let an agent discover guidance from short
+summaries, then load full procedures and their tools when needed. Applications
+can require rules before the first request. Local and MCP providers supply
+project instructions and skills through the same mechanism.
 
 ### Transport
 
@@ -57,6 +64,17 @@ The `context` field on `Tool` lets you pass arbitrary state - a database
 connection, a sandbox object, a file path - to the handler via `CONTEXT.get()`
 at call time without any global state or class-level variables.
 
+Use a {ref}`tool provider <tool-providers>` when an integration owns a changing
+set of tools, instructions, or shared connections. The application opens the
+provider, attaches it to an agent, and closes it after agent runs finish.
+
+### Permissions
+
+{doc}`Guards <guards>` enforce tool permissions. Providers declare effects such
+as reading or writing a file; `PolicyGuard` combines these declarations with
+project rules and user approval. Instructions and tool selection do not grant
+permission to perform actions.
+
 ### Field Metadata
 
 The {doc}`field metadata <field>` system uses `Field()` to add descriptions,
@@ -85,6 +103,7 @@ or any other storage layer.
 :maxdepth: 1
 
 agent
+instructions
 protocols
 tools
 selector

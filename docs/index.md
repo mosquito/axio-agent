@@ -28,7 +28,7 @@ assistant to a tested multi-session harness with isolated execution.
 :link: concepts/index
 :link-type: doc
 
-Reference documentation for the agent, transports, tools, events, and context.
+Understand agents, instructions and skills, tool providers, permissions, and context.
 :::
 
 :::{grid-item-card} Extension Guides

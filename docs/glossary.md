@@ -4,6 +4,11 @@ Terms used throughout Axio documentation.
 
 ## A
 
+**Access**
+: A provider's declaration of a tool effect, such as reading or writing a local
+  file. Permission policy and instruction preflight consume it. See
+  {ref}`tool-effects`.
+
 **Agent**
 : The core component that orchestrates LLM interactions. Receives messages, decides on tool calls, and returns responses.
 
@@ -63,6 +68,11 @@ Terms used throughout Axio documentation.
 
 ## I
 
+**Instruction**
+: Guidance with a short catalog summary and an async loader for its full text
+  and associated tools. Required instructions load before model requests;
+  optional ones load on demand. See {doc}`concepts/instructions`.
+
 **IterationEnd**
 : An event signaling the end of one LLM call iteration. Contains usage statistics and stop reason.
 
@@ -70,6 +80,10 @@ Terms used throughout Axio documentation.
 : An event signaling that one provider request has begun. Its `model` is the model that actually served the turn, which need not be the one asked for. Server-side fallback, sticky routing and dated-snapshot resolution all substitute a different model at a different price. A cost lookup therefore keys off this. Every transport passes `iteration=0`. A transport cannot know the agent's iteration number.
 
 ## L
+
+**LoadedInstruction**
+: The full text and tools returned by an instruction loader. Activation belongs
+  to one agent; the provider retains ownership of tool resources.
 
 **LLM**
 : Large Language Model. The AI model that powers agent reasoning (OpenAI, Anthropic, etc.).
@@ -86,6 +100,14 @@ Terms used throughout Axio documentation.
 
 **PermissionGuard**
 : Abstract class for implementing guards. Define `check()` method to allow/deny tool calls.
+
+**PolicyGuard**
+: A guard that applies explicit rules, permits project-local reads, and asks
+  for other operations. See {doc}`concepts/guards`.
+
+**ProviderOutput**
+: Replayable output from a provider-hosted tool, stored as a `ProviderBlock`.
+  See {doc}`concepts/events`.
 
 **Protocol**
 : Runtime-checkable interface (Python `Protocol` or ABC). Axio uses protocols for pluggability.
@@ -127,6 +149,12 @@ Terms used throughout Axio documentation.
 
 ## S
 
+**Skill**
+: Task-specific guidance and related resources supplied through the instruction
+  contract. A local skill may live in `SKILL.md`; an MCP skill may come from a
+  server. See {doc}`concepts/instructions`.
+
+
 **SSE**
 : Server-Sent Events, the `text/event-stream` media type. How every completion transport in Axio receives a streamed response. The format itself lives in `axio-sse`, which is a separate distribution with no dependencies at all.
 
@@ -149,6 +177,10 @@ Terms used throughout Axio documentation.
 **Tool call**
 : One concrete request from the model to invoke a named Tool with structured
   arguments. A Tool is the definition. A tool call is an invocation of it.
+
+**Tool provider**
+: An integration that owns tools, an instruction catalog, and their shared
+  resources. The application initializes and closes it. See {ref}`tool-providers`.
 
 **Tool handler**
 : The executable logic for a tool. A plain `async def` function. Its parameters define the input schema, and its body implements execution.

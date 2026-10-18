@@ -4,35 +4,32 @@ The {class}`Agent` is the central orchestrator. It connects a transport, a set o
 tools, and a context store into a single loop that streams LLM responses and
 dispatches tool calls until the model signals it is done.
 
-## The Agent dataclass
+## Configure an agent
 
-<!--
-name: test_agent_dataclass
--->
+Start with a transport, a role, and the tools your assistant needs. Supply a
+separate context store for each conversation:
+
+<!-- name: test_agent_dataclass -->
 ```python
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
-from typing import Any
-from axio import Tool, CompletionTransport, ToolSelector
-from axio.messages import Message
-from axio.blocks import ToolResultBlock, ToolUseBlock
+import asyncio
 
+from axio import Agent, MemoryContextStore
+from axio.testing import StubTransport, make_text_response
 
-@dataclass(slots=True)
-class Agent:
-    system: str
-    transport: CompletionTransport
-    tools: list[Tool[Any]] = field(default_factory=list)
-    selector: ToolSelector | None = field(default=None)
-    max_iterations: int = field(default=50)
-    last_iteration_message: Message | None = field(default=None)
-    before_turn: Callable[[int], Awaitable[None]] | None = field(
-        default=None, kw_only=True
-    )
-    before_tools: (
-        Callable[[list[ToolUseBlock], int], Awaitable[list[ToolResultBlock]]] | None
-    ) = field(default=None, kw_only=True)
+agent = Agent(
+    system="Help with the user's project.",
+    transport=StubTransport([make_text_response("Ready.")]),
+)
+assert asyncio.run(agent.run("Hello", MemoryContextStore())) == "Ready."
 ```
+
+The stub makes this example independent of an API account. For a real provider,
+follow {doc}`../guides/choosing-transports`. An agent definition can also carry
+{doc}`instructions`, initialized {ref}`tool providers <tool-providers>`,
+application {doc}`guards`, and hooks that update state before a request or tool
+batch. These parts compose on the same agent.
+
+### Basic settings
 
 `system`
 : The system prompt sent with every request.
@@ -76,6 +73,90 @@ class Agent:
 These callbacks are keyword-only fields and survive `agent.copy()`. Their
 policy belongs to the application. Axio does not discover instruction files.
 
+### Guidance and integrations
+
+`instructions`
+: A catalog of {doc}`instructions` the model can choose to load. Each has a
+  short summary and an async loader for its full text and associated tools.
+
+`required_instructions`
+: IDs of instructions the application requires before every model request.
+  Use this for mandatory project rules rather than relying on model choice.
+
+`providers`
+: Initialized {ref}`tool providers <tool-providers>` whose current tools and
+  instruction catalogs are read at every iteration. The application opens and
+  closes them; the agent does not own their resources.
+
+`tool_guards`
+: Application guards appended to every available tool, including instruction
+  loaders and tools added later. Original tool guards run first.
+
+(agent-hooks)=
+## Update state before requests and tool calls
+
+Hooks let integrations add behavior without replacing another integration's
+callbacks. Use `before_turn_hooks` for async preparation before each model
+request, `system_contributions` for current prompt sections, and
+`before_tools_hooks` to check a whole batch before any handler runs.
+
+For example, publish the current application mode without rewriting the base
+system prompt:
+
+<!-- name: test_agent_system_contribution -->
+```python
+import asyncio
+
+from axio import Agent, MemoryContextStore
+from axio.testing import StubTransport, make_text_response
+
+
+async def main() -> None:
+    state = {"mode": "review"}
+    prepared = []
+
+    async def prepare(iteration: int) -> None:
+        prepared.append(iteration)
+
+    agent = Agent(
+        system="Help with the project.",
+        transport=StubTransport([make_text_response("Reviewed.")]),
+        before_turn_hooks=(prepare,),
+        system_contributions=(lambda: f"Current application mode: {state['mode']}",),
+    )
+    await agent.run("Review the changes.", MemoryContextStore())
+    assert prepared == [1]
+    assert agent.system == "Help with the project."
+
+
+asyncio.run(main())
+```
+
+Before each request, the agent runs `before_turn`, then `before_turn_hooks` in
+tuple order. It refreshes required instructions, activates staged content and
+tools, and constructs the effective prompt from `system`, synchronous
+`system_contributions`, and instruction content. It then applies tool guards
+and selection. Contributions should return text promptly; put asynchronous I/O
+in a preparation hook. A preparation failure ends the run before a model request.
+
+After the model requests tools, `before_tools` runs first, then
+`before_tools_hooks` in tuple order. Each receives only the calls not already
+deferred by an earlier hook. Return replacement `ToolResultBlock`s for calls
+that must not execute, or `[]` to allow the remaining calls. IDs must be unique
+and belong to that hook's input. Invalid results or exceptions prevent execution
+of the whole batch.
+
+A scoped-instruction hook can call `await agent.load_instruction(id)`. If this
+changes active guidance or associated tools, the batch is deferred until the
+model sees the update. Unchanged text and identical tool objects do not cause
+another deferral. Failed hooks and cancellation discard staged instruction changes.
+`LocalToolProvider.bind()` installs this behavior for local file instructions;
+applications normally use the provider rather than implementing it themselves.
+
+`agent.copy()` keeps configuration and hooks, copies the catalog lists, and starts
+with fresh instruction activation. It shares the referenced transports, providers,
+and other resource-owning objects. Keep their lifetimes open for all copies.
+
 ## How the loop works
 
 ```{mermaid}
@@ -92,7 +173,8 @@ flowchart TD
     I -- end_turn --> J[SessionEndEvent end_turn]
     I -- refusal --> K[SessionEndEvent refusal]
     I -- pause_turn --> C
-    I -- anything else --> L[Error, then SessionEndEvent error]
+    I -- incomplete or unknown --> M[SessionEndEvent with the reason]
+    I -- error --> L[Error, then SessionEndEvent error]
 ```
 
 1. The user message is appended to the context store, prefixed with a local
@@ -105,18 +187,17 @@ flowchart TD
    `last_iteration_message` is appended to the history handed to the transport.
    It is never written to the store.
 3. Every event the transport yields is passed through to the consumer
-   unchanged. The agent additionally folds six of them into the turn it is
-   building: text deltas, refusal text, reasoning deltas, reasoning signatures,
-   and inline image and video output. Tool-call fragments are buffered until the
-   iteration ends.
+   unchanged. The agent builds the stored turn from text, refusal text, reasoning,
+   signed content, generated media, and replayable provider output. Tool-call
+   fragments are buffered until the iteration ends.
 4. When the transport yields `IterationEnd`, the buffered fragments are parsed
    into `ToolUseBlock`s. The turn's token usage is then added to the running
    total and reported to the context store.
-   - If tool-use blocks were collected, the agent dispatches **all tool calls
-     concurrently** via `asyncio.gather`, appends the assistant message and the
-     tool results to context, and loops back to step 2. The stop reason is not
-     consulted here. A model that asked for tools gets them. A stop reason
-     other than `tool_use` is logged as a warning.
+   - Tool calls run only when the stop reason is `tool_use`, `end_turn`, or
+     `pause_turn`. Hooks preflight the batch, then valid remaining calls run
+     concurrently. The agent appends the assistant turn and results and loops.
+     Calls from a refused, truncated, cancelled, unknown, or failed turn receive
+     error results without executing their handlers.
    - Otherwise the assistant turn is appended to context. The stop reason
      then decides what happens next.
 5. If `max_iterations` is exceeded, the loop ends with a `SessionEndEvent`
@@ -130,10 +211,12 @@ produced.
 
 | Stop reason | What the loop does |
 |---|---|
-| `tool_use` | Dispatches the calls and iterates. |
+| `tool_use` | Dispatches valid calls and iterates; an empty turn with no call is an error. |
 | `end_turn` | Ends with `SessionEndEvent(stop_reason=end_turn)`. |
 | `refusal` | Ends with `SessionEndEvent(stop_reason=refusal)`. Not an `Error`. |
 | `pause_turn` | **Resumes**: the loop goes round again. |
+| `max_tokens`, `context_window_exceeded`, `cancelled`, `unknown` | Ends with the same reason, preserving partial output. |
+| `repetition` | Axio stops repetitive output and reports the interruption. |
 | anything else | Yields `Error`, then `SessionEndEvent(stop_reason=error)`. |
 
 `refusal` is terminal and deliberately not reported as an error. The model
@@ -149,14 +232,16 @@ finish. That content was appended a line earlier, so going round again *is* the
 resume. The resume takes the same code path as any other iteration, bounded by
 the same `max_iterations`.
 
-Everything else - `max_tokens`, `error`, `refusal`, `context_window_exceeded`,
-`cancelled`, `unknown`, `repetition`, and any member added to `StopReason`
-later - falls into a `case _` wildcard. The
-wildcard is there on purpose. Named one by one, a reason added later would match
-nothing and fall out of the `match`. The loop would then re-prompt the model
-with unchanged history until `max_iterations`, paying for every one of those
-turns. Transports lean on this, mapping a provider reason they do not recognise
-to `StopReason.error` rather than guessing at it.
+Inspect `SessionEndEvent.stop_reason` when displaying a result: partial text can
+be useful while still being unfinished. `axio.INCOMPLETE` groups `max_tokens`,
+`context_window_exceeded`, `cancelled`, and `unknown` for that purpose. `run()`
+returns their collected text, so use `run_stream()` when the interface must
+distinguish a complete answer from a truncated one. `IterationEnd.raw` retains
+the provider's unmapped stop value for an `unknown` reason.
+
+Other reasons, including `error` and unsupported additions, end with an `Error`
+and `SessionEndEvent(error)`. A transport that ends without `IterationEnd` also
+fails; an interrupted stream is not a completed answer.
 
 ## What the agent stores
 
@@ -182,11 +267,16 @@ The assistant message written to context holds more than text and tool calls:
   proves, so a repeated index cannot be a second proof. Stored apart, the block
   replays with half a signature. The turn after it is then refused.
 
-`ImageBlock` / `VideoBlock`
+`ImageBlock` / `AudioBlock` / `VideoBlock`
 : Media the model generated inline, so a later turn still has it in view.
 
 `ToolUseBlock`
 : One per parsed tool call, added when the iteration ends.
+
+`ProviderBlock`
+: Replayable output from tools the model provider ran itself. Its opaque payload
+  must survive storage so the originating transport can send it back. See
+  {doc}`context` and {doc}`events`.
 
 A context store that round-trips these through `to_dict`/`from_dict` must keep
 `ReasoningBlock.signature` intact. Dropping it fails on the *next* turn, not on
@@ -198,7 +288,7 @@ The agent watches accumulated text for a model stuck in a loop - a repeated
 token, phrase, or paragraph. When it fires, the agent stops reading the stream,
 appends `[Output truncated: repetitive content detected]` to the turn, yields
 that note as a `TextDelta`, stores the turn, and ends the session with
-`StopReason.end_turn`. The stream was abandoned before `IterationEnd`, so no
+`StopReason.repetition`. The stream was abandoned before `IterationEnd`, so no
 usage arrived with it. The agent reads `transport.last_usage` if the transport
 keeps one, and adds it, rather than reporting the turn as free.
 
