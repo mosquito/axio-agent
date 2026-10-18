@@ -775,6 +775,49 @@ openai-custom  = "axio_transport_openai.custom:OpenAICompatibleTransport"
 
 [axio](https://github.com/mosquito/axio-agent) · [axio-transport-codex](https://github.com/mosquito/axio-agent) · [axio-transport-anthropic](https://github.com/mosquito/axio-agent) · [axio-tui](https://github.com/mosquito/axio-agent)
 
+## Standalone speech (API key; separately billed)
+
+`OpenAISTTTransport` implements `axio.transport.STTTransport` through
+`POST /v1/audio/transcriptions`; `OpenAITTSTransport` implements `TTSTransport`
+through `POST /v1/audio/speech`. Both are exported from `axio_transport_openai`.
+They are also registered as `openai` in the capability-specific entry-point groups
+`axio.transport.stt` and `axio.transport.tts`, **not** as text-completion providers.
+Construct them directly, or load those groups with `importlib.metadata.entry_points`.
+
+```python
+import aiohttp
+from contextlib import aclosing
+from axio_transport_openai import OpenAISTTTransport, OpenAITTSTransport
+
+
+async def speech_round_trip(recorded_wav: bytes) -> bytes:
+    async with aiohttp.ClientSession() as http:
+        stt = OpenAISTTTransport(session=http, language="en")
+        text = await stt.transcribe(recorded_wav, "audio/wav")
+        tts = OpenAITTSTransport(session=http, response_format="mp3")
+        async with aclosing(tts.synthesize(text, voice="coral")) as stream:
+            return b"".join([chunk async for chunk in stream])
+```
+
+Configuration is explicit constructor kwargs: `api_key` defaults only to
+`OPENAI_API_KEY`; `base_url` defaults to `OPENAI_BASE_URL` or
+`https://api.openai.com/v1`; `session` is an optional borrowed aiohttp session;
+`timeout_seconds` defaults to 120. Omit `session` for a per-request owned session.
+Borrowed sessions are never closed. No automatic retry/replay is performed, avoiding
+duplicate billing or duplicate partial audio. HTTP failures raise `StreamError`
+without echoing request/response contents; cancellation propagates. When abandoning
+TTS early, use `aclosing` so its generator releases the HTTP response promptly.
+
+STT defaults to `gpt-4o-mini-transcribe`, JSON text output, and accepts encoded WAV,
+MP3/MPEG, MP4/M4A or WebM files (maximum 25 MB). Raw PCM is rejected: wrap it in a
+WAV container with the actual sample rate first. `language` and `prompt` are optional.
+TTS defaults to `gpt-4o-mini-tts`, voice `coral`, MP3, speed 1; configurable formats:
+`mp3`, `opus`, `aac`, `flac`, `wav`, `pcm`. `instructions` are optional and must be
+supported by the chosen model. PCM output is 24 kHz signed little-endian PCM16 mono,
+without a header. HTTP chunks are arbitrary bytes, **not** independently decodable
+files or sample-aligned PCM frames. Reassemble/buffer them before playback.
+Tell end users that generated speech is AI-generated.
+
 ## License
 
 MIT

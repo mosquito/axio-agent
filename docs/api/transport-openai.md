@@ -205,3 +205,17 @@ access, so standard tool guards apply.
 .. autoclass:: axio_transport_openai.OpenAIRealtimeSession
    :members:
 ```
+
+## Standalone API speech
+
+These API-key transports are independent of completion and ChatGPT subscription
+credentials. See the [package speech examples](https://github.com/mosquito/axio-agent/tree/master/axio-transport-openai#standalone-speech-api-key-separately-billed)
+for billing boundaries, encoding and streaming cleanup requirements.
+
+```{eval-rst}
+.. autoclass:: axio_transport_openai.OpenAISTTTransport
+   :members:
+
+.. autoclass:: axio_transport_openai.OpenAITTSTransport
+   :members:
+```
