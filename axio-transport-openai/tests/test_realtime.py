@@ -34,7 +34,7 @@ from axio.types import StopReason
 from axio_transport_openai.realtime import (
     OpenAIRealtimeSession,
     OpenAIRealtimeTransport,
-    _convert_realtime_tools,
+    convert_realtime_tools,
 )
 
 
@@ -309,7 +309,7 @@ async def test_convert_tools_uses_flat_function_shape() -> None:
     async def add(a: int, b: int) -> str:
         return str(a + b)
 
-    out = _convert_realtime_tools([Tool(name="add", handler=add, description="adds")])
+    out = convert_realtime_tools([Tool(name="add", handler=add, description="adds")])
     assert out[0]["type"] == "function"
     assert out[0]["name"] == "add"
     assert out[0]["description"] == "adds"

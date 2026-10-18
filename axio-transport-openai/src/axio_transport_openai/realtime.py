@@ -62,7 +62,7 @@ INCOMPLETE_STOP_REASONS = MappingProxyType(
 )
 
 
-def _convert_realtime_tools(tools: list[Tool[Any]]) -> list[dict[str, Any]]:
+def convert_realtime_tools(tools: list[Tool[Any]]) -> list[dict[str, Any]]:
     """Convert axio ``Tool``s to OpenAI realtime tool entries (flat ``function`` shape)."""
     return [
         {
@@ -75,7 +75,7 @@ def _convert_realtime_tools(tools: list[Tool[Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def _audio_format(media_type: str) -> dict[str, Any]:
+def audio_format(media_type: str) -> dict[str, Any]:
     """GA audio format objects. Never relabel a different PCM sample rate."""
     if media_type in ("audio/pcm", DEFAULT_PCM_MEDIA_TYPE):
         return {"type": "audio/pcm", "rate": 24000}
@@ -112,7 +112,7 @@ class OpenAIRealtimeSession(RealtimeSession):
         for block in blocks:
             match block:
                 case AudioBlock(data=data, media_type=media_type):
-                    if _audio_format(media_type) != _audio_format(self.input_audio_media_type):
+                    if audio_format(media_type) != audio_format(self.input_audio_media_type):
                         raise ValueError("Audio block format does not match the connected input format")
                     await self._send_event(
                         {
@@ -347,8 +347,8 @@ class OpenAIRealtimeTransport(RealtimeTransport):
         input_audio_format: str = "audio/pcm;rate=24000",
         output_audio_format: str = "audio/pcm;rate=24000",
     ) -> RealtimeSession:
-        input_format = _audio_format(input_audio_format)
-        output_format = _audio_format(output_audio_format)
+        input_format = audio_format(input_audio_format)
+        output_format = audio_format(output_audio_format)
         if not self.api_key.strip():
             raise ValueError("OPENAI_API_KEY is required for realtime API audio")
         own_session = self.http_session is None or self.http_session.closed
@@ -388,7 +388,7 @@ class OpenAIRealtimeTransport(RealtimeTransport):
                             "instructions": system,
                             "output_modalities": ["audio"],
                             "audio": {"input": audio_input, "output": audio_output},
-                            "tools": _convert_realtime_tools(tools),
+                            "tools": convert_realtime_tools(tools),
                         },
                     }
                 )
