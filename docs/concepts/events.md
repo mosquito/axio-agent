@@ -39,33 +39,21 @@ All events are frozen dataclasses with `slots=True`:
   Same shape as `TextDelta`. All four transports emit it.
 
 `ReasoningSignature`
-: The provider's opaque proof that the reasoning block at `index` is its own.
-  ```python
-  @dataclass(frozen=True, slots=True)
-  class ReasoningSignature:
-      index: int
-      data: str
-      redacted: bool = False
-      id: str = ""
-  ```
+: The provider's opaque proof for a reasoning block at `index`. Its `signature`
+  must be stored with that block. `provider` identifies the issuing protocol;
+  `id` names the reasoning item when required. `redacted=True` means the provider
+  withheld the reasoning text and sent only its proof.
 
 `TextSignature`
-: The provider's opaque proof that the answer text at `index` is its own. Gemini signs the part it
-  produced, which may be plain text rather than reasoning. Stored on the `TextBlock`, because a
-  proof held as reasoning would be replayed on a part the provider never signed.
-  ```python
-  @dataclass(frozen=True, slots=True)
-  class TextSignature:
-      index: int
-      data: str
-  ```
-  The agent attaches it to the `ReasoningBlock` it belongs to so the turn can be
-  sent back unaltered. Never inspect, decode, re-encode or truncate `data`.
-  Anthropic refuses a returned thinking block whose signature is missing or
-  changed. Google reports a `MISSING_THOUGHT_SIGNATURE` finish reason for the
-  same failure. `redacted=True` means the provider withheld the reasoning text.
-  Only the proof travels. `id` is how the provider names the block, where it
-  names them at all.
+: The provider's opaque proof for answer text at `index`. The agent stores its
+  `signature` and `provider` on the corresponding `TextBlock`. A text proof
+  belongs to that text, even when it arrives beside reasoning or a tool call.
+
+Preserve signatures exactly as received: never inspect, decode, re-encode, or
+truncate them. A signed block is finished; later text starts another block.
+Replaying a proof on altered content or for another provider can cause the next
+request to fail. Context stores must preserve these fields along with the text.
+See {doc}`context` for conversation persistence and provider replay.
 
 `Refusal`
 : The model declined, or the provider blocked the turn.
@@ -284,6 +272,16 @@ All events are frozen dataclasses with `slots=True`:
 
 ## Provider passthrough
 
+Hosted tools such as provider-side search run at the model endpoint. They do not
+call one of your application's `Tool` handlers. Their output may still need to
+travel in conversation history so the next request can continue the turn.
+
+`ProviderOutput` carries one such replayable item. The agent stores it as a
+`ProviderBlock`, preserving the provider's object, kind, ID, and provider name.
+Context stores must round-trip it intact; the originating transport decides
+how to replay it. It is not an instruction to execute the hosted tool locally.
+See {doc}`context` for persistence and replay.
+
 `ProviderEvent`
 : A provider payload axio does not model, forwarded verbatim.
   ```python
@@ -302,6 +300,10 @@ All events are frozen dataclasses with `slots=True`:
   shared Responses reader, so its events say `"openai"` too.
 
   A consumer that does not recognise `(provider, kind)` ignores it.
+
+  This is an observation for the harness, not stored conversation content.
+  Use it for provider-specific UI or diagnostics. When a provider item must be
+  replayed, `ProviderOutput` carries that separate responsibility.
 
 ### Why the transports forward instead of naming
 

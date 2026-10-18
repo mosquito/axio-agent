@@ -101,6 +101,87 @@ t = Tool(name="ping", handler=ping, context="ctx-42")
 assert asyncio.run(t(msg="hello")) == "hello:ctx-42"
 ```
 
+## Tools, instructions, and selection
+
+`Agent(tools=[...])` supplies a fixed base set. A tool provider can contribute
+additional tools at each iteration, and a loaded {doc}`instruction <instructions>`
+can add tools needed for its procedure. The agent collects these sets, attaches
+its `tool_guards`, and passes the result to the {doc}`selector`.
+
+`agent.get_tools()` returns the collected tools before selection. Only tools
+selected for the current model request can run. Two different tool objects with
+the same name are a configuration error; repeated references to the same object
+are allowed. A provider entry-point name does not prefix the tool names it supplies.
+
+(tool-providers)=
+## Integrations that own tools and instructions
+
+A filesystem integration can supply file tools and the project's conventions.
+An MCP integration needs a live connection as well as the tools discovered on
+that connection. A `ToolProvider` keeps each integration's tools, guidance, and
+resource lifetime together. The transport still handles communication with the
+language model; a tool provider supplies what the agent can use to work.
+
+For local project tools, install `axio-tools-local` and use its provider directly:
+
+<!-- name: test_concept_local_tool_provider -->
+```python
+import asyncio
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from axio import Agent, MemoryContextStore
+from axio.plugins import open_tool_providers
+from axio.testing import StubTransport, make_text_response
+from axio_tools_local.provider import LocalOptions, LocalToolProvider
+
+
+async def main() -> None:
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "AGENTS.md").write_text("Use the project's formatting conventions.")
+        provider = LocalToolProvider()
+        options = LocalOptions(
+            cwd=root,
+            roots=(root,),
+            isolated=True,
+            instruction_files=(root / "AGENTS.md",),
+        )
+        async with open_tool_providers([provider], config=options):
+            agent = Agent(
+                system="Help with this project.",
+                transport=StubTransport([make_text_response("Ready.")]),
+                providers=[provider],
+            )
+            provider.bind(agent)
+            assert "read_file" in {tool.name for tool in agent.get_tools()}
+            assert await agent.run("Hello", MemoryContextStore()) == "Ready."
+
+
+asyncio.run(main())
+```
+
+`cwd` controls relative tool paths; `roots` describes independent project roots.
+The explicit instruction file loads even in isolated mode. `bind(agent)` adds
+the local provider's scoped instruction checks and prompt contribution. Bind
+each copied agent separately. The stub avoids a model request; replace it with
+your completion transport for real work.
+
+Keep runs inside `open_tool_providers()`. It calls `init()` and registers cleanup
+before initialization, then closes providers in reverse order even after a
+partial startup, exception, or cancellation. An initialization exception propagates
+after cleanup. Separate contexts let independent integrations fail separately.
+
+An agent reads `all_tools` and `get_instructions()` at each iteration, so it sees
+the provider's current catalog after reload. The application owns reload and
+configuration. A copied list from `collect_tools()` is a snapshot: passing it as
+`Agent(tools=...)` does not keep the provider's instructions or dynamic catalog.
+
+For installed integrations, use `discover_tool_providers()` and select entries
+from its catalog. Constructing an `Agent` does not discover or open integrations.
+See {doc}`../guides/plugin-discovery` for registration and diagnostics and
+{doc}`../guides/mcp-tools` for a provider backed by server sessions.
+
 ## Tool dataclass
 
 Every handler function is wrapped in a `Tool` frozen dataclass:
@@ -115,6 +196,8 @@ class Tool[T]:
     concurrency: int | None = None
     context: T = ...  # default: empty mapping
     schema: MappingProxyType[str, Any] = ...  # default: built from the handler
+    access: AccessDescriptor | None = None
+    permission_identity: str = ""
 ```
 
 `handler`
@@ -142,6 +225,17 @@ class Tool[T]:
   you do not pass one. An explicit schema also replaces the fields used for
   validation and default injection. It becomes the filter that strips keys the
   model invented.
+
+`access`
+: Describes the operation's effects for instruction preflight and permission
+  policy. For example, `file_access("write", "path")` declares the file written
+  by a handler. The descriptor must report all effects without performing them.
+  Missing declarations mean unknown effects. See {ref}`tool-effects`.
+
+`permission_identity`
+: Provider-supplied identity included in opaque-call approvals. Providers can
+  distinguish differently configured instances of an otherwise identical tool,
+  so permission for one server configuration does not authorize another.
 
 ### Input schema
 

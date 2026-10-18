@@ -6,6 +6,11 @@ control sessions, permissions, persistence, execution, and output.
 
 That application layer is the **agent harness**.
 
+For the building blocks behind a harness, see {doc}`concepts/index`.
+{doc}`concepts/instructions` explains project guidance and skills;
+{ref}`tool-providers` explains integrations that supply tools and guidance;
+{doc}`concepts/guards` explains declared effects and user approval.
+
 This course builds one small Axio harness through eleven causal lessons. Each
 lesson starts with a concrete failure, adds one capability, and verifies the
 result without a live model.

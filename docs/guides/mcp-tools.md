@@ -11,7 +11,63 @@ Axio agent. Tools are loaded at runtime from the server and wrapped as regular
 pip install axio-tools-mcp
 ```
 
-## Loading tools
+## Keep tools, instructions, and sessions together
+
+Use `MCPToolProvider` when an agent should receive both server tools and server
+guidance, skills, or resources. A provider keeps its connections alive and
+supplies the current catalogs on every agent iteration. Instructions initially
+expose summaries; their full content and associated tools load when needed.
+See {doc}`../concepts/instructions` for how the model uses that catalog.
+
+Applications choose configuration files and decode JSON. Pass validated server
+entries to the provider, then keep it open while the agent runs:
+
+<!-- name: test_mcp_provider_agent -->
+```python
+from axio import Agent, CompletionTransport, MemoryContextStore
+from axio.plugins import open_tool_providers
+from axio_tools_mcp import MCPServerConfig
+from axio_tools_mcp.provider import MCPToolProvider
+
+
+async def ask_with_servers(
+    transport: CompletionTransport,
+    servers: tuple[MCPServerConfig, ...],
+    prompt: str,
+) -> str:
+    provider = MCPToolProvider()
+    async with open_tool_providers([provider], config=servers):
+        agent = Agent(
+            system="Help using the available server tools and guidance.",
+            transport=transport,
+            providers=[provider],
+        )
+        return await agent.run(prompt, MemoryContextStore())
+```
+
+<!--
+name: test_mcp_provider_agent
+```python
+import asyncio
+from axio.testing import StubTransport, make_text_response
+
+assert asyncio.run(ask_with_servers(StubTransport([make_text_response("Ready")]), (), "Hello")) == "Ready"
+```
+-->
+
+Create entries with `MCPServerConfig.from_dict(name, decoded_entry)` or the
+constructor examples below. Supply an open completion transport as shown in
+{doc}`choosing-transports`. MCP does not search for project configuration files;
+that policy belongs to the application. REPL and TUI provide their own layered
+configuration, described in {doc}`axio-repl`.
+
+After configuration changes, `await provider.reload(servers)` replaces the server
+sessions and catalogs. Stop active runs before reloading so they cannot use
+closed sessions. Connection failures are available through
+`provider.inspect_servers()`; healthy servers remain available. Keep shared
+providers open until every agent using their tools has finished.
+
+## Load a tool snapshot directly
 
 `load_mcp_tools` connects to one or more servers and returns a flat list of
 tools plus the open sessions:

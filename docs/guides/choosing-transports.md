@@ -196,6 +196,12 @@ with patch("importlib.metadata.entry_points", return_value=[entry_point]):
 
 ## Configure authentication and provider options
 
+An API key identifies a provider account for one transport. An OAuth integration
+also needs saved registration data and rotating tokens. The transport or its
+account session handles authorization and refresh; the credential store retains
+that state across process restarts. Conversation history belongs in a separate
+`ContextStore`.
+
 Pass constructor or factory settings through `entry.open()`. Their names and
 accepted values belong to the provider. For example, an API-key transport can
 accept `api_key` and `base_url`. The adapter passes supplied values through;
@@ -236,6 +242,68 @@ Opening, model loading, and inference can raise provider-specific exceptions.
 `TransportError` only covers core selection and adapter errors. Preserve the
 original exception for recovery logic; `entry.format_error(error)` provides a
 provider-defined display message, or `str(error)` when no formatter is supplied.
+
+(credential-storage)=
+## Keep account credentials across restarts
+
+For a supported provider, use its account commands and account/session helpers.
+They already know its credential record format and token refresh rules. For
+example, `axio-chatgpt` and `axio-antigravity` manage their own account stores;
+MCP HTTP OAuth has a separate store. A credential store does not sign in, refresh
+tokens, or determine account entitlement by itself.
+
+When implementing your own account integration, `axio.credentials` supplies typed
+file and SQLite stores. The record is a dataclass with exactly one string field
+marked `credential_key`. Hold the account lock while reading and updating its
+credentials so concurrent processes cannot refresh the same account independently:
+
+<!-- name: test_guide_account_credentials -->
+```python
+import asyncio
+from dataclasses import dataclass, field
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from axio.credentials import FileCredentialStore
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceAccount:
+    name: str = field(metadata={"credential_key": True})
+    token: str = field(repr=False)
+
+
+async def main() -> None:
+    with TemporaryDirectory() as directory:
+        store = FileCredentialStore[ServiceAccount](Path(directory) / "service.auth")
+        async with store.lock("work"):
+            await store.save(ServiceAccount("work", "example-token"))
+
+        async with store.lock("work"):
+            account = await store.load("work")
+            assert account is not None
+            # Perform provider-specific refresh here while holding the lock.
+            await store.save(ServiceAccount(account.name, "updated-example-token"))
+
+
+asyncio.run(main())
+```
+
+The example stores only fixture tokens. In a real integration, keep refresh and
+every resulting write inside the same lock. Each save commits independently;
+an exception later in the block does not roll it back. The backend validates
+record types and fields. Subclass a store and set `filename` to use its default
+`$XDG_CONFIG_HOME/axio/` location (or `~/.config/axio/`).
+
+`SQLiteCredentialStore` offers the same record operations. The local backends
+use POSIX permissions and locks; stored records are not encrypted. Keep the
+adjacent lock directory while processes use it. `list_records()` returns full
+records, so remove secrets before displaying account lists or diagnostics.
+Marking a field `repr=False` only hides it in the dataclass representation.
+
+Use the `CredentialStore` protocol for another persistence backend. It must
+provide exclusive account locks and atomic durable saves. See the credentials
+section of {doc}`../api/axio` for serialization details and extension methods.
 
 ## Discover other plugins through core
 
