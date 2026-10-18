@@ -16,6 +16,7 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any
 
 import aiohttp
@@ -45,16 +46,20 @@ OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime"
 DEFAULT_REALTIME_MODEL = "gpt-realtime"
 DEFAULT_PCM_MEDIA_TYPE = "audio/pcm;rate=24000"
 
-_RESPONSE_STOP_REASONS = {
-    "completed": StopReason.end_turn,
-    "cancelled": StopReason.cancelled,
-    "failed": StopReason.error,
-    "incomplete": StopReason.error,
-}
-_INCOMPLETE_STOP_REASONS = {
-    "max_output_tokens": StopReason.max_tokens,
-    "content_filter": StopReason.refusal,
-}
+RESPONSE_STOP_REASONS = MappingProxyType(
+    {
+        "completed": StopReason.end_turn,
+        "cancelled": StopReason.cancelled,
+        "failed": StopReason.error,
+        "incomplete": StopReason.error,
+    }
+)
+INCOMPLETE_STOP_REASONS = MappingProxyType(
+    {
+        "max_output_tokens": StopReason.max_tokens,
+        "content_filter": StopReason.refusal,
+    }
+)
 
 
 def _convert_realtime_tools(tools: list[Tool[Any]]) -> list[dict[str, Any]]:
@@ -245,12 +250,12 @@ class OpenAIRealtimeSession(RealtimeSession):
             resp = ev.get("response") or {}
             items = resp.get("output") or []
             status = resp.get("status", "completed")
-            stop_reason = _RESPONSE_STOP_REASONS.get(status, StopReason.error)
+            stop_reason = RESPONSE_STOP_REASONS.get(status, StopReason.error)
             if status == "completed" and any(it.get("type") == "function_call" for it in items):
                 stop_reason = StopReason.tool_use
             elif status == "incomplete":
                 details = resp.get("status_details") or {}
-                stop_reason = _INCOMPLETE_STOP_REASONS.get(details.get("reason", ""), StopReason.error)
+                stop_reason = INCOMPLETE_STOP_REASONS.get(details.get("reason", ""), StopReason.error)
             if stop_reason == StopReason.error:
                 logger.warning("OpenAI realtime response failed or returned an unrecognized status/reason")
                 out.append(Error(exception=StreamError("OpenAI realtime response failed")))

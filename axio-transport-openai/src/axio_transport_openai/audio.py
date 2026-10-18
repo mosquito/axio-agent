@@ -6,6 +6,7 @@ import os
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import ClassVar, Literal
 
 import aiohttp
@@ -14,7 +15,9 @@ from axio.transport import STTTransport, TTSTransport
 
 
 @dataclass(slots=True, kw_only=True)
-class _AudioAPI:
+class AudioAPI:
+    """Shared API-key configuration and HTTP lifecycle for speech transports."""
+
     env_vars: ClassVar[tuple[str, ...]] = ("OPENAI_API_KEY",)
     api_key: str = field(default_factory=lambda: os.environ.get("OPENAI_API_KEY", ""), repr=False)
     base_url: str = field(default_factory=lambda: os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"))
@@ -40,22 +43,25 @@ class _AudioAPI:
             raise StreamError(f"OpenAI audio HTTP {response.status}")
 
 
-_INPUT_TYPES = {
-    "audio/wav": "wav",
-    "audio/x-wav": "wav",
-    "audio/mpeg": "mp3",
-    "audio/mp3": "mp3",
-    "audio/mpga": "mpga",
-    "audio/m4a": "m4a",
-    "audio/mp4": "m4a",
-    "video/mp4": "mp4",
-    "audio/webm": "webm",
-    "video/webm": "webm",
-}
+INPUT_TYPES = MappingProxyType(
+    {
+        "audio/wav": "wav",
+        "audio/x-wav": "wav",
+        "audio/mpeg": "mp3",
+        "audio/mp3": "mp3",
+        "audio/mpga": "mpga",
+        "audio/m4a": "m4a",
+        "audio/mp4": "m4a",
+        "video/mp4": "mp4",
+        "audio/webm": "webm",
+        "video/webm": "webm",
+    }
+)
+SPEECH_FORMATS = frozenset(("mp3", "opus", "aac", "flac", "wav", "pcm"))
 
 
 @dataclass(slots=True, kw_only=True)
-class OpenAISTTTransport(_AudioAPI, STTTransport):
+class OpenAISTTTransport(AudioAPI, STTTransport):
     """Transcribe an encoded audio file via ``/audio/transcriptions`` (not raw PCM)."""
 
     model: str = "gpt-4o-mini-transcribe"
@@ -64,14 +70,14 @@ class OpenAISTTTransport(_AudioAPI, STTTransport):
 
     async def transcribe(self, audio: bytes, media_type: str = "audio/wav") -> str:
         mime = media_type.partition(";")[0].strip().lower()
-        if mime not in _INPUT_TYPES:
+        if mime not in INPUT_TYPES:
             raise ValueError(f"Unsupported transcription media type: {media_type!r}; wrap raw PCM in WAV first")
         if not audio or len(audio) > 25_000_000:
             raise ValueError("Audio must be nonempty and at most 25 MB; split longer files explicitly")
         form = aiohttp.FormData()
         form.add_field("model", self.model)
         form.add_field("response_format", "json")
-        form.add_field("file", audio, filename=f"audio.{_INPUT_TYPES[mime]}", content_type=mime)
+        form.add_field("file", audio, filename=f"audio.{INPUT_TYPES[mime]}", content_type=mime)
         if self.language is not None:
             form.add_field("language", self.language)
         if self.prompt is not None:
@@ -97,7 +103,7 @@ class OpenAISTTTransport(_AudioAPI, STTTransport):
 
 
 @dataclass(slots=True, kw_only=True)
-class OpenAITTSTransport(_AudioAPI, TTSTransport):
+class OpenAITTSTransport(AudioAPI, TTSTransport):
     """Stream binary audio via ``/audio/speech``. No replay/retry of paid requests.
 
     PCM output is signed 16-bit little-endian mono at 24 kHz without a header.
@@ -116,7 +122,7 @@ class OpenAITTSTransport(_AudioAPI, TTSTransport):
             raise ValueError("Speech input must not be empty")
         if not 0.25 <= self.speed <= 4.0:
             raise ValueError("Speech speed must be between 0.25 and 4.0")
-        if self.response_format not in {"mp3", "opus", "aac", "flac", "wav", "pcm"}:
+        if self.response_format not in SPEECH_FORMATS:
             raise ValueError("Unsupported speech response format")
         payload = dict(
             model=self.model,
