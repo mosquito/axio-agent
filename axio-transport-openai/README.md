@@ -818,6 +818,33 @@ without a header. HTTP chunks are arbitrary bytes, **not** independently decodab
 files or sample-aligned PCM frames. Reassemble/buffer them before playback.
 Tell end users that generated speech is AI-generated.
 
+## Realtime GA migration
+
+`OpenAIRealtimeTransport` now sends GA `session.update` with `type="realtime"`,
+`output_modalities=["audio"]`, nested `audio.input` / `audio.output` format objects,
+and no beta header. PCM requires **24 kHz mono PCM16 in both directions**; invalid
+rates fail before opening a socket. The common `RealtimeAgent` default input rate
+is still 16 kHz for Gemini compatibility, so set
+`input_audio_format="audio/pcm;rate=24000"` explicitly when constructing an OpenAI
+agent and capture/resample the actual microphone bytes to that rate. Bare
+`AudioBlock(media_type="audio/pcm", ...)` means the negotiated session rate.
+G.711 `audio/pcmu` and `audio/pcma` are supported without resampling (8 kHz).
+
+Server VAD is the default: stream microphone blocks continuously, **do not call
+commit per chunk**. Set `server_vad=False` for manual boundaries and call `commit()`
+once per utterance. Set `transcription_model="gpt-4o-mini-transcribe"` to opt into
+user transcripts. GA output text/audio/transcript events are translated, legacy
+output aliases remain readable, and unhandled lifecycle events are forwarded as
+`ProviderEvent`. Failed/cancelled/incomplete responses do not masquerade as success.
+`interrupt()` cancels generation, but does not track speaker playback or truncate
+unheard conversation audio: applications must manage playback/history alignment.
+Always close the session (normally via `async with RealtimeAgent(...)`).
+
+Public contract references verified during implementation (2026-10-18):
+[Realtime conversations](https://developers.openai.com/api/docs/guides/realtime-conversations),
+[file transcription](https://developers.openai.com/api/docs/guides/speech-to-text),
+[text to speech](https://developers.openai.com/api/docs/guides/text-to-speech).
+
 ## License
 
 MIT

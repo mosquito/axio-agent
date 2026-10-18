@@ -14,9 +14,12 @@ from typing import Any
 
 import aiohttp
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestServer
 from axio.blocks import AudioBlock, TextBlock
 from axio.events import (
     AudioOutputDelta,
+    ProviderEvent,
     SpeechStarted,
     SpeechStopped,
     TextDelta,
@@ -292,9 +295,9 @@ class TestInboundTranslation:
         assert ev.usage is not None
         assert ev.usage.input_tokens == 5
 
-    async def test_unknown_event_is_ignored(self) -> None:
+    async def test_unknown_event_is_forwarded(self) -> None:
         _, events = await self._drain([{"type": "session.created"}])
-        assert events == []
+        assert events == [ProviderEvent(provider="openai", kind="session.created", data={"type": "session.created"})]
 
 
 # ---------------------------------------------------------------------------
@@ -351,7 +354,7 @@ async def test_connect_sends_session_update() -> None:
     assert http.connect_url == "wss://api.openai.com/v1/realtime?model=gpt-realtime"
     assert http.connect_headers is not None
     assert http.connect_headers["Authorization"] == "Bearer sk-test"
-    assert http.connect_headers["OpenAI-Beta"] == "realtime=v1"
+    assert "OpenAI-Beta" not in http.connect_headers
 
     sent = _decode_sent(ws)
     assert len(sent) == 1
@@ -359,8 +362,206 @@ async def test_connect_sends_session_update() -> None:
     assert update["type"] == "session.update"
     s = update["session"]
     assert s["instructions"] == "be brief"
-    assert s["voice"] == "marin"
-    assert s["input_audio_format"] == "pcm16"
-    assert s["output_audio_format"] == "pcm16"
-    assert s["turn_detection"]["type"] == "server_vad"
+    assert s["type"] == "realtime"
+    assert s["output_modalities"] == ["audio"]
+    assert s["audio"]["output"]["voice"] == "marin"
+    assert s["audio"]["input"]["format"] == {"type": "audio/pcm", "rate": 24000}
+    assert s["audio"]["output"]["format"] == {"type": "audio/pcm", "rate": 24000}
+    assert s["audio"]["input"]["turn_detection"]["type"] == "server_vad"
     assert s["tools"][0]["name"] == "add"
+
+
+@pytest.mark.parametrize(
+    "status,reason,expected",
+    [
+        ("cancelled", None, StopReason.cancelled),
+        ("failed", None, StopReason.error),
+        ("incomplete", "max_output_tokens", StopReason.max_tokens),
+        ("incomplete", "content_filter", StopReason.refusal),
+        ("incomplete", "unknown", StopReason.error),
+        ("unknown", None, StopReason.error),
+    ],
+)
+async def test_ga_response_status(status: str, reason: str | None, expected: StopReason) -> None:
+    session = OpenAIRealtimeSession(ws=_StubWebSocket([]))
+    events = session._translate(
+        {
+            "type": "response.done",
+            "response": {
+                "status": status,
+                "status_details": {"reason": reason},
+                "output": [{"type": "function_call"}],
+                "usage": {"input_tokens": 10, "output_tokens": 2, "input_token_details": {"cached_tokens": 4}},
+            },
+        }
+    )
+    final = events[-1]
+    assert isinstance(final, TurnComplete)
+    assert final.stop_reason == expected
+    assert final.usage is not None and final.usage.cache_read_tokens == 4
+
+
+async def test_ga_transcription_completion_does_not_duplicate_deltas() -> None:
+    session = OpenAIRealtimeSession(ws=_StubWebSocket([]))
+    assert session._translate({"type": "response.output_text.delta", "delta": "hi"}) == [
+        TextDelta(index=0, delta="hi")
+    ]
+    for item in ("first", "second"):
+        session._translate(
+            {"type": "conversation.item.input_audio_transcription.delta", "item_id": item, "delta": "hel"}
+        )
+    for item in ("second", "first"):
+        assert session._translate(
+            {"type": "conversation.item.input_audio_transcription.completed", "item_id": item, "transcript": "hello"}
+        ) == [TranscriptDelta(role="user", delta="lo")]
+    assert session._translate(
+        {"type": "conversation.item.input_audio_transcription.completed", "item_id": "whole", "transcript": "hi"}
+    ) == [TranscriptDelta(role="user", delta="hi")]
+
+
+async def test_reject_rate_before_connecting() -> None:
+    ws = _StubWebSocket([])
+    http = _StubHttpSession(ws)
+    transport = OpenAIRealtimeTransport(api_key="test", http_session=http)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="24000"):
+        await transport.connect(system="", tools=[], input_audio_format="audio/pcm;rate=16000")
+    assert http.connect_url is None
+    session = OpenAIRealtimeSession(ws=ws)
+    with pytest.raises(ValueError):
+        await session.send(AudioBlock(media_type="audio/pcm;rate=16000", data=b"12"))  # type: ignore[arg-type]
+    assert not ws.sent
+
+
+async def test_setup_failure_cleans_owned_resources(monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = _StubWebSocket([])
+    http = _StubHttpSession(ws)
+
+    async def fail(data: str) -> None:
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(ws, "send_str", fail)
+    monkeypatch.setattr(aiohttp, "ClientSession", lambda: http)
+    with pytest.raises(asyncio.CancelledError):
+        await OpenAIRealtimeTransport(api_key="test").connect(system="", tools=[])
+    assert ws.closed and http.closed
+
+
+async def test_close_is_idempotent_and_preserves_shared_client() -> None:
+    ws = _StubWebSocket([])
+    http = _StubHttpSession(ws)
+    transport = OpenAIRealtimeTransport(api_key="test", http_session=http)  # type: ignore[arg-type]
+    session = await transport.connect(system="", tools=[])
+    await session.close()
+    await session.close()
+    assert ws.closed and not http.closed
+
+
+async def test_owned_connect_failure_closes_http(monkeypatch: pytest.MonkeyPatch) -> None:
+    http = _StubHttpSession(_StubWebSocket([]))
+
+    async def fail(url: str, *, headers: dict[str, str]) -> _StubWebSocket:
+        raise aiohttp.ClientConnectionError("offline")
+
+    monkeypatch.setattr(http, "ws_connect", fail)
+    monkeypatch.setattr(aiohttp, "ClientSession", lambda: http)
+    with pytest.raises(aiohttp.ClientConnectionError):
+        await OpenAIRealtimeTransport(api_key="test").connect(system="", tools=[])
+    assert http.closed
+
+
+async def test_manual_vad_transcription_and_g711() -> None:
+    ws = _StubWebSocket([])
+    http = _StubHttpSession(ws)
+    transport = OpenAIRealtimeTransport(
+        api_key="test",
+        http_session=http,  # type: ignore[arg-type]
+        server_vad=False,
+        transcription_model="gpt-4o-mini-transcribe",
+        input_noise_reduction=None,
+    )
+    await transport.connect(system="", tools=[], input_audio_format="audio/pcmu", output_audio_format="audio/pcma")
+    audio = _decode_sent(ws)[0]["session"]["audio"]
+    assert audio["input"]["turn_detection"] is None
+    assert audio["input"]["noise_reduction"] is None
+    assert audio["input"]["transcription"] == {"model": "gpt-4o-mini-transcribe"}
+    assert audio["input"]["format"] == {"type": "audio/pcmu"}
+    assert audio["output"]["format"] == {"type": "audio/pcma"}
+
+
+async def test_malformed_audio_event_surfaces_error() -> None:
+    from axio.events import Error
+
+    ws = _StubWebSocket([{"type": "response.output_audio.delta", "delta": "!!!"}])
+    ws.push(None)
+    events = [event async for event in OpenAIRealtimeSession(ws=ws).events()]
+    assert len(events) == 1 and isinstance(events[0], Error)
+
+
+@pytest.mark.parametrize("payload", ["[]", "null", "invalid JSON"])
+async def test_malformed_event_surfaces_error(payload: str) -> None:
+    from axio.events import Error
+
+    class BrokenWS(_StubWebSocket):
+        async def _iter(self) -> AsyncIterator[_StubWSMessage]:
+            yield _StubWSMessage(aiohttp.WSMsgType.TEXT, payload)
+
+    events = [event async for event in OpenAIRealtimeSession(ws=BrokenWS([])).events()]
+    assert len(events) == 1 and isinstance(events[0], Error)
+
+
+async def test_websocket_error_surfaces_error() -> None:
+    from axio.events import Error
+
+    class BrokenWS(_StubWebSocket):
+        async def _iter(self) -> AsyncIterator[_StubWSMessage]:
+            yield _StubWSMessage(aiohttp.WSMsgType.ERROR)
+
+    events = [event async for event in OpenAIRealtimeSession(ws=BrokenWS([])).events()]
+    assert len(events) == 1 and isinstance(events[0], Error)
+
+
+async def test_close_http_even_if_socket_close_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = _StubWebSocket([])
+    http = _StubHttpSession(ws)
+
+    async def fail() -> None:
+        raise RuntimeError("close failed")
+
+    monkeypatch.setattr(ws, "close", fail)
+    session = OpenAIRealtimeSession(ws=ws, http_session=http, own_http_session=True)  # type: ignore[arg-type]
+    with pytest.raises(RuntimeError):
+        await session.close()
+    assert http.closed
+
+
+async def test_ga_session_over_websocket() -> None:
+    async def realtime(request: web.Request) -> web.WebSocketResponse:
+        assert request.headers["Authorization"] == "Bearer test"
+        assert "OpenAI-Beta" not in request.headers
+        assert request.query["model"] == "gpt-realtime"
+        assert request.query["custom"] == "kept"
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        update = await ws.receive_json()
+        assert update["session"]["type"] == "realtime"
+        assert update["session"]["audio"]["input"]["format"] == {"type": "audio/pcm", "rate": 24000}
+        await ws.send_json({"type": "response.output_audio.delta", "delta": base64.b64encode(b"12").decode()})
+        await ws.send_json({"type": "response.done", "response": {"status": "completed"}})
+        await ws.close()
+        return ws
+
+    app = web.Application()
+    app.router.add_get("/realtime", realtime)
+    async with TestServer(app) as server, aiohttp.ClientSession() as client:
+        transport = OpenAIRealtimeTransport(
+            api_key="test",
+            base_url=str(server.make_url("/realtime?custom=kept")),
+            http_session=client,
+        )
+        session = await transport.connect(system="", tools=[])
+        try:
+            events = [event async for event in session.events()]
+            assert events == [AudioOutputDelta(data=b"12"), TurnComplete(stop_reason=StopReason.end_turn)]
+        finally:
+            await session.close()
+        assert not client.closed

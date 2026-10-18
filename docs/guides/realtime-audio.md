@@ -244,3 +244,12 @@ The repository includes two complete examples:
 - [`examples/realtime_chat/`](https://github.com/mosquito/axio-agent/tree/master/examples/realtime_chat) -
   full-featured voice chat with echo cancellation, volume metering, interruption
   handling, and Playwright-based screenshot tool
+
+## OpenAI API speech and Realtime GA
+
+OpenAI Realtime uses the same `RealtimeAgent` / `DuplexAudio` architecture as
+Gemini, but requires 24 kHz PCM16 mono input and output. Set
+`RealtimeAgent(input_audio_format="audio/pcm;rate=24000", ...)` and configure the
+microphone to 24000 Hz (or actually resample before sending). The generic agent's
+16 kHz default remains unchanged for Gemini. `examples/realtime_chat/chat.py`
+already selects provider-specific rates.
