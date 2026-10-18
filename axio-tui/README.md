@@ -2,7 +2,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/axio-tui)](https://pypi.org/project/axio-tui/)
 [![Python](https://img.shields.io/pypi/pyversions/axio-tui)](https://pypi.org/project/axio-tui/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/mosquito/axio-agent/blob/main/LICENSE)
 
 Textual TUI application for [axio](https://github.com/mosquito/axio-agent).
 

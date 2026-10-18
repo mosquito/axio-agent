@@ -513,6 +513,8 @@ dependencies = [
     { name = "axio-transport-codex" },
     { name = "axio-transport-google" },
     { name = "axio-transport-openai" },
+    { name = "axio-tui" },
+    { name = "axio-tui-guards" },
 ]
 
 [package.dev-dependencies]
@@ -544,6 +546,8 @@ requires-dist = [
     { name = "axio-transport-codex", editable = "axio-transport-codex" },
     { name = "axio-transport-google", editable = "axio-transport-google" },
     { name = "axio-transport-openai", editable = "axio-transport-openai" },
+    { name = "axio-tui", editable = "axio-tui" },
+    { name = "axio-tui-guards", editable = "axio-tui-guards" },
 ]
 
 [package.metadata.requires-dev]

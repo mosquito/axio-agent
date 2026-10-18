@@ -45,6 +45,13 @@ Write transports, tools, guards, and context stores.
 Public classes, events, and methods.
 :::
 
+:::{grid-item-card} Packages
+:link: packages/index
+:link-type: doc
+
+Choose packages, install them, and start using each library or application.
+:::
+
 ::::
 
 ## The boundary Axio provides
@@ -103,7 +110,7 @@ Plain async tools
 quick-start
 concepts/index
 guides/index
-packages
+packages/index
 api/index
 troubleshooting
 glossary

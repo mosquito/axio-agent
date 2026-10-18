@@ -2,7 +2,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/axio-transport-openai)](https://pypi.org/project/axio-transport-openai/)
 [![Python](https://img.shields.io/pypi/pyversions/axio-transport-openai)](https://pypi.org/project/axio-transport-openai/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/mosquito/axio-agent/blob/main/LICENSE)
 
 OpenAI-compatible streaming transport for [axio](https://github.com/mosquito/axio-agent).
 
@@ -505,7 +505,7 @@ On first use with an empty credential store, the REPL offers sign-in and continu
 after browser authorization. This requires terminal input; piped input does not
 prompt. The separate `axio-chatgpt login` command is optional for this workflow.
 
-The [standalone example](examples/chatgpt_agent.py) runs an agent with a local
+The [standalone example](https://github.com/mosquito/axio-agent/blob/main/axio-transport-openai/examples/chatgpt_agent.py) runs an agent with a local
 multiplication tool and the selected saved account:
 
 ```bash
@@ -827,7 +827,7 @@ for API speech or Realtime. Never supply subscription access tokens as `api_key`
 There is no implicit subscription-to-paid-API fallback.
 
 For an end-to-end WAV -> agent -> MP3 example, see
-[`speech_pipeline.py`](../examples/realtime_chat/speech_pipeline.py):
+[`speech_pipeline.py`](https://github.com/mosquito/axio-agent/blob/main/examples/realtime_chat/speech_pipeline.py):
 
 ```bash
 # From examples/realtime_chat, with OPENAI_API_KEY configured separately:
