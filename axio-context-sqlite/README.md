@@ -2,7 +2,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/axio-context-sqlite)](https://pypi.org/project/axio-context-sqlite/)
 [![Python](https://img.shields.io/pypi/pyversions/axio-context-sqlite)](https://pypi.org/project/axio-context-sqlite/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/mosquito/axio-agent/blob/main/LICENSE)
 
 SQLite-backed persistent context store for [axio](https://github.com/mosquito/axio-agent).
 

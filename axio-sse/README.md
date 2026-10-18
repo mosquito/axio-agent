@@ -2,7 +2,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/axio-sse)](https://pypi.org/project/axio-sse/)
 [![Python](https://img.shields.io/pypi/pyversions/axio-sse)](https://pypi.org/project/axio-sse/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/mosquito/axio-agent/blob/main/LICENSE)
 
 Read `text/event-stream`: a decoder you feed, and a reader for what its payloads mean.
 

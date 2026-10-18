@@ -2,7 +2,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/axio)](https://pypi.org/project/axio/)
 [![Python](https://img.shields.io/pypi/pyversions/axio)](https://pypi.org/project/axio/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/mosquito/axio-agent/blob/main/LICENSE)
 
 Minimal, streaming-first, protocol-driven foundation for LLM-powered agents.
 

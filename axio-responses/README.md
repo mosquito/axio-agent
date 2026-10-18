@@ -2,7 +2,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/axio-responses)](https://pypi.org/project/axio-responses/)
 [![Python](https://img.shields.io/pypi/pyversions/axio-responses)](https://pypi.org/project/axio-responses/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/mosquito/axio-agent/blob/main/LICENSE)
 
 The OpenAI Responses API as [axio](https://github.com/mosquito/axio-agent) speaks it: request items
 in, `StreamEvent`s out.

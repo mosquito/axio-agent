@@ -1,6 +1,6 @@
 # axio-repl
 
-Interactive REPL coding assistant powered by the [axio](../axio) agent framework.
+Interactive REPL coding assistant powered by the [axio](https://github.com/mosquito/axio-agent/tree/main/axio) agent framework.
 Uses pluggable transports with API keys or a saved ChatGPT subscription account.
 
 ## Philosophy

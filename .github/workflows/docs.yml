@@ -3,10 +3,10 @@ name: docs
 on:
   push:
     branches: [master, main]
-    paths: ['docs/**']
+    paths: ['docs/**', 'axio*/README.md', '.github/workflows/docs.yml']
   pull_request:
     branches: [master, main]
-    paths: ['docs/**']
+    paths: ['docs/**', 'axio*/README.md', '.github/workflows/docs.yml']
 
 jobs:
   build:
@@ -23,7 +23,7 @@ jobs:
         working-directory: docs
 
       - name: Build HTML documentation
-        run: uv run make html
+        run: make check-html
         working-directory: docs
         env:
           FORCE_COLOR: 1

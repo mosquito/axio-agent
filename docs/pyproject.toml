@@ -24,6 +24,8 @@ dependencies = [
     "axio-transport-codex",
     "axio-transport-google",
     "axio-transport-openai",
+    "axio-tui",
+    "axio-tui-guards",
 ]
 
 [dependency-groups]
@@ -55,3 +57,5 @@ axio-transport-anthropic = { workspace = true }
 axio-transport-codex = { workspace = true }
 axio-transport-google = { workspace = true }
 axio-transport-openai = { workspace = true }
+axio-tui = { workspace = true }
+axio-tui-guards = { workspace = true }

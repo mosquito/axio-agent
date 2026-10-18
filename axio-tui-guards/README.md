@@ -2,13 +2,13 @@
 
 [![PyPI](https://img.shields.io/pypi/v/axio-tui-guards)](https://pypi.org/project/axio-tui-guards/)
 [![Python](https://img.shields.io/pypi/pyversions/axio-tui-guards)](https://pypi.org/project/axio-tui-guards/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/mosquito/axio-agent/blob/main/LICENSE)
 
 Permission guard plugins for [axio-tui](https://github.com/mosquito/axio-agent).
 
 The TUI applies its built-in permission policy to every agent tool. Read-only file
 access inside the project is automatic. Other operations require explicit rules or
-confirmation. See [TUI permissions](../axio-tui/README.md#tool-permissions).
+confirmation. See [TUI permissions](https://github.com/mosquito/axio-agent/tree/main/axio-tui#tool-permissions).
 
 This optional package supplies an LLM reviewer and the legacy standalone PathGuard.
 The TUI uses LLM review as advice in its permission dialog. A SAFE verdict cannot

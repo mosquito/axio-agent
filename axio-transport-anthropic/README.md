@@ -2,7 +2,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/axio-transport-anthropic)](https://pypi.org/project/axio-transport-anthropic/)
 [![Python](https://img.shields.io/pypi/pyversions/axio-transport-anthropic)](https://pypi.org/project/axio-transport-anthropic/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/mosquito/axio-agent/blob/main/LICENSE)
 
 Anthropic Claude transport for [axio](https://github.com/mosquito/axio-agent).
 

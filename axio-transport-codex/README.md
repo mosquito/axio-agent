@@ -2,7 +2,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/axio-transport-codex)](https://pypi.org/project/axio-transport-codex/)
 [![Python](https://img.shields.io/pypi/pyversions/axio-transport-codex)](https://pypi.org/project/axio-transport-codex/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/mosquito/axio-agent/blob/main/LICENSE)
 
 ChatGPT OAuth transport for [axio](https://github.com/mosquito/axio-agent) using the OpenAI Responses API.
 
