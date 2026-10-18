@@ -818,6 +818,27 @@ without a header. HTTP chunks are arbitrary bytes, **not** independently decodab
 files or sample-aligned PCM frames. Reassemble/buffer them before playback.
 Tell end users that generated speech is AI-generated.
 
+### ChatGPT text plus API speech: explicit composition only
+
+ChatGPT subscription authentication remains owned by `ChatGPTTransport` (native
+Codex and dynamic OAuth flows are unchanged). Subscription voice/STT/TTS contracts
+have not been verified and are **not implemented**. A subscription does not pay
+for API speech or Realtime. Never supply subscription access tokens as `api_key`.
+There is no implicit subscription-to-paid-API fallback.
+
+For an end-to-end WAV -> agent -> MP3 example, see
+[`speech_pipeline.py`](../examples/realtime_chat/speech_pipeline.py):
+
+```bash
+# From examples/realtime_chat, with OPENAI_API_KEY configured separately:
+uv run python speech_pipeline.py input.wav output.mp3 --text-provider openai --allow-paid-audio
+# Existing ChatGPT account for text, API key for speech, deliberately separate billing:
+uv run python speech_pipeline.py input.wav output.mp3 --text-provider chatgpt --allow-paid-audio
+```
+
+For ChatGPT text, first sign in using the existing `axio-chatgpt login` workflow.
+Only transcript and answer text cross the composition boundary; OAuth tokens do not.
+
 ## Realtime GA migration
 
 `OpenAIRealtimeTransport` now sends GA `session.update` with `type="realtime"`,

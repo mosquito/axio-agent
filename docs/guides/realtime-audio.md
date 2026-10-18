@@ -253,3 +253,9 @@ Gemini, but requires 24 kHz PCM16 mono input and output. Set
 microphone to 24000 Hz (or actually resample before sending). The generic agent's
 16 kHz default remains unchanged for Gemini. `examples/realtime_chat/chat.py`
 already selects provider-specific rates.
+
+For file-based voice turns, the exported `OpenAISTTTransport` and
+`OpenAITTSTransport` can wrap any text `Agent`, including subscription-backed
+ChatGPT. This is **explicit composition with separately API-billed speech**, not
+subscription audio support or billing fallback. See
+`examples/realtime_chat/speech_pipeline.py` and the OpenAI package README.

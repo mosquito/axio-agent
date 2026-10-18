@@ -24,7 +24,7 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 # Explicit list — without this setuptools tries to auto-discover
 # packages and fails on this flat-layout example tree.
-py-modules = ["chat", "aec", "aec_bench"]
+py-modules = ["chat", "aec", "aec_bench", "speech_pipeline"]
 
 [tool.ruff]
 line-length = 119
