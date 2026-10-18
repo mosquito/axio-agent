@@ -117,11 +117,13 @@ async def test_bad_stt_response(result: Any) -> None:
 
 
 @pytest.mark.parametrize(
-    "audio,mime", [(b"", "audio/wav"), (b"a", "audio/pcm;rate=16000"), (b"a" * 25_000_001, "audio/wav")]
+    "size,mime",
+    [(0, "audio/wav"), (1, "audio/pcm;rate=16000"), (25_000_001, "audio/wav")],
+    ids=("empty", "raw-pcm", "oversized"),
 )
-async def test_invalid_stt_input(audio: bytes, mime: str) -> None:
+async def test_invalid_stt_input(size: int, mime: str) -> None:
     with pytest.raises(ValueError):
-        await OpenAISTTTransport(api_key="test").transcribe(audio, mime)
+        await OpenAISTTTransport(api_key="test").transcribe(b"a" * size, mime)
 
 
 async def test_early_close_releases_response_and_owned_client() -> None:
