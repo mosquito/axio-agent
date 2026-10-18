@@ -775,6 +775,97 @@ openai-custom  = "axio_transport_openai.custom:OpenAICompatibleTransport"
 
 [axio](https://github.com/mosquito/axio-agent) · [axio-transport-codex](https://github.com/mosquito/axio-agent) · [axio-transport-anthropic](https://github.com/mosquito/axio-agent) · [axio-tui](https://github.com/mosquito/axio-agent)
 
+## Standalone speech (API key; separately billed)
+
+`OpenAISTTTransport` implements `axio.transport.STTTransport` through
+`POST /v1/audio/transcriptions`; `OpenAITTSTransport` implements `TTSTransport`
+through `POST /v1/audio/speech`. Both are exported from `axio_transport_openai`.
+They are also registered as `openai` in the capability-specific entry-point groups
+`axio.transport.stt` and `axio.transport.tts`, **not** as text-completion providers.
+Construct them directly, or load those groups with `importlib.metadata.entry_points`.
+
+```python
+import aiohttp
+from contextlib import aclosing
+from axio_transport_openai import OpenAISTTTransport, OpenAITTSTransport
+
+
+async def speech_round_trip(recorded_wav: bytes) -> bytes:
+    async with aiohttp.ClientSession() as http:
+        stt = OpenAISTTTransport(session=http, language="en")
+        text = await stt.transcribe(recorded_wav, "audio/wav")
+        tts = OpenAITTSTransport(session=http, response_format="mp3")
+        async with aclosing(tts.synthesize(text, voice="coral")) as stream:
+            return b"".join([chunk async for chunk in stream])
+```
+
+Configuration is explicit constructor kwargs: `api_key` defaults only to
+`OPENAI_API_KEY`; `base_url` defaults to `OPENAI_BASE_URL` or
+`https://api.openai.com/v1`; `session` is an optional borrowed aiohttp session;
+`timeout_seconds` defaults to 120. Omit `session` for a per-request owned session.
+Borrowed sessions are never closed. No automatic retry/replay is performed, avoiding
+duplicate billing or duplicate partial audio. HTTP failures raise `StreamError`
+without echoing request/response contents; cancellation propagates. When abandoning
+TTS early, use `aclosing` so its generator releases the HTTP response promptly.
+
+STT defaults to `gpt-4o-mini-transcribe`, JSON text output, and accepts encoded WAV,
+MP3/MPEG, MP4/M4A or WebM files (maximum 25 MB). Raw PCM is rejected: wrap it in a
+WAV container with the actual sample rate first. `language` and `prompt` are optional.
+TTS defaults to `gpt-4o-mini-tts`, voice `coral`, MP3, speed 1; configurable formats:
+`mp3`, `opus`, `aac`, `flac`, `wav`, `pcm`. `instructions` are optional and must be
+supported by the chosen model. PCM output is 24 kHz signed little-endian PCM16 mono,
+without a header. HTTP chunks are arbitrary bytes, **not** independently decodable
+files or sample-aligned PCM frames. Reassemble/buffer them before playback.
+Tell end users that generated speech is AI-generated.
+
+### ChatGPT text plus API speech: explicit composition only
+
+ChatGPT subscription authentication remains owned by `ChatGPTTransport` (native
+Codex and dynamic OAuth flows are unchanged). Subscription voice/STT/TTS contracts
+have not been verified and are **not implemented**. A subscription does not pay
+for API speech or Realtime. Never supply subscription access tokens as `api_key`.
+There is no implicit subscription-to-paid-API fallback.
+
+For an end-to-end WAV -> agent -> MP3 example, see
+[`speech_pipeline.py`](../examples/realtime_chat/speech_pipeline.py):
+
+```bash
+# From examples/realtime_chat, with OPENAI_API_KEY configured separately:
+uv run python speech_pipeline.py input.wav output.mp3 --text-provider openai --allow-paid-audio
+# Existing ChatGPT account for text, API key for speech, deliberately separate billing:
+uv run python speech_pipeline.py input.wav output.mp3 --text-provider chatgpt --allow-paid-audio
+```
+
+For ChatGPT text, first sign in using the existing `axio-chatgpt login` workflow.
+Only transcript and answer text cross the composition boundary; OAuth tokens do not.
+
+## Realtime GA migration
+
+`OpenAIRealtimeTransport` now sends GA `session.update` with `type="realtime"`,
+`output_modalities=["audio"]`, nested `audio.input` / `audio.output` format objects,
+and no beta header. PCM requires **24 kHz mono PCM16 in both directions**; invalid
+rates fail before opening a socket. The common `RealtimeAgent` default input rate
+is still 16 kHz for Gemini compatibility, so set
+`input_audio_format="audio/pcm;rate=24000"` explicitly when constructing an OpenAI
+agent and capture/resample the actual microphone bytes to that rate. Bare
+`AudioBlock(media_type="audio/pcm", ...)` means the negotiated session rate.
+G.711 `audio/pcmu` and `audio/pcma` are supported without resampling (8 kHz).
+
+Server VAD is the default: stream microphone blocks continuously, **do not call
+commit per chunk**. Set `server_vad=False` for manual boundaries and call `commit()`
+once per utterance. Set `transcription_model="gpt-4o-mini-transcribe"` to opt into
+user transcripts. GA output text/audio/transcript events are translated, legacy
+output aliases remain readable, and unhandled lifecycle events are forwarded as
+`ProviderEvent`. Failed/cancelled/incomplete responses do not masquerade as success.
+`interrupt()` cancels generation, but does not track speaker playback or truncate
+unheard conversation audio: applications must manage playback/history alignment.
+Always close the session (normally via `async with RealtimeAgent(...)`).
+
+Public contract references verified during implementation (2026-10-18):
+[Realtime conversations](https://developers.openai.com/api/docs/guides/realtime-conversations),
+[file transcription](https://developers.openai.com/api/docs/guides/speech-to-text),
+[text to speech](https://developers.openai.com/api/docs/guides/text-to-speech).
+
 ## License
 
 MIT

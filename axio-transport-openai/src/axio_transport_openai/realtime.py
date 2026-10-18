@@ -9,12 +9,14 @@ mapped to the corresponding client events.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
 import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any
 
 import aiohttp
@@ -22,6 +24,7 @@ from axio.blocks import AudioBlock, ContentBlock, TextBlock
 from axio.events import (
     AudioOutputDelta,
     Error,
+    ProviderEvent,
     SpeechStarted,
     SpeechStopped,
     StreamEvent,
@@ -35,6 +38,7 @@ from axio.exceptions import StreamError
 from axio.tool import Tool
 from axio.transport import RealtimeSession, RealtimeTransport
 from axio.types import StopReason, ToolCallID, ToolName, Usage
+from yarl import URL
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +46,23 @@ OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime"
 DEFAULT_REALTIME_MODEL = "gpt-realtime"
 DEFAULT_PCM_MEDIA_TYPE = "audio/pcm;rate=24000"
 
+RESPONSE_STOP_REASONS = MappingProxyType(
+    {
+        "completed": StopReason.end_turn,
+        "cancelled": StopReason.cancelled,
+        "failed": StopReason.error,
+        "incomplete": StopReason.error,
+    }
+)
+INCOMPLETE_STOP_REASONS = MappingProxyType(
+    {
+        "max_output_tokens": StopReason.max_tokens,
+        "content_filter": StopReason.refusal,
+    }
+)
 
-def _convert_realtime_tools(tools: list[Tool[Any]]) -> list[dict[str, Any]]:
+
+def convert_realtime_tools(tools: list[Tool[Any]]) -> list[dict[str, Any]]:
     """Convert axio ``Tool``s to OpenAI realtime tool entries (flat ``function`` shape)."""
     return [
         {
@@ -56,19 +75,13 @@ def _convert_realtime_tools(tools: list[Tool[Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def _flat_audio_format(media_type: str) -> str:
-    """Translate axio audio media-type strings to OpenAI realtime v1 format strings.
-
-    realtime=v1 takes a flat string (``"pcm16"`` / ``"g711_ulaw"`` / ``"g711_alaw"``).
-    24 kHz PCM16 mono is the only sample rate the API currently supports.
-    """
-    if media_type.startswith("audio/pcm"):
-        return "pcm16"
-    if media_type.startswith("audio/pcmu"):
-        return "g711_ulaw"
-    if media_type.startswith("audio/pcma"):
-        return "g711_alaw"
-    raise ValueError(f"OpenAI realtime: unsupported audio format {media_type!r}")
+def audio_format(media_type: str) -> dict[str, Any]:
+    """GA audio format objects. Never relabel a different PCM sample rate."""
+    if media_type in ("audio/pcm", DEFAULT_PCM_MEDIA_TYPE):
+        return {"type": "audio/pcm", "rate": 24000}
+    if media_type in ("audio/pcmu", "audio/pcma"):
+        return {"type": media_type}
+    raise ValueError(f"OpenAI realtime: unsupported audio format {media_type!r}; PCM requires 24000 Hz mono")
 
 
 @dataclass(slots=True)
@@ -82,12 +95,14 @@ class OpenAIRealtimeSession(RealtimeSession):
     """
 
     ws: Any
+    input_audio_media_type: str = DEFAULT_PCM_MEDIA_TYPE
     output_audio_media_type: str = DEFAULT_PCM_MEDIA_TYPE
     http_session: aiohttp.ClientSession | None = field(default=None, repr=False)
     own_http_session: bool = False
     _tool_index: dict[str, int] = field(default_factory=dict, init=False, repr=False)
     _next_tool_index: int = field(default=0, init=False, repr=False)
     _audio_appended: bool = field(default=False, init=False, repr=False)
+    _transcripts: dict[tuple[str, int], str] = field(default_factory=dict, init=False, repr=False)
 
     async def _send_event(self, payload: dict[str, Any]) -> None:
         await self.ws.send_str(json.dumps(payload))
@@ -96,14 +111,16 @@ class OpenAIRealtimeSession(RealtimeSession):
         blocks = content if isinstance(content, list) else [content]
         for block in blocks:
             match block:
-                case AudioBlock(data=data):
-                    self._audio_appended = True
+                case AudioBlock(data=data, media_type=media_type):
+                    if audio_format(media_type) != audio_format(self.input_audio_media_type):
+                        raise ValueError("Audio block format does not match the connected input format")
                     await self._send_event(
                         {
                             "type": "input_audio_buffer.append",
                             "audio": base64.b64encode(data).decode(),
                         }
                     )
+                    self._audio_appended = True
                 case TextBlock(text=text):
                     await self._send_event(
                         {
@@ -157,21 +174,28 @@ class OpenAIRealtimeSession(RealtimeSession):
         await self._send_event({"type": "response.create"})
 
     async def events(self) -> AsyncIterator[StreamEvent]:
-        async for msg in self.ws:
-            mtype = getattr(msg, "type", None)
-            if mtype is aiohttp.WSMsgType.TEXT:
-                payload = json.loads(msg.data)
-                for ev in self._translate(payload):
-                    yield ev
-            elif mtype is aiohttp.WSMsgType.ERROR:
-                logger.error("OpenAI realtime ws error: %s", self.ws.exception())
-                break
-            elif mtype in (
-                aiohttp.WSMsgType.CLOSE,
-                aiohttp.WSMsgType.CLOSED,
-                aiohttp.WSMsgType.CLOSING,
-            ):
-                break
+        try:
+            async for msg in self.ws:
+                mtype = getattr(msg, "type", None)
+                if mtype is aiohttp.WSMsgType.TEXT:
+                    payload = json.loads(msg.data)
+                    if not isinstance(payload, dict):
+                        raise ValueError("Expected a realtime event object")
+                    for ev in self._translate(payload):
+                        yield ev
+                elif mtype is aiohttp.WSMsgType.ERROR:
+                    yield Error(exception=StreamError("OpenAI realtime WebSocket failed"))
+                    break
+                elif mtype in (
+                    aiohttp.WSMsgType.CLOSE,
+                    aiohttp.WSMsgType.CLOSED,
+                    aiohttp.WSMsgType.CLOSING,
+                ):
+                    break
+        except (aiohttp.ClientError, ValueError, KeyError, TypeError) as exc:
+            error = StreamError("OpenAI realtime stream is invalid or disconnected")
+            error.__cause__ = exc
+            yield Error(exception=error)
 
     def _translate(self, ev: dict[str, Any]) -> list[StreamEvent]:
         """Map a raw OpenAI realtime server event to axio StreamEvents."""
@@ -182,15 +206,29 @@ class OpenAIRealtimeSession(RealtimeSession):
         if t in ("response.audio.delta", "response.output_audio.delta"):
             out.append(
                 AudioOutputDelta(
-                    data=base64.b64decode(ev["delta"]),
+                    data=base64.b64decode(ev["delta"], validate=True),
                     media_type=self.output_audio_media_type,
                 )
             )
         elif t in ("response.audio_transcript.delta", "response.output_audio_transcript.delta"):
             out.append(TranscriptDelta(role="assistant", delta=ev["delta"]))
         elif t == "conversation.item.input_audio_transcription.delta":
+            key = (ev.get("item_id", ""), ev.get("content_index", 0))
+            self._transcripts[key] = self._transcripts.get(key, "") + ev["delta"]
             out.append(TranscriptDelta(role="user", delta=ev["delta"]))
-        elif t == "response.text.delta":
+        elif t == "conversation.item.input_audio_transcription.completed":
+            key = (ev.get("item_id", ""), ev.get("content_index", 0))
+            previous = self._transcripts.pop(key, "")
+            transcript = ev.get("transcript", "")
+            if transcript.startswith(previous) and transcript[len(previous) :]:
+                out.append(TranscriptDelta(role="user", delta=transcript[len(previous) :]))
+        elif t == "conversation.item.input_audio_transcription.failed":
+            self._transcripts.pop((ev.get("item_id", ""), ev.get("content_index", 0)), None)
+            out.append(Error(exception=StreamError("OpenAI realtime input transcription failed")))
+        elif t == "input_audio_buffer.committed":
+            self._audio_appended = False
+            out.append(ProviderEvent(provider="openai", kind=t, data=ev))
+        elif t in ("response.text.delta", "response.output_text.delta"):
             out.append(TextDelta(index=0, delta=ev["delta"]))
         elif t == "input_audio_buffer.speech_started":
             out.append(SpeechStarted())
@@ -211,15 +249,23 @@ class OpenAIRealtimeSession(RealtimeSession):
         elif t == "response.done":
             resp = ev.get("response") or {}
             items = resp.get("output") or []
-            stop_reason = (
-                StopReason.tool_use if any(it.get("type") == "function_call" for it in items) else StopReason.end_turn
-            )
+            status = resp.get("status", "completed")
+            stop_reason = RESPONSE_STOP_REASONS.get(status, StopReason.error)
+            if status == "completed" and any(it.get("type") == "function_call" for it in items):
+                stop_reason = StopReason.tool_use
+            elif status == "incomplete":
+                details = resp.get("status_details") or {}
+                stop_reason = INCOMPLETE_STOP_REASONS.get(details.get("reason", ""), StopReason.error)
+            if stop_reason == StopReason.error:
+                logger.warning("OpenAI realtime response failed or returned an unrecognized status/reason")
+                out.append(Error(exception=StreamError("OpenAI realtime response failed")))
             usage_data = resp.get("usage")
             usage: Usage | None = None
             if usage_data:
                 usage = Usage.reported(
                     input_tokens=usage_data.get("input_tokens", 0),
                     output_tokens=usage_data.get("output_tokens", 0),
+                    cache_read_tokens=(usage_data.get("input_token_details") or {}).get("cached_tokens", 0),
                 )
             out.append(TurnComplete(stop_reason=stop_reason, usage=usage))
             self._tool_index.clear()
@@ -231,14 +277,16 @@ class OpenAIRealtimeSession(RealtimeSession):
             logger.error("OpenAI realtime error [%s]: %s", code, msg)
             out.append(Error(exception=StreamError(f"OpenAI realtime [{code}]: {msg}")))
         else:
-            logger.debug("OpenAI realtime: ignoring event %s", t)
+            out.append(ProviderEvent(provider="openai", kind=str(t), data=ev))
         return out
 
     async def close(self) -> None:
-        if not self.ws.closed:
-            await self.ws.close()
-        if self.own_http_session and self.http_session is not None and not self.http_session.closed:
-            await self.http_session.close()
+        try:
+            if not self.ws.closed:
+                await self.ws.close()
+        finally:
+            if self.own_http_session and self.http_session is not None and not self.http_session.closed:
+                await self.http_session.close()
 
 
 @dataclass(slots=True)
@@ -254,10 +302,16 @@ class OpenAIRealtimeTransport(RealtimeTransport):
     ``agent.interrupt()``.
     """
 
-    api_key: str = field(default_factory=lambda: os.environ.get("OPENAI_API_KEY", ""))
+    api_key: str = field(default_factory=lambda: os.environ.get("OPENAI_API_KEY", ""), repr=False)
     base_url: str = field(default_factory=lambda: os.environ.get("OPENAI_REALTIME_URL", OPENAI_REALTIME_URL))
     model: str = DEFAULT_REALTIME_MODEL
     http_session: aiohttp.ClientSession | None = field(default=None, repr=False, compare=False)
+
+    server_vad: bool = True
+    """Set False for explicit utterance boundaries via commit()."""
+
+    transcription_model: str | None = None
+    """Opt in to user transcripts, e.g. gpt-4o-mini-transcribe."""
 
     vad_threshold: float = 0.5
     """Server VAD activation threshold (0..1).  Higher → less sensitive to
@@ -293,43 +347,64 @@ class OpenAIRealtimeTransport(RealtimeTransport):
         input_audio_format: str = "audio/pcm;rate=24000",
         output_audio_format: str = "audio/pcm;rate=24000",
     ) -> RealtimeSession:
-        own_session = False
-        if self.http_session is None or self.http_session.closed:
-            self.http_session = aiohttp.ClientSession()
-            own_session = True
-        url = f"{self.base_url}?model={self.model}"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "OpenAI-Beta": "realtime=v1",
-        }
-        ws = await self.http_session.ws_connect(url, headers=headers)
-        # The realtime=v1 (gpt-4o-realtime / gpt-realtime) WebSocket schema is
-        # flat — instructions / voice / *_audio_format / turn_detection / tools
-        # live directly on session.  The nested {audio: {input, output}} shape
-        # belongs to the newer HTTP session-create REST endpoint.  Sent here it
-        # is rejected with "Unknown parameter: 'session.audio'".
-        session_payload: dict[str, Any] = {
-            "instructions": system,
-            "input_audio_format": _flat_audio_format(input_audio_format),
-            "output_audio_format": _flat_audio_format(output_audio_format),
-            "turn_detection": {
-                "type": "server_vad",
-                "threshold": self.vad_threshold,
-                "prefix_padding_ms": self.vad_prefix_padding_ms,
-                "silence_duration_ms": self.vad_silence_duration_ms,
-                "create_response": self.vad_create_response,
-                "interrupt_response": self.vad_interrupt_response,
-            },
-            "tools": _convert_realtime_tools(tools),
-        }
-        if self.input_noise_reduction is not None:
-            session_payload["input_audio_noise_reduction"] = {"type": self.input_noise_reduction}
-        if voice:
-            session_payload["voice"] = voice
-        await ws.send_str(json.dumps({"type": "session.update", "session": session_payload}))
-        return OpenAIRealtimeSession(
-            ws=ws,
-            output_audio_media_type=output_audio_format,
-            http_session=self.http_session,
-            own_http_session=own_session,
-        )
+        input_format = audio_format(input_audio_format)
+        output_format = audio_format(output_audio_format)
+        if not self.api_key.strip():
+            raise ValueError("OPENAI_API_KEY is required for realtime API audio")
+        own_session = self.http_session is None or self.http_session.closed
+        client = aiohttp.ClientSession() if own_session else self.http_session
+        assert client is not None
+        ws: Any = None
+        try:
+            url = str(URL(self.base_url).update_query(model=self.model))
+            ws = await client.ws_connect(url, headers={"Authorization": f"Bearer {self.api_key}"})
+            audio_input: dict[str, Any] = {
+                "format": input_format,
+                "turn_detection": {
+                    "type": "server_vad",
+                    "threshold": self.vad_threshold,
+                    "prefix_padding_ms": self.vad_prefix_padding_ms,
+                    "silence_duration_ms": self.vad_silence_duration_ms,
+                    "create_response": self.vad_create_response,
+                    "interrupt_response": self.vad_interrupt_response,
+                },
+            }
+            if not self.server_vad:
+                audio_input["turn_detection"] = None
+            if self.transcription_model is not None:
+                audio_input["transcription"] = {"model": self.transcription_model}
+            audio_input["noise_reduction"] = (
+                {"type": self.input_noise_reduction} if self.input_noise_reduction is not None else None
+            )
+            audio_output: dict[str, Any] = {"format": output_format}
+            if voice:
+                audio_output["voice"] = voice
+            await ws.send_str(
+                json.dumps(
+                    {
+                        "type": "session.update",
+                        "session": {
+                            "type": "realtime",
+                            "instructions": system,
+                            "output_modalities": ["audio"],
+                            "audio": {"input": audio_input, "output": audio_output},
+                            "tools": convert_realtime_tools(tools),
+                        },
+                    }
+                )
+            )
+            return OpenAIRealtimeSession(
+                ws=ws,
+                input_audio_media_type=input_audio_format,
+                output_audio_media_type=output_audio_format,
+                http_session=client,
+                own_http_session=own_session,
+            )
+        except (Exception, asyncio.CancelledError):
+            try:
+                if ws is not None:
+                    await ws.close()
+            finally:
+                if own_session:
+                    await client.close()
+            raise

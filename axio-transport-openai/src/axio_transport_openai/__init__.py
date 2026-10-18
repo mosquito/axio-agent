@@ -38,15 +38,17 @@ from axio.types import StopReason, Usage, stop_reason_from
 from axio_responses import Responses, ResponsesAPIError, convert_messages, convert_tools, request_id
 from axio_sse import Payload, Wire, payloads
 
+from .audio import AudioAPI, OpenAISTTTransport, OpenAITTSTransport
 from .chatgpt import ChatGPTTransport
 from .chatgpt_images import ChatGPTImageTransport
 from .chatgpt_models import CHATGPT_IMAGE_MODELS, ChatGPTImageModel
 from .chatgpt_tools import ChatGPTImageTools
 from .realtime import OpenAIRealtimeSession, OpenAIRealtimeTransport
 
-__all__ = [
+__all__ = (
     "CHATGPT_IMAGE_MODELS",
     "OPENAI_MODELS",
+    "AudioAPI",
     "ChatGPTImageModel",
     "ChatGPTImageTools",
     "ChatGPTImageTransport",
@@ -60,12 +62,14 @@ __all__ = [
     "OpenAIRealtimeSession",
     "OpenAIRealtimeTransport",
     "OpenAITransport",
+    "OpenAISTTTransport",
+    "OpenAITTSTransport",
     "PromptDetails",
     "ThinkingMixin",
     "ThinkTagParser",
     "ToolCall",
     "ToolFunction",
-]
+)
 
 logger = logging.getLogger(__name__)
 
