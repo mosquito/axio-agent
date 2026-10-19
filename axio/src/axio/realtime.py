@@ -21,7 +21,7 @@ from .events import (
     TurnComplete,
 )
 from .tool import Tool
-from .transport import RealtimeSession, RealtimeTransport
+from .transport import RealtimePlaybackControl, RealtimeSession, RealtimeTransport
 from .types import StopReason
 
 logger = logging.getLogger(__name__)
@@ -105,6 +105,17 @@ class RealtimeAgent:
 
     async def commit(self) -> None:
         await self.session.commit()
+
+    async def truncate(self, item_id: str, audio_end_ms: int, *, content_index: int = 0) -> None:
+        """Reconcile interrupted playback where the session supports it.
+
+        Does not cancel generation or clear the application's playback queue.
+        Raises ``NotImplementedError`` for transports without this capability.
+        """
+        session = self.session
+        if not isinstance(session, RealtimePlaybackControl):
+            raise NotImplementedError("This realtime session does not support playback truncation")
+        await session.truncate(item_id, audio_end_ms, content_index=content_index)
 
     async def interrupt(self) -> None:
         # Cancel running tool tasks AND drop any half-streamed pending tool

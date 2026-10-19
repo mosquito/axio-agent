@@ -149,6 +149,24 @@ class RealtimeSession(Protocol):
 
 
 @runtime_checkable
+class RealtimePlaybackControl(Protocol):
+    """Optional session capability for reconciling interrupted local playback.
+
+    Session implementations without server-side playback truncation need not
+    implement this protocol. Cancelling generation and clearing the local
+    speaker queue are separate operations.
+    """
+
+    async def truncate(self, item_id: str, audio_end_ms: int, *, content_index: int = 0) -> None:
+        """Keep only the audio actually played for the identified content part.
+
+        ``audio_end_ms`` is a nonnegative duration relative to this part, not
+        time since the response started. The provider may reject a duration
+        beyond its generated audio. Removes the unplayed server transcript.
+        """
+
+
+@runtime_checkable
 class RealtimeTransport(Protocol):
     """Provider that supports duplex realtime sessions (e.g. OpenAI Realtime,
     Gemini Live).  Distinct from :class:`CompletionTransport` because the

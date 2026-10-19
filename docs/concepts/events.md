@@ -334,11 +334,26 @@ These come from a duplex {ref}`realtime session <protocols>`, not from
 
 `AudioOutputDelta`
 : A chunk of assistant audio. `data: bytes`, `media_type: str` defaulting to
-  `"audio/pcm;rate=24000"`.
+  `"audio/pcm;rate=24000"`. Optional keyword-only `item_id`, `response_id` and
+  `content_index` identify its content part where the provider supplies them.
+
+`AudioOutputEnd`
+: The provider finished streaming one audio part. Carries the same optional IDs;
+  it does not mean the local speaker finished playback.
 
 `TranscriptDelta`
 : A live transcript chunk. `role: Literal["user", "assistant"]` says whether it
   is server-side STT of the microphone or the assistant's own speech.
+  Optional keyword-only `item_id`, `response_id` and `content_index` correlate
+  deltas with their final transcript.
+
+`TranscriptFinal`
+: The authoritative `text` for a transcript part, replacing deltas. Contains
+  `role`, `status` (`"completed"` or `"failed"`) and optional keyword-only IDs.
+  Completion describes transcription, including for cancelled assistant responses;
+  correlate the response ID with `TurnComplete` to learn response status.
+  Input ASR may finish after the assistant response. A failed input transcript
+  has empty text and is followed by `Error`.
 
 `SpeechStarted` / `SpeechStopped`
 : Server voice-activity detection saw the user start or stop speaking. Neither
@@ -346,7 +361,8 @@ These come from a duplex {ref}`realtime session <protocols>`, not from
 
 `TurnComplete`
 : The assistant turn finished. `stop_reason: StopReason` and
-  `usage: Usage | None = None`. A `tool_use` stop reason means pending tool
+  `usage: Usage | None = None` and optional keyword-only `response_id`.
+  A `tool_use` stop reason means pending tool
   calls should run before the next turn starts.
 
 <!-- The blocks above mirror the source; the ones below are executed by markdown-pytest. -->
@@ -403,7 +419,9 @@ type StreamEvent = (
     | ProviderEvent
     | SessionEndEvent
     | AudioOutputDelta
+    | AudioOutputEnd
     | TranscriptDelta
+    | TranscriptFinal
     | SpeechStarted
     | SpeechStopped
     | TurnComplete

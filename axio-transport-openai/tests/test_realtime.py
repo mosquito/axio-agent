@@ -16,9 +16,11 @@ import aiohttp
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
-from axio.blocks import AudioBlock, TextBlock
+from axio.blocks import AudioBlock, ImageBlock, TextBlock, VideoBlock
 from axio.events import (
     AudioOutputDelta,
+    AudioOutputEnd,
+    Error,
     ProviderEvent,
     SpeechStarted,
     SpeechStopped,
@@ -26,6 +28,7 @@ from axio.events import (
     ToolInputDelta,
     ToolUseStart,
     TranscriptDelta,
+    TranscriptFinal,
     TurnComplete,
 )
 from axio.tool import Tool
@@ -167,10 +170,70 @@ class TestOutboundEvents:
     async def test_send_unsupported_block_raises(self) -> None:
         ws = _StubWebSocket([])
         session = OpenAIRealtimeSession(ws=ws)
-        from axio.blocks import ImageBlock
-
         with pytest.raises(TypeError):
-            await session.send(ImageBlock(media_type="image/png", data=b""))
+            await session.send(VideoBlock(media_type="video/mp4", data=b"video"))
+
+    async def test_panorama_is_one_ordered_message(self) -> None:
+        ws = _StubWebSocket([])
+        session = OpenAIRealtimeSession(ws=ws)
+        await session.send(
+            [
+                TextBlock(text="Слева, угол −30°"),
+                ImageBlock(media_type="image/jpeg", data=b"left"),
+                TextBlock(text="Справа, угол +30°"),
+                ImageBlock(media_type="image/png", data=b"right"),
+            ]
+        )
+        assert _decode_sent(ws) == [
+            {
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "Слева, угол −30°"},
+                        {"type": "input_image", "image_url": "data:image/jpeg;base64,bGVmdA=="},
+                        {"type": "input_text", "text": "Справа, угол +30°"},
+                        {"type": "input_image", "image_url": "data:image/png;base64,cmlnaHQ="},
+                    ],
+                },
+            }
+        ]
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            [TextBlock(text="partial"), ImageBlock(media_type="image/jpeg", data=b"")],
+            [TextBlock(text="partial"), AudioBlock(media_type="audio/pcm", data=b"12")],
+            [AudioBlock(media_type="audio/pcm", data=b"12"), VideoBlock(media_type="video/mp4", data=b"video")],
+        ],
+    )
+    async def test_invalid_message_does_not_send_partial_content(self, bad: list[Any]) -> None:
+        ws = _StubWebSocket([])
+        with pytest.raises((TypeError, ValueError)):
+            await OpenAIRealtimeSession(ws=ws).send(bad)
+        assert not ws.sent
+
+    async def test_truncate_uses_played_duration_and_content_index(self) -> None:
+        ws = _StubWebSocket([])
+        await OpenAIRealtimeSession(ws=ws).truncate("assistant-item", 720, content_index=2)
+        assert _decode_sent(ws) == [
+            {
+                "type": "conversation.item.truncate",
+                "item_id": "assistant-item",
+                "content_index": 2,
+                "audio_end_ms": 720,
+            }
+        ]
+
+    @pytest.mark.parametrize(
+        "item,duration,index", [("", 0, 0), ("i", -1, 0), ("i", True, 0), ("i", 1.5, 0), ("i", 0, -1), ("i", 0, False)]
+    )
+    async def test_invalid_truncate_never_reaches_provider(self, item: str, duration: Any, index: Any) -> None:
+        ws = _StubWebSocket([])
+        with pytest.raises(ValueError):
+            await OpenAIRealtimeSession(ws=ws).truncate(item, duration, content_index=index)
+        assert not ws.sent
 
 
 # ---------------------------------------------------------------------------
@@ -342,7 +405,7 @@ async def test_connect_sends_session_update() -> None:
     async def add(a: int, b: int) -> str:
         return str(a + b)
 
-    ws = _StubWebSocket([])
+    ws = _StubWebSocket([{"type": "session.updated"}])
     http = _StubHttpSession(ws)
     transport = OpenAIRealtimeTransport(api_key="sk-test", model="gpt-realtime", http_session=http)  # type: ignore[arg-type]
     session = await transport.connect(
@@ -413,10 +476,16 @@ async def test_ga_transcription_completion_does_not_duplicate_deltas() -> None:
     for item in ("second", "first"):
         assert session._translate(
             {"type": "conversation.item.input_audio_transcription.completed", "item_id": item, "transcript": "hello"}
-        ) == [TranscriptDelta(role="user", delta="lo")]
+        ) == [
+            TranscriptDelta(role="user", delta="lo", item_id=item),
+            TranscriptFinal(role="user", text="hello", item_id=item),
+        ]
     assert session._translate(
         {"type": "conversation.item.input_audio_transcription.completed", "item_id": "whole", "transcript": "hi"}
-    ) == [TranscriptDelta(role="user", delta="hi")]
+    ) == [
+        TranscriptDelta(role="user", delta="hi", item_id="whole"),
+        TranscriptFinal(role="user", text="hi", item_id="whole"),
+    ]
 
 
 async def test_reject_rate_before_connecting() -> None:
@@ -430,6 +499,15 @@ async def test_reject_rate_before_connecting() -> None:
     with pytest.raises(ValueError):
         await session.send(AudioBlock(media_type="audio/pcm;rate=16000", data=b"12"))  # type: ignore[arg-type]
     assert not ws.sent
+
+
+@pytest.mark.parametrize("timeout", [0, -1, float("inf"), float("nan")])
+async def test_readiness_requires_a_bounded_timeout(timeout: float) -> None:
+    http = _StubHttpSession(_StubWebSocket([]))
+    transport = OpenAIRealtimeTransport(api_key="test", http_session=http, ready_timeout=timeout)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="finite"):
+        await transport.connect(system="", tools=[])
+    assert http.connect_url is None
 
 
 async def test_setup_failure_cleans_owned_resources(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -447,7 +525,7 @@ async def test_setup_failure_cleans_owned_resources(monkeypatch: pytest.MonkeyPa
 
 
 async def test_close_is_idempotent_and_preserves_shared_client() -> None:
-    ws = _StubWebSocket([])
+    ws = _StubWebSocket([{"type": "session.updated"}])
     http = _StubHttpSession(ws)
     transport = OpenAIRealtimeTransport(api_key="test", http_session=http)  # type: ignore[arg-type]
     session = await transport.connect(system="", tools=[])
@@ -470,7 +548,7 @@ async def test_owned_connect_failure_closes_http(monkeypatch: pytest.MonkeyPatch
 
 
 async def test_manual_vad_transcription_and_g711() -> None:
-    ws = _StubWebSocket([])
+    ws = _StubWebSocket([{"type": "session.updated"}])
     http = _StubHttpSession(ws)
     transport = OpenAIRealtimeTransport(
         api_key="test",
@@ -484,8 +562,95 @@ async def test_manual_vad_transcription_and_g711() -> None:
     assert audio["input"]["turn_detection"] is None
     assert audio["input"]["noise_reduction"] is None
     assert audio["input"]["transcription"] == {"model": "gpt-4o-mini-transcribe"}
+    assert "language" not in audio["input"]["transcription"]  # multilingual auto-detection
     assert audio["input"]["format"] == {"type": "audio/pcmu"}
     assert audio["output"]["format"] == {"type": "audio/pcma"}
+
+
+async def test_final_transcripts_preserve_identity_even_when_cancelled_or_late() -> None:
+    session = OpenAIRealtimeSession(ws=_StubWebSocket([]))
+    identity: dict[str, Any] = {"item_id": "assistant-1", "response_id": "response-1", "content_index": 2}
+    pcm = session._translate({"type": "response.output_audio.delta", "delta": "MTI=", **identity})
+    assert pcm == [AudioOutputDelta(data=b"12", **identity)]
+    assert session._translate({"type": "response.output_audio.done", **identity}) == [AudioOutputEnd(**identity)]
+    assert session._translate({"type": "response.output_audio_transcript.delta", "delta": "Привет", **identity}) == [
+        TranscriptDelta(role="assistant", delta="Привет", **identity)
+    ]
+    assert session._translate(
+        {"type": "response.output_audio_transcript.done", "transcript": "Привет! Hello!", **identity}
+    ) == [TranscriptFinal(role="assistant", text="Привет! Hello!", **identity)]
+    assert session._translate({"type": "response.done", "response": {"id": "response-1", "status": "cancelled"}}) == [
+        TurnComplete(stop_reason=StopReason.cancelled, response_id="response-1")
+    ]
+    # Input ASR is independently scheduled and may finish after the assistant.
+    user: dict[str, Any] = {"item_id": "user-1", "content_index": 0}
+    session._translate({"type": "conversation.item.input_audio_transcription.delta", "delta": "Добро", **user})
+    assert session._translate(
+        {"type": "conversation.item.input_audio_transcription.completed", "transcript": "Good morning", **user}
+    ) == [TranscriptFinal(role="user", text="Good morning", **user)]
+
+
+async def test_failed_input_transcription_keeps_identity_without_archiving_partial_text() -> None:
+    session = OpenAIRealtimeSession(ws=_StubWebSocket([]))
+    user: dict[str, Any] = {"item_id": "user-2", "content_index": 1}
+    session._translate({"type": "conversation.item.input_audio_transcription.delta", "delta": "unfinished", **user})
+    events = session._translate({"type": "conversation.item.input_audio_transcription.failed", **user})
+    assert events[0] == TranscriptFinal(role="user", text="", status="failed", **user)
+    assert isinstance(events[1], Error)
+    assert not session._transcripts
+
+
+async def test_connect_waits_for_ack_and_preserves_early_events() -> None:
+    early = {"type": "session.created", "session": {"id": "s"}}
+    ws = _StubWebSocket([early])
+    http = _StubHttpSession(ws)
+    transport = OpenAIRealtimeTransport(api_key="test", http_session=http, ready_timeout=1)  # type: ignore[arg-type]
+    connecting = asyncio.create_task(transport.connect(system="", tools=[]))
+    await asyncio.sleep(0)
+    assert not connecting.done()
+    ws.push({"type": "session.updated"})
+    session = await connecting
+    ws.push(None)
+    assert [event async for event in session.events()] == [
+        ProviderEvent(provider="openai", kind="session.created", data=early),
+        ProviderEvent(provider="openai", kind="session.updated", data={"type": "session.updated"}),
+    ]
+    await session.close()
+    assert not http.closed
+
+
+@pytest.mark.parametrize("failure", ["timeout", "closed", "rejected", "overflow"])
+@pytest.mark.parametrize("owned", [False, True])
+async def test_handshake_failure_closes_socket_and_only_owned_http(
+    failure: str, owned: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scripted = [{"type": "session.created"}] * 257 if failure == "overflow" else []
+    ws = _StubWebSocket(scripted)
+    if failure == "closed":
+        ws.push(None)
+    elif failure == "rejected":
+        ws.push({"type": "error", "error": {"message": "private configuration"}})
+    http = _StubHttpSession(ws)
+    monkeypatch.setattr(aiohttp, "ClientSession", lambda: http)
+    transport = OpenAIRealtimeTransport(api_key="test", http_session=None if owned else http, ready_timeout=0.02)  # type: ignore[arg-type]
+    from axio.exceptions import StreamError
+
+    with pytest.raises((StreamError, TimeoutError)) as exc:
+        await transport.connect(system="", tools=[])
+    assert "private configuration" not in str(exc.value)
+    assert ws.closed and http.closed is owned
+
+
+async def test_cancel_during_readiness_cleans_owned_resources(monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = _StubWebSocket([])
+    http = _StubHttpSession(ws)
+    monkeypatch.setattr(aiohttp, "ClientSession", lambda: http)
+    connecting = asyncio.create_task(OpenAIRealtimeTransport(api_key="test").connect(system="", tools=[]))
+    await asyncio.sleep(0)
+    connecting.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await connecting
+    assert ws.closed and http.closed
 
 
 async def test_malformed_audio_event_surfaces_error() -> None:
@@ -545,6 +710,7 @@ async def test_ga_session_over_websocket() -> None:
         update = await ws.receive_json()
         assert update["session"]["type"] == "realtime"
         assert update["session"]["audio"]["input"]["format"] == {"type": "audio/pcm", "rate": 24000}
+        await ws.send_json({"type": "session.updated"})
         await ws.send_json({"type": "response.output_audio.delta", "delta": base64.b64encode(b"12").decode()})
         await ws.send_json({"type": "response.done", "response": {"status": "completed"}})
         await ws.close()
@@ -561,7 +727,11 @@ async def test_ga_session_over_websocket() -> None:
         session = await transport.connect(system="", tools=[])
         try:
             events = [event async for event in session.events()]
-            assert events == [AudioOutputDelta(data=b"12"), TurnComplete(stop_reason=StopReason.end_turn)]
+            assert events == [
+                ProviderEvent(provider="openai", kind="session.updated", data={"type": "session.updated"}),
+                AudioOutputDelta(data=b"12"),
+                TurnComplete(stop_reason=StopReason.end_turn),
+            ]
         finally:
             await session.close()
         assert not client.closed

@@ -30,6 +30,28 @@ from axio.realtime import RealtimeAgent
 from axio.tool import Tool
 from axio.types import StopReason, Usage
 
+
+async def test_playback_truncation_is_an_optional_session_capability() -> None:
+    from axio import RealtimePlaybackControl
+
+    class PlaybackSession(_StubSession):
+        truncated: tuple[str, int, int] | None = None
+
+        async def truncate(self, item_id: str, audio_end_ms: int, *, content_index: int = 0) -> None:
+            self.truncated = (item_id, audio_end_ms, content_index)
+
+    session = PlaybackSession([])
+    assert isinstance(session, RealtimePlaybackControl)
+    async with RealtimeAgent(system="", transport=_StubTransport(session)) as agent:
+        await agent.truncate("item", 240, content_index=1)
+        assert session.truncated == ("item", 240, 1)
+    legacy = _StubSession([])
+    assert not isinstance(legacy, RealtimePlaybackControl)
+    async with RealtimeAgent(system="", transport=_StubTransport(legacy)) as agent:
+        with pytest.raises(NotImplementedError):
+            await agent.truncate("item", 0)
+
+
 # ---------------------------------------------------------------------------
 # Stubs
 # ---------------------------------------------------------------------------

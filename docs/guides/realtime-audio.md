@@ -254,6 +254,14 @@ microphone to 24000 Hz (or actually resample before sending). The generic agent'
 16 kHz default remains unchanged for Gemini. `examples/realtime_chat/chat.py`
 already selects provider-specific rates.
 
+The OpenAI transport waits for the session configuration acknowledgement before
+returning from `connect()`. It accepts ordered text/image messages, exposes final
+transcripts with item/response IDs, and supports explicit truncation of unplayed
+audio through `RealtimeAgent.truncate()`. The application still owns speaker
+queue clearing and measurement of played duration. See the
+[OpenAI package guide](../packages/axio-transport-openai.md#camera-frames-and-interrupted-playback)
+for the complete playback and archive contract.
+
 For file-based voice turns, the exported `OpenAISTTTransport` and
 `OpenAITTSTransport` can wrap any text `Agent`, including subscription-backed
 ChatGPT. This is **explicit composition with separately API-billed speech**, not
