@@ -181,12 +181,21 @@ agent = RealtimeAgent(
 | `input_audio_format` | `"audio/pcm;rate=16000"` | Audio format sent to the model |
 | `output_audio_format` | `"audio/pcm;rate=24000"` | Audio format received from the model |
 | `raise_on_error` | `True` | Re-raise exceptions from `Error` events; set `False` to handle them in-loop |
+| `close_timeout` | `5.0` | Positive finite bound for shutdown and tool cleanup |
+
+Calls in one turn execute concurrently through the usual `Tool` validation and
+guards. Their `ToolResult` events appear as they finish. Transports implementing
+`RealtimeToolBatch` receive one group of `RealtimeToolResponse` values, so OpenAI
+creates one continuation after all results. Other transports retain individual
+delivery. Invalid argument JSON never runs a handler. Closing cancels tools and
+closes the socket concurrently; cancelled callers leave cleanup running, and
+uncooperative tasks cause a bounded `TimeoutError`.
 
 ## Handling interruptions
 
 When the user starts speaking while the assistant is talking, the model signals
-a `SpeechStarted` event. Call `agent.interrupt()` to cancel in-flight tool tasks
-and tell the session to stop generating:
+a `SpeechStarted` event. The agent immediately invalidates in-flight tool work.
+Call `agent.interrupt()` to also tell the session to stop generating:
 
 ```python
 from axio.events import AudioOutputDelta, SpeechStarted

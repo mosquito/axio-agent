@@ -20,6 +20,7 @@ class ReasoningDelta:
 class TextDelta:
     index: int
     delta: str
+    response_id: str | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +28,7 @@ class ToolUseStart:
     index: int
     tool_use_id: ToolCallID
     name: ToolName
+    response_id: str | None = field(default=None, kw_only=True)
 
     signature: str = ""
     """Opaque proof that this call is the model's own, where the provider issues one for the call
@@ -43,6 +45,7 @@ class ToolInputDelta:
     index: int
     tool_use_id: ToolCallID
     partial_json: str
+    response_id: str | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +85,7 @@ class ToolResult:
     is_error: bool
     content: str = ""
     input: dict[str, Any] = field(default_factory=dict)
+    response_id: str | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +146,13 @@ class SessionEndEvent:
 
 
 # ── Realtime (duplex) events ────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class TurnStarted:
+    """A realtime response began; its ID correlates output and interruption."""
+
+    response_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -452,4 +463,5 @@ type StreamEvent = (
     | SpeechStarted
     | SpeechStopped
     | TurnComplete
+    | TurnStarted
 )

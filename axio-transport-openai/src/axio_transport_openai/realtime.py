@@ -37,10 +37,11 @@ from axio.events import (
     TranscriptDelta,
     TranscriptFinal,
     TurnComplete,
+    TurnStarted,
 )
 from axio.exceptions import StreamError
 from axio.tool import Tool
-from axio.transport import RealtimeSession, RealtimeTransport
+from axio.transport import RealtimeSession, RealtimeToolResponse, RealtimeTransport
 from axio.types import StopReason, ToolCallID, ToolName, Usage
 from yarl import URL
 
@@ -103,12 +104,16 @@ class OpenAIRealtimeSession(RealtimeSession):
     output_audio_media_type: str = DEFAULT_PCM_MEDIA_TYPE
     http_session: aiohttp.ClientSession | None = field(default=None, repr=False)
     own_http_session: bool = False
-    _tool_index: dict[str, int] = field(default_factory=dict, init=False, repr=False)
+    _tool_index: dict[tuple[str | None, str], int] = field(default_factory=dict, init=False, repr=False)
     _next_tool_index: int = field(default=0, init=False, repr=False)
     _audio_appended: bool = field(default=False, init=False, repr=False)
     _transcripts: dict[tuple[str, int], str] = field(default_factory=dict, init=False, repr=False)
     pending_events: deque[dict[str, Any]] = field(default_factory=deque, init=False, repr=False)
     ws_messages: AsyncIterator[Any] | None = field(default=None, init=False, repr=False)
+    response_active: bool = field(default=False, init=False)
+    response_requested: bool = field(default=False, init=False)
+    active_response_id: str | None = field(default=None, init=False)
+    cancel_requested: bool = field(default=False, init=False)
 
     async def _send_event(self, payload: dict[str, Any]) -> None:
         await self.ws.send_str(json.dumps(payload))
@@ -163,10 +168,29 @@ class OpenAIRealtimeSession(RealtimeSession):
         if self._audio_appended:
             await self._send_event({"type": "input_audio_buffer.commit"})
             self._audio_appended = False
-        await self._send_event({"type": "response.create"})
+        await self.create_response()
+
+    async def create_response(self) -> None:
+        """Track the interval before response.created so it can be interrupted."""
+        self.response_requested = True
+        self.cancel_requested = False
+        try:
+            await self._send_event({"type": "response.create"})
+        except BaseException:
+            self.response_requested = False
+            raise
 
     async def interrupt(self) -> None:
-        await self._send_event({"type": "response.cancel"})
+        if (self.response_active or self.response_requested) and not self.cancel_requested:
+            self.cancel_requested = True
+            payload: dict[str, Any] = {"type": "response.cancel"}
+            if self.response_active and self.active_response_id is not None:
+                payload["response_id"] = self.active_response_id
+            try:
+                await self._send_event(payload)
+            except BaseException:
+                self.cancel_requested = False
+                raise
 
     async def truncate(self, item_id: str, audio_end_ms: int, *, content_index: int = 0) -> None:
         """Remove unplayed audio and its transcript from the server conversation."""
@@ -187,29 +211,37 @@ class OpenAIRealtimeSession(RealtimeSession):
     async def send_tool_result(
         self, tool_use_id: ToolCallID, name: ToolName, content: str | list[ContentBlock]
     ) -> None:
-        if isinstance(content, list):
-            parts: list[str] = []
-            for b in content:
-                if isinstance(b, TextBlock):
-                    parts.append(b.text)
-                else:
-                    raise TypeError(
-                        f"OpenAI realtime tool result only supports str / TextBlock, got {type(b).__name__}"
-                    )
-            output = "".join(parts)
-        else:
-            output = content
-        await self._send_event(
-            {
-                "type": "conversation.item.create",
-                "item": {
-                    "type": "function_call_output",
-                    "call_id": tool_use_id,
-                    "output": output,
-                },
-            }
-        )
-        await self._send_event({"type": "response.create"})
+        await self.send_tool_results([RealtimeToolResponse(tool_use_id, name, content)])
+
+    async def send_tool_results(self, results: list[RealtimeToolResponse]) -> None:
+        """Send all function outputs before creating one continuation response."""
+        payloads: list[dict[str, Any]] = []
+        call_ids: set[str] = set()
+        for result in results:
+            if not result.tool_use_id.strip() or result.tool_use_id in call_ids:
+                raise ValueError("Tool result call IDs must be nonempty and unique within a batch")
+            call_ids.add(result.tool_use_id)
+            if isinstance(result.content, list):
+                parts: list[str] = []
+                for block in result.content:
+                    if not isinstance(block, TextBlock):
+                        raise TypeError("OpenAI realtime tool results support only str / TextBlock")
+                    parts.append(block.text)
+                output = "".join(parts)
+            elif isinstance(result.content, str):
+                output = result.content
+            else:
+                raise TypeError("OpenAI realtime tool results support only str / TextBlock")
+            payloads.append(
+                {
+                    "type": "conversation.item.create",
+                    "item": {"type": "function_call_output", "call_id": result.tool_use_id, "output": output},
+                }
+            )
+        for payload in payloads:
+            await self._send_event(payload)
+        if payloads:
+            await self.create_response()
 
     async def read_payload(self) -> dict[str, Any] | None:
         """Read from the single socket iterator; return None on orderly closure."""
@@ -265,6 +297,12 @@ class OpenAIRealtimeSession(RealtimeSession):
         """Map a raw OpenAI realtime server event to axio StreamEvents."""
         out: list[StreamEvent] = []
         t = ev.get("type")
+        if t == "response.created":
+            self.active_response_id = (ev.get("response") or {}).get("id")
+            self.response_active = True
+            self.response_requested = False
+            self.cancel_requested = False
+            return [TurnStarted(response_id=self.active_response_id)]
         # Both the v1 (realtime=v1) and the newer GA schemas appear on this
         # endpoint depending on the model id.  Accept both event-name variants.
         if t in ("response.audio.delta", "response.output_audio.delta"):
@@ -345,7 +383,7 @@ class OpenAIRealtimeSession(RealtimeSession):
             self._audio_appended = False
             out.append(ProviderEvent(provider="openai", kind=t, data=ev))
         elif t in ("response.text.delta", "response.output_text.delta"):
-            out.append(TextDelta(index=0, delta=ev["delta"]))
+            out.append(TextDelta(index=0, delta=ev["delta"], response_id=ev.get("response_id")))
         elif t == "input_audio_buffer.speech_started":
             out.append(SpeechStarted())
         elif t == "input_audio_buffer.speech_stopped":
@@ -356,14 +394,24 @@ class OpenAIRealtimeSession(RealtimeSession):
                 call_id = item["call_id"]
                 idx = self._next_tool_index
                 self._next_tool_index += 1
-                self._tool_index[call_id] = idx
-                out.append(ToolUseStart(index=idx, tool_use_id=call_id, name=item["name"]))
+                self._tool_index[(ev.get("response_id"), call_id)] = idx
+                out.append(
+                    ToolUseStart(index=idx, tool_use_id=call_id, name=item["name"], response_id=ev.get("response_id"))
+                )
+            else:
+                out.append(ProviderEvent(provider="openai", kind=t, data=ev))
         elif t == "response.function_call_arguments.delta":
             call_id = ev["call_id"]
-            idx = self._tool_index.get(call_id, 0)
-            out.append(ToolInputDelta(index=idx, tool_use_id=call_id, partial_json=ev["delta"]))
+            idx = self._tool_index.get((ev.get("response_id"), call_id), 0)
+            out.append(
+                ToolInputDelta(
+                    index=idx, tool_use_id=call_id, partial_json=ev["delta"], response_id=ev.get("response_id")
+                )
+            )
         elif t == "response.done":
             resp = ev.get("response") or {}
+            if resp.get("id") == self.active_response_id:
+                self.response_active = False
             items = resp.get("output") or []
             status = resp.get("status", "completed")
             stop_reason = RESPONSE_STOP_REASONS.get(status, StopReason.error)
@@ -384,8 +432,11 @@ class OpenAIRealtimeSession(RealtimeSession):
                     cache_read_tokens=(usage_data.get("input_token_details") or {}).get("cached_tokens", 0),
                 )
             out.append(TurnComplete(stop_reason=stop_reason, usage=usage, response_id=resp.get("id")))
-            self._tool_index.clear()
-            self._next_tool_index = 0
+            for key in tuple(self._tool_index):
+                if key[0] == resp.get("id"):
+                    self._tool_index.pop(key)
+            if not self._tool_index:
+                self._next_tool_index = 0
         elif t == "error":
             err = ev.get("error") or {}
             msg = err.get("message") or str(err)

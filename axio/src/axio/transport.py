@@ -166,6 +166,23 @@ class RealtimePlaybackControl(Protocol):
         """
 
 
+@dataclass(frozen=True, slots=True)
+class RealtimeToolResponse:
+    """One function result to deliver, retaining its provider call identity."""
+
+    tool_use_id: ToolCallID
+    name: ToolName
+    content: str | list[ContentBlock]
+
+
+@runtime_checkable
+class RealtimeToolBatch(Protocol):
+    """Optional capability for resuming generation once per group of results."""
+
+    async def send_tool_results(self, results: list[RealtimeToolResponse]) -> None:
+        """Deliver the complete group, then resume generation once, if needed."""
+
+
 @runtime_checkable
 class RealtimeTransport(Protocol):
     """Provider that supports duplex realtime sessions (e.g. OpenAI Realtime,

@@ -532,6 +532,14 @@ raises `NotImplementedError` if unavailable. Existing sessions do not need to
 implement it. See the [OpenAI package example](../packages/axio-transport-openai.md)
 for multimodal input, readiness and transcript collection.
 
+`RealtimeToolBatch` optionally adds `send_tool_results(list[RealtimeToolResponse])`
+to a session. Each immutable response contains `tool_use_id`, `name` and `content`
+(a string or list of content blocks). The agent executes a turn's tools
+concurrently, then uses this capability to deliver all results and resume once.
+Without it, the original individual-result API remains in use. OpenAI implements
+the batch capability. Unknown providers do not need to implement either optional
+capability to remain compatible.
+
 **Implementation status**: implemented by `OpenAIRealtimeTransport`
 (`axio-transport-openai`) and by `GeminiLiveTransport` / `VertexLiveTransport`
 (`axio-transport-google`). See {doc}`../guides/realtime-audio`.

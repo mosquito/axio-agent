@@ -34,6 +34,7 @@ from .events import (
     TranscriptDelta,
     TranscriptFinal,
     TurnComplete,
+    TurnStarted,
     VideoOutput,
 )
 from .exceptions import GuardError, HandlerError
@@ -44,7 +45,14 @@ from .realtime import RealtimeAgent
 from .selector import ToolSelector
 from .stream import AgentStream
 from .tool import CONTEXT, Tool
-from .transport import CompletionTransport, RealtimePlaybackControl, RealtimeSession, RealtimeTransport
+from .transport import (
+    CompletionTransport,
+    RealtimePlaybackControl,
+    RealtimeSession,
+    RealtimeToolBatch,
+    RealtimeToolResponse,
+    RealtimeTransport,
+)
 from .types import INCOMPLETE, StopReason, Usage
 
 __all__ = [
@@ -75,6 +83,8 @@ __all__ = [
     "RealtimeAgent",
     "RealtimePlaybackControl",
     "RealtimeSession",
+    "RealtimeToolBatch",
+    "RealtimeToolResponse",
     "RealtimeTransport",
     "INCOMPLETE",
     "ProviderBlock",
@@ -105,6 +115,7 @@ __all__ = [
     "TranscriptDelta",
     "TranscriptFinal",
     "TurnComplete",
+    "TurnStarted",
     "Usage",
     "VideoOutput",
 ]

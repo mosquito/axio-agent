@@ -332,6 +332,10 @@ logprobs, extra choices).
 These come from a duplex {ref}`realtime session <protocols>`, not from
 `CompletionTransport.stream()`:
 
+`TurnStarted`
+: A realtime response began; optional `response_id` correlates its output,
+  tool calls, results and completion with interruption.
+
 `AudioOutputDelta`
 : A chunk of assistant audio. `data: bytes`, `media_type: str` defaulting to
   `"audio/pcm;rate=24000"`. Optional keyword-only `item_id`, `response_id` and
@@ -425,6 +429,7 @@ type StreamEvent = (
     | SpeechStarted
     | SpeechStopped
     | TurnComplete
+    | TurnStarted
 )
 ```
 

@@ -16,6 +16,7 @@ import aiohttp
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
+from axio import RealtimeAgent, RealtimeToolResponse
 from axio.blocks import AudioBlock, ImageBlock, TextBlock, VideoBlock
 from axio.events import (
     AudioOutputDelta,
@@ -26,10 +27,12 @@ from axio.events import (
     SpeechStopped,
     TextDelta,
     ToolInputDelta,
+    ToolResult,
     ToolUseStart,
     TranscriptDelta,
     TranscriptFinal,
     TurnComplete,
+    TurnStarted,
 )
 from axio.tool import Tool
 from axio.types import StopReason
@@ -140,8 +143,12 @@ class TestOutboundEvents:
     async def test_interrupt_sends_response_cancel(self) -> None:
         ws = _StubWebSocket([])
         session = OpenAIRealtimeSession(ws=ws)
+        assert session._translate({"type": "response.created", "response": {"id": "r"}}) == [
+            TurnStarted(response_id="r")
+        ]
         await session.interrupt()
-        assert _decode_sent(ws) == [{"type": "response.cancel"}]
+        await session.interrupt()
+        assert _decode_sent(ws) == [{"type": "response.cancel", "response_id": "r"}]
 
     async def test_send_tool_result_str(self) -> None:
         ws = _StubWebSocket([])
@@ -166,6 +173,56 @@ class TestOutboundEvents:
         await session.send_tool_result("call_1", "concat", [TextBlock(text="a"), TextBlock(text="b")])
         first = _decode_sent(ws)[0]
         assert first["item"]["output"] == "ab"
+
+    async def test_tool_batch_validates_before_sending_and_resumes_only_once(self) -> None:
+        ws = _StubWebSocket([])
+        session = OpenAIRealtimeSession(ws=ws)
+        invalid = [
+            RealtimeToolResponse("a", "one", "ok"),
+            RealtimeToolResponse("b", "two", [ImageBlock(media_type="image/png", data=b"image")]),
+        ]
+        with pytest.raises(TypeError):
+            await session.send_tool_results(invalid)
+        assert not ws.sent
+        await session.send_tool_results([])
+        assert not ws.sent
+        await session.send_tool_results([RealtimeToolResponse("a", "one", "1"), RealtimeToolResponse("b", "two", "2")])
+        assert [event["type"] for event in _decode_sent(ws)] == [
+            "conversation.item.create",
+            "conversation.item.create",
+            "response.create",
+        ]
+        assert [event["item"]["call_id"] for event in _decode_sent(ws)[:-1]] == ["a", "b"]
+
+    async def test_interrupt_does_not_cancel_an_idle_or_completed_response(self) -> None:
+        ws = _StubWebSocket([])
+        session = OpenAIRealtimeSession(ws=ws)
+        await session.interrupt()
+        session._translate({"type": "response.created", "response": {"id": "a"}})
+        session._translate({"type": "response.done", "response": {"id": "a", "status": "completed"}})
+        await session.interrupt()
+        assert not ws.sent
+
+    async def test_interrupt_cancels_a_requested_response_before_created_arrives(self) -> None:
+        ws = _StubWebSocket([])
+        session = OpenAIRealtimeSession(ws=ws)
+        await session.commit()
+        await session.interrupt()
+        await session.interrupt()
+        assert _decode_sent(ws) == [{"type": "response.create"}, {"type": "response.cancel"}]
+
+    async def test_late_done_does_not_mark_the_new_response_idle(self) -> None:
+        ws = _StubWebSocket([])
+        session = OpenAIRealtimeSession(ws=ws)
+        session._translate({"type": "response.created", "response": {"id": "old"}})
+        await session.interrupt()
+        session._translate({"type": "response.created", "response": {"id": "new"}})
+        session._translate({"type": "response.done", "response": {"id": "old", "status": "cancelled"}})
+        await session.interrupt()
+        assert _decode_sent(ws) == [
+            {"type": "response.cancel", "response_id": "old"},
+            {"type": "response.cancel", "response_id": "new"},
+        ]
 
     async def test_send_unsupported_block_raises(self) -> None:
         ws = _StubWebSocket([])
@@ -735,3 +792,64 @@ async def test_ga_session_over_websocket() -> None:
         finally:
             await session.close()
         assert not client.closed
+
+
+@pytest.mark.parametrize("slow_fails", [False, True])
+async def test_agent_runs_tools_concurrently_then_sends_one_openai_continuation(slow_fails: bool) -> None:
+    slow_started, release = asyncio.Event(), asyncio.Event()
+
+    async def slow() -> str:
+        slow_started.set()
+        await release.wait()
+        if slow_fails:
+            raise ValueError("cannot finish")
+        return "slow result"
+
+    async def fast() -> dict[str, str]:
+        await slow_started.wait()
+        return {"result": "быстро"}
+
+    scripted: list[dict[str, Any]] = [
+        {"type": "session.updated"},
+        {"type": "response.created", "response": {"id": "r"}},
+        {
+            "type": "response.output_item.added",
+            "response_id": "r",
+            "item": {"type": "function_call", "call_id": "slow-id", "name": "slow"},
+        },
+        {"type": "response.function_call_arguments.delta", "response_id": "r", "call_id": "slow-id", "delta": "{}"},
+        {
+            "type": "response.output_item.added",
+            "response_id": "r",
+            "item": {"type": "function_call", "call_id": "fast-id", "name": "fast"},
+        },
+        {"type": "response.function_call_arguments.delta", "response_id": "r", "call_id": "fast-id", "delta": "{}"},
+        {
+            "type": "response.done",
+            "response": {"id": "r", "status": "completed", "output": [{"type": "function_call"}]},
+        },
+    ]
+    ws = _StubWebSocket(scripted)
+    ws.push(None)
+    http = _StubHttpSession(ws)
+    transport = OpenAIRealtimeTransport(api_key="test", http_session=http)  # type: ignore[arg-type]
+    results: list[ToolResult] = []
+    async with RealtimeAgent(
+        system="",
+        transport=transport,
+        tools=[Tool(name="slow", handler=slow), Tool(name="fast", handler=fast)],
+        input_audio_format="audio/pcm;rate=24000",
+    ) as agent:
+        async for event in agent.events():
+            if isinstance(event, ToolResult):
+                results.append(event)
+                if event.tool_use_id == "fast-id":
+                    assert not any(payload["type"] == "response.create" for payload in _decode_sent(ws))
+                    assert event.response_id == "r" and not event.is_error
+                    assert json.loads(event.content) == {"result": "быстро"}
+                    release.set()
+    outputs = [payload for payload in _decode_sent(ws) if payload["type"] == "conversation.item.create"]
+    assert [output["item"]["call_id"] for output in outputs] == ["slow-id", "fast-id"]
+    assert sum(payload["type"] == "response.create" for payload in _decode_sent(ws)) == 1
+    assert [result.tool_use_id for result in results] == ["fast-id", "slow-id"]
+    assert results[-1].is_error is slow_fails
