@@ -161,6 +161,12 @@ class SQLiteContextStore(ContextStore):
     async def clear(self) -> None:
         async with self.database.transaction():
             await self._conn.execute(
+                "INSERT INTO axio_context_changes(session_id, project, message_id) "
+                "SELECT session_id, project, message_id FROM axio_context_messages "
+                "WHERE session_id = ? AND project = ? ORDER BY id",
+                (self._session_id, self._project),
+            )
+            await self._conn.execute(
                 "DELETE FROM axio_context_messages WHERE session_id = ? AND project = ?",
                 (self._session_id, self._project),
             )
@@ -178,6 +184,12 @@ class SQLiteContextStore(ContextStore):
                 "SELECT ?, project, position, role, content, message_id, status, metadata, revision "
                 "FROM axio_context_messages WHERE session_id = ? AND project = ?",
                 (new_id, self._session_id, self._project),
+            )
+            await self._conn.execute(
+                "INSERT INTO axio_context_changes(session_id, project, message_id) "
+                "SELECT session_id, project, message_id FROM axio_context_messages "
+                "WHERE session_id = ? AND project = ? ORDER BY id",
+                (new_id, self._project),
             )
             await self._conn.execute(
                 "INSERT OR IGNORE INTO axio_context_tokens (session_id, project, input_tokens, output_tokens) "

@@ -136,6 +136,45 @@ async def test_failed_commit_rolls_back_message_and_journal(
     assert not database.connection.in_transaction
 
 
+@pytest.mark.parametrize("operation", ["insert", "update", "clear", "fork"])
+async def test_journal_failure_rolls_back_the_entire_operation(
+    database: SQLiteContextDatabase, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    store = database.store("s", "home")
+    first = await store.upsert(message("before"), message_id="a")
+    await store.set_context_tokens(12, 5)
+    changes = await database.changes("home")
+    execute = database.connection.execute
+
+    def fail(sql: str, parameters: Any = None) -> Any:
+        if "INSERT INTO axio_context_changes" in sql:
+            raise RuntimeError("journal failed")
+        return execute(sql, parameters)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(database.connection, "execute", fail)
+        with pytest.raises(RuntimeError, match="journal failed"):
+            match operation:
+                case "insert":
+                    await store.upsert(message("new"), message_id="b")
+                case "update":
+                    await store.upsert(message("changed"), message_id="a")
+                case "clear":
+                    await store.clear()
+                case "fork":
+                    await store.fork()
+    assert await store.get_records() == [first]
+    assert await store.get_context_tokens() == (12, 5)
+    assert await database.changes("home") == changes
+    assert len(await store.list_sessions()) == 1
+    assert not database.connection.in_transaction
+
+
+async def test_fresh_database_has_no_triggers(database: SQLiteContextDatabase) -> None:
+    async with database.connection.execute("SELECT name FROM sqlite_master WHERE type='trigger'") as cursor:
+        assert await cursor.fetchall() == []
+
+
 async def test_cancellation_rolls_back_before_another_writer_can_enter(
     database: SQLiteContextDatabase, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -175,28 +214,21 @@ def make_legacy(path: Path) -> None:
         )
 
 
-async def test_existing_database_is_migrated_once_and_legacy_insert_shape_still_works(tmp_path: Path) -> None:
+async def test_existing_database_is_migrated_once_without_triggers(tmp_path: Path) -> None:
     path = tmp_path / "legacy.db"
     make_legacy(path)
-    for attempt in range(2):
+    for _ in range(2):
         conn = await connect(path)
         try:
             database = SQLiteContextDatabase(conn)
             records = await database.store("s", "home").get_records()
             assert records[0].message_id == "legacy:1" and records[0].revision == 1
             assert records[0].metadata == {} and records[0].status == "completed"
-            assert len(await database.changes("home")) == (1 if attempt == 0 else 2)
+            assert len(await database.changes("home")) == 1
             async with conn.execute("PRAGMA user_version") as cursor:
                 assert await cursor.fetchone() == (42,)
-            if attempt == 0:
-                await conn.execute(
-                    "INSERT INTO axio_context_messages(session_id,project,position,role,content) "
-                    "VALUES('s','home',1,'user',?)",
-                    (json.dumps(message("old client").to_dict()["content"]),),
-                )
-                await conn.commit()
-                assert (await database.store("s", "home").get_records())[1].message_id == "legacy:2"
-                assert len(await database.changes("home")) == 2
+            async with conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'") as cursor:
+                assert await cursor.fetchall() == []
         finally:
             await conn.close()
 
@@ -209,7 +241,7 @@ async def test_migration_failure_does_not_leave_half_installed_schema(
     execute = aiosqlite.Connection.execute
 
     def fail(conn: aiosqlite.Connection, sql: str, parameters: Any = None) -> Any:
-        if "CREATE TRIGGER" in sql:
+        if "CREATE INDEX IF NOT EXISTS idx_axio_context_changes_project" in sql:
             raise RuntimeError("migration interrupted")
         return execute(conn, sql, parameters)
 

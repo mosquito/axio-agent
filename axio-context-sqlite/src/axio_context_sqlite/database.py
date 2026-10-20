@@ -124,7 +124,7 @@ class SQLiteContextDatabase:
                 raise ContextConflictError("The context record revision changed")
             if existing is None and message_id.startswith("legacy:"):
                 raise ValueError("The legacy: message ID prefix is reserved for migrated records")
-            await self.connection.execute(
+            async with self.connection.execute(
                 "INSERT INTO axio_context_messages(session_id, project, message_id, "
                 "position, role, content, status, metadata) "
                 "VALUES (?, ?, ?, (SELECT COALESCE(MAX(position)+1, 0) "
@@ -139,7 +139,13 @@ class SQLiteContextDatabase:
                 "axio_context_messages.status != excluded.status OR "
                 "axio_context_messages.metadata != excluded.metadata",
                 (session_id, project, message_id, session_id, message.role, content, status, metadata_json),
-            )
+            ) as cursor:
+                changed = cursor.rowcount > 0
+            if changed:
+                await self.connection.execute(
+                    "INSERT INTO axio_context_changes(session_id, project, message_id) VALUES (?, ?, ?)",
+                    (session_id, project, message_id),
+                )
             async with self.connection.execute(
                 f"SELECT {RECORD_COLUMNS} FROM axio_context_messages m "
                 "WHERE m.session_id=? AND m.project=? AND m.message_id=?",

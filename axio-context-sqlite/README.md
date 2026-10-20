@@ -154,9 +154,10 @@ async def archive_example():
 asyncio.run(archive_example())
 ```
 
-Database triggers record invalidations in the same transaction as the source
-write. Apply each current record or deletion idempotently, commit your index,
-then persist the page's last sequence. A crash before the checkpoint replays
+The Python write operations record invalidations in the same transaction as the
+source write, without SQL triggers. Apply each current record or deletion
+idempotently, commit your index, then persist the page's last sequence.
+A crash before the checkpoint replays
 the page; a crash after source commit cannot lose its invalidation. Sequence
 gaps are normal across projects. Empty pages do not advance the cursor. The
 journal stores identifiers only, so clearing history leaves deletion keys
@@ -167,18 +168,20 @@ must persist their own checkpoints. New indexes can start at sequence zero.
 `connect()` migrates existing databases additively and transactionally, backfills
 stable `legacy:<row-id>` IDs and one initial invalidation per existing message,
 and leaves the application's `PRAGMA user_version` alone. The `legacy:` prefix
-is reserved for migrated/legacy-inserted messages. Existing records under that
-prefix can be updated. Reopening does not duplicate the migration journal.
-The original insert shape remains writable; compression and old raw JSON remain
-readable. Fork preserves message identity/metadata/revision inside its new session;
-clear removes only the selected session/project and resets its token counts.
+is reserved for migrated messages. Existing records under that prefix can be
+updated. Reopening does not duplicate the migration journal.
+Compression and old raw JSON remain readable. Fork preserves message identity,
+metadata and revision inside its new session; clear removes only the selected
+session/project and resets its token counts.
 
 Managed writes use `BEGIN IMMEDIATE`, commit on success and roll back on errors
 or cancellation. Cancellation racing a commit can still leave a committed write;
 retry by stable ID. Do not run raw SQL concurrently with managed operations or
 nest managed calls inside `database.transaction()`. That context is for raw SQL
-extensions on the same initialized connection. An already-open unmanaged
-transaction is rejected without committing or rolling it back. The caller must
+extensions on the same initialized connection. Raw SQL changes to context
+messages do not assign identities or update the journal automatically; use the
+store methods for those writes. An already-open unmanaged transaction is
+rejected without committing or rolling it back. The caller must
 finish all operations before closing the borrowed connection; `store.close()`
 continues to leave it open.
 
