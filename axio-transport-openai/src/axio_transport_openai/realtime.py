@@ -367,6 +367,9 @@ class OpenAIRealtimeSession(RealtimeSession):
                     role="user", text=transcript, item_id=ev.get("item_id"), content_index=ev.get("content_index")
                 )
             )
+            # Input ASR has its own token/duration billing, not response Usage.
+            # Preserve the provider event for consumers needing that breakdown.
+            out.append(ProviderEvent(provider="openai", kind=t, data=ev))
         elif t == "conversation.item.input_audio_transcription.failed":
             self._transcripts.pop((ev.get("item_id", ""), ev.get("content_index", 0)), None)
             out.append(
@@ -378,7 +381,8 @@ class OpenAIRealtimeSession(RealtimeSession):
                     content_index=ev.get("content_index"),
                 )
             )
-            out.append(Error(exception=StreamError("OpenAI realtime input transcription failed")))
+            # Optional ASR failure does not invalidate the native audio dialogue.
+            out.append(ProviderEvent(provider="openai", kind=t, data=ev))
         elif t == "input_audio_buffer.committed":
             self._audio_appended = False
             out.append(ProviderEvent(provider="openai", kind=t, data=ev))

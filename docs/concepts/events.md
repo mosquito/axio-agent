@@ -357,7 +357,12 @@ These come from a duplex {ref}`realtime session <protocols>`, not from
   Completion describes transcription, including for cancelled assistant responses;
   correlate the response ID with `TurnComplete` to learn response status.
   Input ASR may finish after the assistant response. A failed input transcript
-  has empty text and is followed by `Error`.
+  has empty text; OpenAI keeps the audio session alive. Its completed/failed
+  provider events are also forwarded as `ProviderEvent` with the original kind
+  and item/content identities. Completed events retain separate ASR `usage`
+  (tokens or duration), independent of `TurnComplete.usage`. Missing usage is
+  unknown, not zero. Raw provider data can include private transcript/error
+  text: project only the fields your application needs before persistence.
 
 `SpeechStarted` / `SpeechStopped`
 : Server voice-activity detection saw the user start or stop speaking. Neither

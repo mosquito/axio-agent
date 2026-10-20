@@ -198,7 +198,7 @@ class TranscriptFinal:
     ``completed`` describes transcription, not response or playback completion.
     Assistant transcripts can finish even for cancelled responses: correlate
     ``response_id`` with :class:`TurnComplete`. A failed input transcription
-    carries empty text and is also accompanied by an :class:`Error` event.
+    carries empty text; optional ASR failure need not end the audio session.
     Never infer what the user heard from this generated text.
     """
 

@@ -531,17 +531,25 @@ async def test_ga_transcription_completion_does_not_duplicate_deltas() -> None:
             {"type": "conversation.item.input_audio_transcription.delta", "item_id": item, "delta": "hel"}
         )
     for item in ("second", "first"):
-        assert session._translate(
-            {"type": "conversation.item.input_audio_transcription.completed", "item_id": item, "transcript": "hello"}
-        ) == [
+        completed = {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "item_id": item,
+            "transcript": "hello",
+        }
+        assert session._translate(completed) == [
             TranscriptDelta(role="user", delta="lo", item_id=item),
             TranscriptFinal(role="user", text="hello", item_id=item),
+            ProviderEvent(provider="openai", kind=completed["type"], data=completed),
         ]
-    assert session._translate(
-        {"type": "conversation.item.input_audio_transcription.completed", "item_id": "whole", "transcript": "hi"}
-    ) == [
+    completed = {
+        "type": "conversation.item.input_audio_transcription.completed",
+        "item_id": "whole",
+        "transcript": "hi",
+    }
+    assert session._translate(completed) == [
         TranscriptDelta(role="user", delta="hi", item_id="whole"),
         TranscriptFinal(role="user", text="hi", item_id="whole"),
+        ProviderEvent(provider="openai", kind=completed["type"], data=completed),
     ]
 
 
@@ -642,9 +650,11 @@ async def test_final_transcripts_preserve_identity_even_when_cancelled_or_late()
     # Input ASR is independently scheduled and may finish after the assistant.
     user: dict[str, Any] = {"item_id": "user-1", "content_index": 0}
     session._translate({"type": "conversation.item.input_audio_transcription.delta", "delta": "Добро", **user})
-    assert session._translate(
-        {"type": "conversation.item.input_audio_transcription.completed", "transcript": "Good morning", **user}
-    ) == [TranscriptFinal(role="user", text="Good morning", **user)]
+    completed = {"type": "conversation.item.input_audio_transcription.completed", "transcript": "Good morning", **user}
+    assert session._translate(completed) == [
+        TranscriptFinal(role="user", text="Good morning", **user),
+        ProviderEvent(provider="openai", kind=completed["type"], data=completed),
+    ]
 
 
 async def test_failed_input_transcription_keeps_identity_without_archiving_partial_text() -> None:
@@ -653,7 +663,8 @@ async def test_failed_input_transcription_keeps_identity_without_archiving_parti
     session._translate({"type": "conversation.item.input_audio_transcription.delta", "delta": "unfinished", **user})
     events = session._translate({"type": "conversation.item.input_audio_transcription.failed", **user})
     assert events[0] == TranscriptFinal(role="user", text="", status="failed", **user)
-    assert isinstance(events[1], Error)
+    assert isinstance(events[1], ProviderEvent)
+    assert not any(isinstance(event, Error) for event in events)
     assert not session._transcripts
 
 
@@ -853,3 +864,83 @@ async def test_agent_runs_tools_concurrently_then_sends_one_openai_continuation(
     assert sum(payload["type"] == "response.create" for payload in _decode_sent(ws)) == 1
     assert [result.tool_use_id for result in results] == ["fast-id", "slow-id"]
     assert results[-1].is_error is slow_fails
+
+
+@pytest.mark.parametrize(
+    "usage",
+    [
+        {
+            "type": "tokens",
+            "input_tokens": 13,
+            "output_tokens": 9,
+            "total_tokens": 22,
+            "input_token_details": {"audio_tokens": 13, "text_tokens": 0},
+        },
+        {"type": "duration", "seconds": 2.5},
+        None,
+        {"type": "future", "unknown": "value"},
+    ],
+)
+async def test_input_asr_usage_is_forwarded_separately_from_response_usage(usage: Any) -> None:
+    raw = {
+        "type": "conversation.item.input_audio_transcription.completed",
+        "item_id": "user",
+        "content_index": 0,
+        "transcript": "Synthetic final",
+        "usage": usage,
+    }
+    session = OpenAIRealtimeSession(ws=_StubWebSocket([]))
+    response = session._translate(
+        {
+            "type": "response.done",
+            "response": {"id": "reply", "status": "completed", "usage": {"input_tokens": 100, "output_tokens": 10}},
+        }
+    )
+    assert isinstance(response[0], TurnComplete)
+    events = session._translate(raw)
+    provider = next(event for event in events if isinstance(event, ProviderEvent))
+    assert provider.kind == raw["type"] and provider.data == raw
+    assert response[0].usage is not None and response[0].usage.input_tokens == 100
+    assert not any(isinstance(event, TurnComplete) for event in events)
+
+
+async def test_failed_optional_asr_does_not_end_actual_realtime_agent_audio_dialogue() -> None:
+    ws = _StubWebSocket(
+        [
+            {"type": "session.updated"},
+            {"type": "conversation.item.input_audio_transcription.failed", "item_id": "user", "content_index": 0},
+            {"type": "response.created", "response": {"id": "reply"}},
+            {
+                "type": "response.output_audio.delta",
+                "response_id": "reply",
+                "item_id": "answer",
+                "content_index": 0,
+                "delta": "MTI=",
+            },
+            {"type": "response.done", "response": {"id": "reply", "status": "completed"}},
+        ]
+    )
+    http = _StubHttpSession(ws)
+    agent = RealtimeAgent(
+        system="Synthetic test",
+        input_audio_format="audio/pcm;rate=24000",
+        output_audio_format="audio/pcm;rate=24000",
+        transport=OpenAIRealtimeTransport(
+            api_key="synthetic",
+            http_session=http,  # type: ignore[arg-type]
+            transcription_model="gpt-4o-mini-transcribe",
+        ),
+    )
+    await agent.connect()
+    events = []
+    try:
+        async with asyncio.timeout(2):
+            async for event in agent.events():
+                events.append(event)
+                if isinstance(event, TurnComplete):
+                    break
+        assert any(isinstance(event, TranscriptFinal) and event.status == "failed" for event in events)
+        assert any(isinstance(event, AudioOutputDelta) and event.data == b"12" for event in events)
+        assert not any(isinstance(event, Error) for event in events)
+    finally:
+        await agent.close()
