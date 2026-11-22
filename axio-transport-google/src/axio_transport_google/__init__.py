@@ -89,7 +89,9 @@ class _RefreshableCredentials(Protocol):
 
 
 def valid_thinking_levels(model_id: str) -> tuple[str, ...] | None:
-    """Return valid thinkingLevel values for a Gemini 3+ model, or None for budget-based (2.5) models."""
+    """Return valid thinkingLevel values for a Gemini 3+ / Gemini 4+ model, or None for budget-based (2.5) models."""
+    if "gemini-4" in model_id or "argon" in model_id:
+        return ("LOW", "MEDIUM", "HIGH")
     if "gemini-3" not in model_id:
         return None
     if "-pro-image" in model_id:
@@ -133,6 +135,14 @@ _IMG_25 = frozenset({Capability.text, Capability.vision, Capability.image_genera
 GENAI_MODELS: ModelRegistry = ModelRegistry(
     {
         # --- Gemini chat/reasoning models ---
+        ModelSpec(
+            id="gemini-4-argon",
+            context_window=1_048_576,
+            max_output_tokens=65_536,
+            capabilities=_RT,
+            input_cost=2.0,
+            output_cost=12.0,
+        ),
         ModelSpec(
             id="gemini-3.8-flash",
             context_window=1_048_576,

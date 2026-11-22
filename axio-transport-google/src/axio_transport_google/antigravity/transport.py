@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing, asynccontextmanager
@@ -36,7 +37,10 @@ from .oauth import AntigravityOAuth
 from .session import AntigravityFileCredentials, AntigravitySession, resolve_account
 
 BASE_URL = "https://daily-cloudcode-pa.googleapis.com"
-USER_AGENT = "antigravity/cli/1.1.13 (aidev_client; auth_method=consumer)"
+USER_AGENT = os.environ.get(
+    "ANTIGRAVITY_USER_AGENT",
+    "antigravity/cli/1.5.5 (aidev_client; os_type=linux; arch=amd64; cl=982146307; auth_method=consumer)",
+)
 
 
 class AntigravityAPIError(StreamError):
@@ -220,9 +224,14 @@ class AntigravityTransport:
         if not models:
             raise StreamError("No Gemini completion models are available to this Antigravity account.")
         if self.model.id:
-            if self.model.id not in models:
+            if self.model.id in models:
+                selected = models[self.model.id]
+            elif f"{self.model.id}-high" in models:
+                selected = models[f"{self.model.id}-high"]
+            elif f"{self.model.id}-medium" in models:
+                selected = models[f"{self.model.id}-medium"]
+            else:
                 raise StreamError(f"The selected model {self.model.id!r} is unavailable for this account.")
-            selected = models[self.model.id]
         else:
             default = data.get("defaultAgentModelId")
             selected = models[default] if isinstance(default, str) and default in models else models.first()
@@ -230,9 +239,15 @@ class AntigravityTransport:
         return models
 
     def with_model(self, model: ModelSpec) -> AntigravityTransport:
-        if model.id not in self.models:
-            raise ValueError(f"Unknown Antigravity model: {model.id}")
-        return replace(self, model=self.models[model.id], thinking_level=None, thinking_budget=None, last_usage=None)
+        model_id = model.id
+        if model_id not in self.models:
+            if f"{model_id}-high" in self.models:
+                model_id = f"{model_id}-high"
+            elif f"{model_id}-medium" in self.models:
+                model_id = f"{model_id}-medium"
+            else:
+                raise ValueError(f"Unknown Antigravity model: {model.id}")
+        return replace(self, model=self.models[model_id], thinking_level=None, thinking_budget=None, last_usage=None)
 
     def get_thinking_options(self) -> tuple[str, ...] | None:
         return valid_thinking_levels(self.model.id)

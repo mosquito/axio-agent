@@ -308,3 +308,40 @@ def test_mcp_json_schema_preserves_nullable_types_and_keywords(transport_class: 
     assert "parameters" not in declaration
     assert declaration["parametersJsonSchema"] == schema
     assert tool.input_schema == schema
+
+
+async def test_fetch_models_resolves_base_model_to_high_variant(tmp_path: Path) -> None:
+    argon_catalog = {
+        "models": {
+            "gemini-4-argon-high": {
+                "displayName": "Gemini 4 Argon (High)",
+                "supportsThinking": True,
+                "supportsImages": True,
+                "maxTokens": 1048576,
+                "maxOutputTokens": 65536,
+            }
+        }
+    }
+
+    async def handler(request: web.Request) -> web.Response:
+        if request.path.endswith("loadCodeAssist"):
+            return web.json_response({"cloudaicompanionProject": {"id": "project"}})
+        return web.json_response(argon_catalog)
+
+    async with transport_at(tmp_path, handler) as transport:
+        transport.model = ModelSpec("gemini-4-argon")
+        await transport.fetch_models()
+        assert transport.model.id == "gemini-4-argon-high"
+        assert transport.get_thinking_options() == ("LOW", "MEDIUM", "HIGH")
+
+        transport.thinking_level = "HIGH"
+        payload = transport.build_payload([Message(role="user", content=[TextBlock("hi")])], [], "")
+        assert payload["model"] == "gemini-4-argon-high"
+        assert payload["request"]["generationConfig"]["thinkingConfig"] == {
+            "includeThoughts": True,
+            "thinkingLevel": "HIGH",
+        }
+
+        # with_model also resolves base model ID
+        cloned = transport.with_model(ModelSpec("gemini-4-argon"))
+        assert cloned.model.id == "gemini-4-argon-high"
