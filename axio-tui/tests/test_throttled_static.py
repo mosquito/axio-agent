@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from textual.app import App, ComposeResult
 
-from axio_tui.app import _ThinkingWidget, _ThrottledStatic, _ToolStatusWidget
+from axio_tui.app import _ThrottledStatic, _ToolStatusWidget
 
 
 class _CountingStatic(_ThrottledStatic):
@@ -58,12 +58,10 @@ class TestTheRepaintThrottle:
             assert app.widget.paints == 0
 
     def test_the_content_is_readable_before_the_paint(self) -> None:
-        # Both widgets below are written to before they are mounted, and the reasoning pane is
-        # also read back from tests, so `shown` must hold the content at once.
-        thinking = _ThinkingWidget()
-        thinking.add("reasoning")
+        # The tool line is written to before it is mounted, so `shown` must hold the content at
+        # once rather than wait for a tick that an unmounted widget never gets.
         tools = _ToolStatusWidget()
+
         tools.track("t1", "shell")
 
-        assert "reasoning" in thinking.shown
         assert "shell" in tools.shown

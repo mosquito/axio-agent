@@ -9,6 +9,7 @@ from collections.abc import Generator, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
+from time import monotonic
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
@@ -62,7 +63,7 @@ from textual.highlight import highlight as hl_highlight
 from textual.screen import ModalScreen
 from textual.timer import Timer
 from textual.widget import Widget
-from textual.widgets import Footer, Header, Input, Markdown, OptionList, RichLog, Static
+from textual.widgets import Collapsible, Footer, Header, Input, Markdown, OptionList, RichLog, Static
 from textual.widgets._markdown import MarkdownFence
 from textual.widgets.markdown import MarkdownStream
 
@@ -211,50 +212,113 @@ class _ThrottledStatic(Static):
         self.update(self.shown)
 
 
-class _ThinkingWidget(_ThrottledStatic):
-    """The model's reasoning while it lasts, and one line about it afterwards.
+class _ThinkingWidget(Collapsible):
+    """The model's reasoning, streamed as it arrives and kept in full afterwards.
 
-    Kept out of the transcript. Left in, a model that reasons at length buries the answer it was
-    reasoning towards, and scrolling back through the conversation stops being useful.
+    Expanded while the model reasons, and folded to one clickable line once the answer starts.
+    Folded, it stays in the transcript: a model that reasons at length would otherwise bury the
+    answer, while the reasoning itself is still wanted. Click the line, or focus it and press
+    enter, to read the whole of it again.
     """
 
-    #: How much of the reasoning stays on screen while it streams.
-    LINES = 6
+    #: Title frames, one per tick, which is what says the model is still reasoning.
+    SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+    #: Title updates per second while the reasoning streams.
+    TICK_HZ = 10
 
     DEFAULT_CSS = """
     _ThinkingWidget {
-        height: auto;
+        border: none;
+        background: transparent;
         margin: 0;
+        padding: 0;
+    }
+    _ThinkingWidget > CollapsibleTitle {
+        color: $text-muted;
+        text-style: italic;
         padding: 0 1;
+    }
+    _ThinkingWidget > Contents {
+        border: none;
+        padding: 0 0 0 2;
+    }
+    /* Rows of reasoning on screen. The rest is scrolled, not dropped. The pane streams
+       beside the rest of the turn, and opens taller once it is there to be read. */
+    _ThinkingWidget #thinking-body {
+        height: auto;
+        max-height: 8;
+    }
+    _ThinkingWidget #thinking-body.done {
+        max-height: 20;
+    }
+    _ThinkingWidget #thinking-body > Markdown {
+        margin: 0;
+        color: $text-muted;
     }
     """
 
     def __init__(self) -> None:
-        super().__init__("", classes="meta")
-        #: Only the lines this widget shows. The whole reasoning was kept and split again on every
-        #: delta, so a model that reasons at length paid for its own output once per chunk.
-        self._tail: list[str] = [""]
+        self._body = _Markdown("")
+        #: Scrolled, not truncated. The reasoning is kept whole and follows its own tail.
+        self._scroll = VerticalScroll(self._body, id="thinking-body")
+        super().__init__(self._scroll, title="✻ thinking…", collapsed=False)
+        #: Appends to the reasoning. `Markdown.update` would reparse all of it per delta.
+        self._stream: MarkdownStream | None = None
         #: How much reasoning arrived, which is all the two properties below need of it.
         self._chars = 0
         self._done = False
         self._tokens = 0
+        self._frame = 0
+        self._started = monotonic()
+        self._elapsed = 0.0
+        self._tick_timer: Timer | None = None
 
-    def add(self, delta: str) -> None:
+    def on_mount(self) -> None:
+        self._started = monotonic()
+        self._tick_timer = self.set_interval(1 / self.TICK_HZ, self._tick)
+
+    async def add(self, delta: str) -> None:
+        """Append `delta` to the reasoning on screen."""
         self._chars += len(delta)
-        lines = delta.split("\n")
-        self._tail[-1] += lines[0]
-        self._tail.extend(lines[1:])
-        del self._tail[: -self.LINES]
-        self._draw()
+        if self._stream is None:
+            if not self._body.is_attached:
+                return
+            self._stream = Markdown.get_stream(self._body)
+            # Anchored, the pane follows the reasoning as it grows and lets go as soon as the
+            # user scrolls it.
+            self._scroll.anchor()
+        await self._stream.write(delta)
 
-    def collapse(self, tokens: int = 0) -> None:
-        """Fold to one line, which is what the answer arriving means."""
-        self._done, self._tokens = True, tokens or self._tokens
-        self._draw()
+    async def collapse(self, tokens: int = 0) -> None:
+        """Fold to one line, which is what the answer arriving means.
+
+        The reasoning stays in the widget and the line says how to read it. Called again with a
+        token count, it keeps the count and the folded state.
+        """
+        self._tokens = tokens or self._tokens
+        if self._done:
+            self._draw_title()
+            return
+        self._done = True
+        self._elapsed = monotonic() - self._started
+        if self._tick_timer is not None:
+            self._tick_timer.stop()
+            self._tick_timer = None
+        if self._stream is not None:
+            await self._stream.stop()
+            self._stream = None
+        self.collapsed = True
+        # Opened again, the pane is read rather than watched: it starts at the first line and
+        # shows more of them at once.
+        self._scroll.anchor(False)
+        self._scroll.add_class("done")
+        self._scroll.scroll_home(animate=False)
+        self._draw_title()
 
     @property
     def empty(self) -> bool:
-        """Nothing to show and nothing to report, so the marker would say nothing either."""
+        """Nothing to show and nothing to report, so the line would say nothing either."""
         return not self._chars and not self._tokens
 
     @property
@@ -266,14 +330,20 @@ class _ThinkingWidget(_ThrottledStatic):
         """
         return bool(self._tokens) and not self._chars
 
-    def _draw(self) -> None:
-        if self._done:
-            cost = f" · {self._tokens:,} tokens" if self._tokens else ""
-            note = ", not sent by the provider" if self.withheld else ""
-            self.draw(f"[dim]✻ thinking{cost}{note}[/]")
-        else:
-            body = "\n".join(f"[dim]{escape(line)}[/]" for line in self._tail)
-            self.draw(f"[dim italic]✻ thinking…[/]\n{body}")
+    def _tick(self) -> None:
+        self._frame = (self._frame + 1) % len(self.SPINNER)
+        self._draw_title()
+
+    def _draw_title(self) -> None:
+        if not self._done:
+            frame = self.SPINNER[self._frame]
+            self.title = f"{frame} thinking… {monotonic() - self._started:.1f}s"
+            return
+        cost = f" · {self._tokens:,} tokens" if self._tokens else ""
+        if self.withheld:
+            self.title = f"✻ thinking{cost}, not sent by the provider"
+            return
+        self.title = f"✻ thought for {self._elapsed:.1f}s{cost} · enter or click to expand"
 
 
 class _ToolStatusWidget(_ThrottledStatic):
@@ -1072,7 +1142,7 @@ class AgentApp(App[None]):
         """
         if self._thinking is None:
             return
-        self._thinking.collapse(tokens)
+        await self._thinking.collapse(tokens)
         if self._thinking.empty:
             # An iteration that neither reasoned nor was billed for it. A bare marker there says
             # nothing and reads as a second turn.
@@ -1967,12 +2037,12 @@ class AgentApp(App[None]):
                             case ReasoningDelta(delta=delta):
                                 self._tool_status = None
                                 self._agent_emoji = "🤔"
-                                (await self._ensure_thinking()).add(delta)
+                                await (await self._ensure_thinking()).add(delta)
                             case TextDelta(delta=delta):
                                 self._tool_status = None
                                 self._agent_emoji = "💬"
                                 if self._thinking is not None:
-                                    self._thinking.collapse()
+                                    await self._thinking.collapse()
                                 await self._write_text(delta)
                             case Refusal(text=text, category=category, blocked_input=blocked):
                                 # Rendered, and not as ordinary text: a declined turn otherwise looked like the model
