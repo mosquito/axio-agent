@@ -43,6 +43,7 @@ from axio_transport_google import (
     _tool_name_from_id,
     _Turn,
     _usage,
+    format_grounded_response,
     valid_thinking_levels,
 )
 from axio_transport_google._generated_types import Part
@@ -300,6 +301,44 @@ def test_build_tools_json() -> None:
     assert "query" in declarations[0]["parametersJsonSchema"].get("properties", {})
 
 
+def test_google_search_request_body() -> None:
+    t = GoogleTransport(api_key="test-key", google_search=True)
+    body = t._build_request_body([], [], "")
+    assert "tools" in body
+    assert body["tools"] == [{"googleSearch": {}}]
+
+
+def test_google_search_with_function_tools() -> None:
+    tool: Tool[Any] = Tool(name="search", description="Search", handler=_dummy_tool)
+    t = GoogleTransport(api_key="test-key", google_search=True)
+    body = t._build_request_body([], [tool], "")
+    assert "tools" in body
+    assert len(body["tools"]) == 2
+    assert "functionDeclarations" in body["tools"][0]
+    assert body["tools"][1] == {"googleSearch": {}}
+
+
+def test_format_grounded_response() -> None:
+    grounding = {
+        "webSearchQueries": ["latest python version"],
+        "groundingChunks": [
+            {"web": {"uri": "https://www.python.org", "title": "Python.org"}},
+            {"web": {"uri": "https://en.wikipedia.org/wiki/Python", "title": "Wikipedia"}},
+        ],
+    }
+    formatted = format_grounded_response("Python 3.14 is the latest release.", grounding)
+    assert "Python 3.14 is the latest release." in formatted
+    assert "Sources:" in formatted
+    assert "- [Python.org](https://www.python.org)" in formatted
+    assert "- [Wikipedia](https://en.wikipedia.org/wiki/Python)" in formatted
+
+
+def test_format_grounded_response_empty() -> None:
+    assert format_grounded_response("", None) == "No search results found."
+    assert format_grounded_response("", {}) == "No search results found."
+    assert format_grounded_response("Only text", None) == "Only text"
+
+
 # ---------------------------------------------------------------------------
 # GoogleTransport basics
 # ---------------------------------------------------------------------------
@@ -312,11 +351,13 @@ def test_transport_defaults() -> None:
 
 
 def test_transport_to_from_dict() -> None:
-    t = GoogleTransport(api_key="test-key")
+    t = GoogleTransport(api_key="test-key", google_search=True)
     d = t.to_dict()
     assert d["api_key"] == "test-key"
+    assert d["google_search"] is True
     t2 = GoogleTransport.from_dict(d)
     assert t2.api_key == "test-key"
+    assert t2.google_search is True
 
 
 def test_transport_vertexai_to_from_dict() -> None:
@@ -424,12 +465,14 @@ def test_string_settings_coercion() -> None:
         top_p="0.9",  # type: ignore[arg-type]
         seed="42",  # type: ignore[arg-type]
         thinking_budget="4096",  # type: ignore[arg-type]
+        google_search="true",  # type: ignore[arg-type]
     )
     assert t.vertexai is True
     assert t.temperature == 0.7
     assert t.top_p == 0.9
     assert t.seed == 42
     assert t.thinking_budget == 4096
+    assert t.google_search is True
 
 
 # ---------------------------------------------------------------------------

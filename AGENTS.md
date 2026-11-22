@@ -319,7 +319,7 @@ Both halves of the OpenAI Responses API live in one package because two transpor
 
 ### Transport protocol (`axio/transport.py`)
 
-Nine `@runtime_checkable` Protocols. A transport implements as many as it supports. `OpenAITransport` is `CompletionTransport, EmbeddingTransport`. `GoogleTransport` is `CompletionTransport, ImageGenTransport, VideoGenTransport`.
+Ten `@runtime_checkable` Protocols. A transport implements as many as it supports. `OpenAITransport` is `CompletionTransport, EmbeddingTransport`. `GoogleTransport` is `CompletionTransport, ImageGenTransport, VideoGenTransport, SearchTransport`.
 
 ```python
 @runtime_checkable
@@ -338,8 +338,9 @@ class CompletionTransport(Protocol):
 | `TTSTransport` | `synthesize(text, *, voice=None) -> AsyncIterator[bytes]` |
 | `STTTransport` | `async transcribe(audio, media_type="audio/wav") -> str` |
 | `EmbeddingTransport` | `async embed(texts) -> list[list[float]]` |
+| `SearchTransport` | `async search(query, *, model=None) -> str` |
 
-`DummyCompletionTransport` and its six siblings (`DummyImageGenTransport`, `DummyVideoGenTransport`, `DummyAudioGenTransport`, `DummyTTSTransport`, `DummySTTTransport`, `DummyEmbeddingTransport`) fail loudly when called. Use one as the transport of an agent prototype. Swap the real one in with `agent.copy(transport=...)`.
+`DummyCompletionTransport` and its seven siblings (`DummyImageGenTransport`, `DummyVideoGenTransport`, `DummyAudioGenTransport`, `DummyTTSTransport`, `DummySTTTransport`, `DummyEmbeddingTransport`, `DummySearchTransport`) fail loudly when called. Use one as the transport of an agent prototype. Swap the real one in with `agent.copy(transport=...)`.
 
 Contract for `stream()`:
 

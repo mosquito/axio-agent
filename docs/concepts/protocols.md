@@ -521,8 +521,24 @@ signals end-of-utterance for manual voice-activity detection. It is a no-op
 under server VAD.
 
 A session yields the realtime events described in {doc}`events` -
-`AudioOutputDelta`, `TranscriptDelta`, `SpeechStarted`, `SpeechStopped`,
+`AudioOutputDelta`, `AudioOutputEnd`, `TranscriptDelta`, `TranscriptFinal`, `SpeechStarted`, `SpeechStopped`,
 `TurnComplete` - alongside the ordinary content events.
+
+`RealtimePlaybackControl` is an optional, runtime-checkable session protocol with
+`truncate(item_id, audio_end_ms, *, content_index=0)`. After interrupting generation
+and clearing local playback, use the duration actually played for that content part
+to reconcile server context. `RealtimeAgent.truncate()` checks this capability and
+raises `NotImplementedError` if unavailable. Existing sessions do not need to
+implement it. See the {doc}`OpenAI package example <../packages/axio-transport-openai>`
+for multimodal input, readiness and transcript collection.
+
+`RealtimeToolBatch` optionally adds `send_tool_results(list[RealtimeToolResponse])`
+to a session. Each immutable response contains `tool_use_id`, `name` and `content`
+(a string or list of content blocks). The agent executes a turn's tools
+concurrently, then uses this capability to deliver all results and resume once.
+Without it, the original individual-result API remains in use. OpenAI implements
+the batch capability. Unknown providers do not need to implement either optional
+capability to remain compatible.
 
 **Implementation status**: implemented by `OpenAIRealtimeTransport`
 (`axio-transport-openai`) and by `GeminiLiveTransport` / `VertexLiveTransport`

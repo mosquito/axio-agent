@@ -9,7 +9,7 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing, asynccontextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import aiohttp
 from axio.events import IterationEnd, ProviderEvent, StreamEvent
@@ -29,6 +29,7 @@ from axio_transport_google import (
     _build_tools_json,
     _Turn,
     _usage,
+    format_grounded_response,
     valid_thinking_levels,
 )
 
@@ -114,9 +115,17 @@ class AntigravityTransport:
     max_output_tokens: int | None = None
     thinking_level: str | None = None
     thinking_budget: int | None = None
+    google_search: bool = False
     last_usage: Usage | None = field(default=None, repr=False)
     _session_id: str = field(default_factory=lambda: str(uuid.uuid4()), repr=False)
     _reader: GoogleTransport = field(default_factory=GoogleTransport, repr=False)
+
+    @staticmethod
+    def bind_tools(transport: Any | None) -> None:
+        from .. import tools
+
+        if transport is None or tools.transport is None:
+            tools.transport = transport
 
     @classmethod
     @asynccontextmanager
@@ -275,8 +284,13 @@ class AntigravityTransport:
         }
         if system:
             request["systemInstruction"] = {"parts": [{"text": system}]}
+        tool_list: list[dict[str, Any]] = []
         if tools:
-            request["tools"] = _build_tools_json(tools)
+            tool_list.extend(cast(list[dict[str, Any]], _build_tools_json(tools)))
+        if self.google_search:
+            tool_list.append({"googleSearch": {}})
+        if tool_list:
+            request["tools"] = tool_list
         return {
             "project": self.project,
             "model": self.model.id,
@@ -320,3 +334,49 @@ class AntigravityTransport:
         usage = _usage(turn.counts, final=True) if turn.counts is not None else turn.usage
         self.last_usage = usage
         yield IterationEnd(iteration=0, stop_reason=reason, usage=usage)
+
+    async def search(self, query: str, *, model: str | None = None) -> str:
+        """Perform a Google Search query via Gemini grounding and return the grounded answer with sources."""
+        if self.session is None:
+            async with aiohttp.ClientSession() as session:
+                transport = replace(self, session=session)
+                return await transport.search(query, model=model)
+
+        if not self.project or not self.model.id:
+            await self.fetch_models()
+        model_id = model or self.model.id
+        request: dict[str, Any] = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": query}],
+                }
+            ],
+            "sessionId": self._session_id,
+            "tools": [{"googleSearch": {}}],
+        }
+        payload = {
+            "project": self.project,
+            "model": model_id,
+            "request": request,
+            "userAgent": "antigravity",
+            "requestType": "agent",
+            "requestId": f"agent/{uuid.uuid4()}",
+        }
+        text_parts: list[str] = []
+        grounding: dict[str, Any] = {}
+        async for envelope in self._payloads("streamGenerateContent", payload, streaming=True):
+            if "error" in envelope:
+                raise StreamError("Antigravity returned an error inside the stream.")
+            response = envelope.get("response")
+            if not isinstance(response, dict):
+                continue
+            candidates = response.get("candidates", [])
+            if candidates:
+                cand = candidates[0]
+                for part in cand.get("content", {}).get("parts", []):
+                    if isinstance(part, dict) and "text" in part:
+                        text_parts.append(part["text"])
+                if cand.get("groundingMetadata"):
+                    grounding = cand["groundingMetadata"]
+        return format_grounded_response("".join(text_parts), grounding)

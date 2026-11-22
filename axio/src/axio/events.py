@@ -20,6 +20,7 @@ class ReasoningDelta:
 class TextDelta:
     index: int
     delta: str
+    response_id: str | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +28,7 @@ class ToolUseStart:
     index: int
     tool_use_id: ToolCallID
     name: ToolName
+    response_id: str | None = field(default=None, kw_only=True)
 
     signature: str = ""
     """Opaque proof that this call is the model's own, where the provider issues one for the call
@@ -43,6 +45,7 @@ class ToolInputDelta:
     index: int
     tool_use_id: ToolCallID
     partial_json: str
+    response_id: str | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +85,7 @@ class ToolResult:
     is_error: bool
     content: str = ""
     input: dict[str, Any] = field(default_factory=dict)
+    response_id: str | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,11 +149,34 @@ class SessionEndEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class TurnStarted:
+    """A realtime response began; its ID correlates output and interruption."""
+
+    response_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class AudioOutputDelta:
     """Streaming audio chunk from the assistant in a realtime session."""
 
     data: bytes
     media_type: str = "audio/pcm;rate=24000"
+    item_id: str | None = field(default=None, kw_only=True)
+    response_id: str | None = field(default=None, kw_only=True)
+    content_index: int | None = field(default=None, kw_only=True)
+
+
+@dataclass(frozen=True, slots=True)
+class AudioOutputEnd:
+    """No more generated audio for this content part, including on interruption.
+
+    This marks the provider stream, not completion of local speaker playback.
+    Identifiers are absent when the provider does not supply them.
+    """
+
+    item_id: str | None = None
+    response_id: str | None = None
+    content_index: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +186,28 @@ class TranscriptDelta:
 
     role: Literal["user", "assistant"]
     delta: str
+    item_id: str | None = field(default=None, kw_only=True)
+    response_id: str | None = field(default=None, kw_only=True)
+    content_index: int | None = field(default=None, kw_only=True)
+
+
+@dataclass(frozen=True, slots=True)
+class TranscriptFinal:
+    """Authoritative transcript for one content part, replacing its deltas.
+
+    ``completed`` describes transcription, not response or playback completion.
+    Assistant transcripts can finish even for cancelled responses: correlate
+    ``response_id`` with :class:`TurnComplete`. A failed input transcription
+    carries empty text; optional ASR failure need not end the audio session.
+    Never infer what the user heard from this generated text.
+    """
+
+    role: Literal["user", "assistant"]
+    text: str
+    status: Literal["completed", "failed"] = "completed"
+    item_id: str | None = field(default=None, kw_only=True)
+    response_id: str | None = field(default=None, kw_only=True)
+    content_index: int | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +228,7 @@ class TurnComplete:
 
     stop_reason: StopReason
     usage: Usage | None = None
+    response_id: str | None = field(default=None, kw_only=True)
 
 
 # ── Provider passthrough ────────────────────────────────────────────────────
@@ -407,8 +457,11 @@ type StreamEvent = (
     | ProviderOutput
     | SessionEndEvent
     | AudioOutputDelta
+    | AudioOutputEnd
     | TranscriptDelta
+    | TranscriptFinal
     | SpeechStarted
     | SpeechStopped
     | TurnComplete
+    | TurnStarted
 )

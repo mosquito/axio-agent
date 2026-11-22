@@ -6,6 +6,7 @@ from .context import ContextStore, MemoryContextStore
 from .events import (
     AudioOutput,
     AudioOutputDelta,
+    AudioOutputEnd,
     BlockEnd,
     Citation,
     Error,
@@ -31,7 +32,9 @@ from .events import (
     ToolResult,
     ToolUseStart,
     TranscriptDelta,
+    TranscriptFinal,
     TurnComplete,
+    TurnStarted,
     VideoOutput,
 )
 from .exceptions import GuardError, HandlerError
@@ -42,7 +45,14 @@ from .realtime import RealtimeAgent
 from .selector import ToolSelector
 from .stream import AgentStream
 from .tool import CONTEXT, Tool
-from .transport import CompletionTransport, RealtimeSession, RealtimeTransport
+from .transport import (
+    CompletionTransport,
+    RealtimePlaybackControl,
+    RealtimeSession,
+    RealtimeToolBatch,
+    RealtimeToolResponse,
+    RealtimeTransport,
+)
 from .types import INCOMPLETE, StopReason, Usage
 
 __all__ = [
@@ -50,6 +60,7 @@ __all__ = [
     "AgentStream",
     "AudioOutput",
     "AudioOutputDelta",
+    "AudioOutputEnd",
     "BlockEnd",
     "CONTEXT",
     "Citation",
@@ -70,7 +81,10 @@ __all__ = [
     "ProviderEvent",
     "ProviderOutput",
     "RealtimeAgent",
+    "RealtimePlaybackControl",
     "RealtimeSession",
+    "RealtimeToolBatch",
+    "RealtimeToolResponse",
     "RealtimeTransport",
     "INCOMPLETE",
     "ProviderBlock",
@@ -99,7 +113,9 @@ __all__ = [
     "ToolUseBlock",
     "ToolUseStart",
     "TranscriptDelta",
+    "TranscriptFinal",
     "TurnComplete",
+    "TurnStarted",
     "Usage",
     "VideoOutput",
 ]

@@ -13,16 +13,19 @@ import asyncio
 import base64
 import json
 import logging
+import math
 import os
+from collections import deque
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
 import aiohttp
-from axio.blocks import AudioBlock, ContentBlock, TextBlock
+from axio.blocks import AudioBlock, ContentBlock, ImageBlock, TextBlock
 from axio.events import (
     AudioOutputDelta,
+    AudioOutputEnd,
     Error,
     ProviderEvent,
     SpeechStarted,
@@ -32,11 +35,13 @@ from axio.events import (
     ToolInputDelta,
     ToolUseStart,
     TranscriptDelta,
+    TranscriptFinal,
     TurnComplete,
+    TurnStarted,
 )
 from axio.exceptions import StreamError
 from axio.tool import Tool
-from axio.transport import RealtimeSession, RealtimeTransport
+from axio.transport import RealtimeSession, RealtimeToolResponse, RealtimeTransport
 from axio.types import StopReason, ToolCallID, ToolName, Usage
 from yarl import URL
 
@@ -99,41 +104,63 @@ class OpenAIRealtimeSession(RealtimeSession):
     output_audio_media_type: str = DEFAULT_PCM_MEDIA_TYPE
     http_session: aiohttp.ClientSession | None = field(default=None, repr=False)
     own_http_session: bool = False
-    _tool_index: dict[str, int] = field(default_factory=dict, init=False, repr=False)
+    _tool_index: dict[tuple[str | None, str], int] = field(default_factory=dict, init=False, repr=False)
     _next_tool_index: int = field(default=0, init=False, repr=False)
     _audio_appended: bool = field(default=False, init=False, repr=False)
     _transcripts: dict[tuple[str, int], str] = field(default_factory=dict, init=False, repr=False)
+    pending_events: deque[dict[str, Any]] = field(default_factory=deque, init=False, repr=False)
+    ws_messages: AsyncIterator[Any] | None = field(default=None, init=False, repr=False)
+    response_active: bool = field(default=False, init=False)
+    response_requested: bool = field(default=False, init=False)
+    active_response_id: str | None = field(default=None, init=False)
+    cancel_requested: bool = field(default=False, init=False)
 
     async def _send_event(self, payload: dict[str, Any]) -> None:
         await self.ws.send_str(json.dumps(payload))
 
     async def send(self, content: ContentBlock | list[ContentBlock]) -> None:
+        """Send an atomic text/image message or append homogeneous audio chunks.
+
+        All blocks are validated before sending. Audio cannot be mixed with
+        text/images in one call because it uses a separate provider buffer.
+        """
         blocks = content if isinstance(content, list) else [content]
+        payloads: list[dict[str, Any]] = []
+        message: list[dict[str, Any]] = []
         for block in blocks:
             match block:
                 case AudioBlock(data=data, media_type=media_type):
                     if audio_format(media_type) != audio_format(self.input_audio_media_type):
                         raise ValueError("Audio block format does not match the connected input format")
-                    await self._send_event(
+                    payloads.append(
                         {
                             "type": "input_audio_buffer.append",
                             "audio": base64.b64encode(data).decode(),
                         }
                     )
-                    self._audio_appended = True
                 case TextBlock(text=text):
-                    await self._send_event(
+                    message.append({"type": "input_text", "text": text})
+                case ImageBlock(data=data, media_type=media_type):
+                    if media_type not in ("image/jpeg", "image/png", "image/gif", "image/webp") or not data:
+                        raise ValueError("OpenAI realtime requires nonempty JPEG, PNG, GIF or WebP image bytes")
+                    message.append(
                         {
-                            "type": "conversation.item.create",
-                            "item": {
-                                "type": "message",
-                                "role": "user",
-                                "content": [{"type": "input_text", "text": text}],
-                            },
+                            "type": "input_image",
+                            "image_url": f"data:{media_type};base64,{base64.b64encode(data).decode()}",
                         }
                     )
                 case _:
                     raise TypeError(f"OpenAI realtime: send() does not support {type(block).__name__}")
+        if message and payloads:
+            raise ValueError("Send audio separately from a text/image message")
+        if message:
+            payloads.append(
+                {"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": message}}
+            )
+        for payload in payloads:
+            await self._send_event(payload)
+            if payload["type"] == "input_audio_buffer.append":
+                self._audio_appended = True
 
     async def commit(self) -> None:
         # OpenAI rejects input_audio_buffer.commit on an empty buffer
@@ -141,58 +168,127 @@ class OpenAIRealtimeSession(RealtimeSession):
         if self._audio_appended:
             await self._send_event({"type": "input_audio_buffer.commit"})
             self._audio_appended = False
-        await self._send_event({"type": "response.create"})
+        await self.create_response()
+
+    async def create_response(self) -> None:
+        """Track the interval before response.created so it can be interrupted."""
+        self.response_requested = True
+        self.cancel_requested = False
+        try:
+            await self._send_event({"type": "response.create"})
+        except BaseException:
+            self.response_requested = False
+            raise
 
     async def interrupt(self) -> None:
-        await self._send_event({"type": "response.cancel"})
+        if (self.response_active or self.response_requested) and not self.cancel_requested:
+            self.cancel_requested = True
+            payload: dict[str, Any] = {"type": "response.cancel"}
+            if self.response_active and self.active_response_id is not None:
+                payload["response_id"] = self.active_response_id
+            try:
+                await self._send_event(payload)
+            except BaseException:
+                self.cancel_requested = False
+                raise
+
+    async def truncate(self, item_id: str, audio_end_ms: int, *, content_index: int = 0) -> None:
+        """Remove unplayed audio and its transcript from the server conversation."""
+        if not isinstance(item_id, str) or not item_id.strip():
+            raise ValueError("item_id must be nonempty")
+        for name, value in (("audio_end_ms", audio_end_ms), ("content_index", content_index)):
+            if type(value) is not int or value < 0:
+                raise ValueError(f"{name} must be a nonnegative integer")
+        await self._send_event(
+            {
+                "type": "conversation.item.truncate",
+                "item_id": item_id,
+                "content_index": content_index,
+                "audio_end_ms": audio_end_ms,
+            }
+        )
 
     async def send_tool_result(
         self, tool_use_id: ToolCallID, name: ToolName, content: str | list[ContentBlock]
     ) -> None:
-        if isinstance(content, list):
-            parts: list[str] = []
-            for b in content:
-                if isinstance(b, TextBlock):
-                    parts.append(b.text)
-                else:
-                    raise TypeError(
-                        f"OpenAI realtime tool result only supports str / TextBlock, got {type(b).__name__}"
-                    )
-            output = "".join(parts)
-        else:
-            output = content
-        await self._send_event(
-            {
-                "type": "conversation.item.create",
-                "item": {
-                    "type": "function_call_output",
-                    "call_id": tool_use_id,
-                    "output": output,
-                },
-            }
-        )
-        await self._send_event({"type": "response.create"})
+        await self.send_tool_results([RealtimeToolResponse(tool_use_id, name, content)])
+
+    async def send_tool_results(self, results: list[RealtimeToolResponse]) -> None:
+        """Send all function outputs before creating one continuation response."""
+        payloads: list[dict[str, Any]] = []
+        call_ids: set[str] = set()
+        for result in results:
+            if not result.tool_use_id.strip() or result.tool_use_id in call_ids:
+                raise ValueError("Tool result call IDs must be nonempty and unique within a batch")
+            call_ids.add(result.tool_use_id)
+            if isinstance(result.content, list):
+                parts: list[str] = []
+                for block in result.content:
+                    if not isinstance(block, TextBlock):
+                        raise TypeError("OpenAI realtime tool results support only str / TextBlock")
+                    parts.append(block.text)
+                output = "".join(parts)
+            elif isinstance(result.content, str):
+                output = result.content
+            else:
+                raise TypeError("OpenAI realtime tool results support only str / TextBlock")
+            payloads.append(
+                {
+                    "type": "conversation.item.create",
+                    "item": {"type": "function_call_output", "call_id": result.tool_use_id, "output": output},
+                }
+            )
+        for payload in payloads:
+            await self._send_event(payload)
+        if payloads:
+            await self.create_response()
+
+    async def read_payload(self) -> dict[str, Any] | None:
+        """Read from the single socket iterator; return None on orderly closure."""
+        if self.ws_messages is None:
+            self.ws_messages = self.ws.__aiter__()
+        async for msg in self.ws_messages:
+            mtype = getattr(msg, "type", None)
+            if mtype is aiohttp.WSMsgType.TEXT:
+                payload = json.loads(msg.data)
+                if not isinstance(payload, dict):
+                    raise ValueError("Expected a realtime event object")
+                return payload
+            if mtype is aiohttp.WSMsgType.ERROR:
+                raise StreamError("OpenAI realtime WebSocket failed")
+            if mtype in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSING):
+                return None
+        return None
+
+    async def wait_ready(self, timeout: float) -> None:
+        """Wait for session.updated before input can race session configuration.
+
+        Preserve lifecycle/early events for the event consumer. The bounded
+        handshake buffer prevents a peer from filling memory before readiness.
+        Call only before starting the events iterator.
+        """
+        async with asyncio.timeout(timeout):
+            while True:
+                payload = await self.read_payload()
+                if payload is None:
+                    raise StreamError("OpenAI realtime closed before session.updated")
+                if payload.get("type") == "error":
+                    raise StreamError("OpenAI realtime session configuration was rejected")
+                if len(self.pending_events) >= 256:
+                    raise StreamError("OpenAI realtime handshake exceeded the event buffer")
+                self.pending_events.append(payload)
+                if payload.get("type") == "session.updated":
+                    return
 
     async def events(self) -> AsyncIterator[StreamEvent]:
         try:
-            async for msg in self.ws:
-                mtype = getattr(msg, "type", None)
-                if mtype is aiohttp.WSMsgType.TEXT:
-                    payload = json.loads(msg.data)
-                    if not isinstance(payload, dict):
-                        raise ValueError("Expected a realtime event object")
-                    for ev in self._translate(payload):
-                        yield ev
-                elif mtype is aiohttp.WSMsgType.ERROR:
-                    yield Error(exception=StreamError("OpenAI realtime WebSocket failed"))
+            while True:
+                payload = self.pending_events.popleft() if self.pending_events else await self.read_payload()
+                if payload is None:
                     break
-                elif mtype in (
-                    aiohttp.WSMsgType.CLOSE,
-                    aiohttp.WSMsgType.CLOSED,
-                    aiohttp.WSMsgType.CLOSING,
-                ):
-                    break
-        except (aiohttp.ClientError, ValueError, KeyError, TypeError) as exc:
+                for ev in self._translate(payload):
+                    yield ev
+        except (aiohttp.ClientError, ValueError, KeyError, TypeError, StreamError) as exc:
             error = StreamError("OpenAI realtime stream is invalid or disconnected")
             error.__cause__ = exc
             yield Error(exception=error)
@@ -201,6 +297,12 @@ class OpenAIRealtimeSession(RealtimeSession):
         """Map a raw OpenAI realtime server event to axio StreamEvents."""
         out: list[StreamEvent] = []
         t = ev.get("type")
+        if t == "response.created":
+            self.active_response_id = (ev.get("response") or {}).get("id")
+            self.response_active = True
+            self.response_requested = False
+            self.cancel_requested = False
+            return [TurnStarted(response_id=self.active_response_id)]
         # Both the v1 (realtime=v1) and the newer GA schemas appear on this
         # endpoint depending on the model id.  Accept both event-name variants.
         if t in ("response.audio.delta", "response.output_audio.delta"):
@@ -208,28 +310,84 @@ class OpenAIRealtimeSession(RealtimeSession):
                 AudioOutputDelta(
                     data=base64.b64decode(ev["delta"], validate=True),
                     media_type=self.output_audio_media_type,
+                    item_id=ev.get("item_id"),
+                    response_id=ev.get("response_id"),
+                    content_index=ev.get("content_index"),
+                )
+            )
+        elif t in ("response.audio.done", "response.output_audio.done"):
+            out.append(
+                AudioOutputEnd(
+                    item_id=ev.get("item_id"), response_id=ev.get("response_id"), content_index=ev.get("content_index")
                 )
             )
         elif t in ("response.audio_transcript.delta", "response.output_audio_transcript.delta"):
-            out.append(TranscriptDelta(role="assistant", delta=ev["delta"]))
+            out.append(
+                TranscriptDelta(
+                    role="assistant",
+                    delta=ev["delta"],
+                    item_id=ev.get("item_id"),
+                    response_id=ev.get("response_id"),
+                    content_index=ev.get("content_index"),
+                )
+            )
+        elif t in ("response.audio_transcript.done", "response.output_audio_transcript.done"):
+            out.append(
+                TranscriptFinal(
+                    role="assistant",
+                    text=ev["transcript"],
+                    item_id=ev.get("item_id"),
+                    response_id=ev.get("response_id"),
+                    content_index=ev.get("content_index"),
+                )
+            )
         elif t == "conversation.item.input_audio_transcription.delta":
             key = (ev.get("item_id", ""), ev.get("content_index", 0))
             self._transcripts[key] = self._transcripts.get(key, "") + ev["delta"]
-            out.append(TranscriptDelta(role="user", delta=ev["delta"]))
+            out.append(
+                TranscriptDelta(
+                    role="user", delta=ev["delta"], item_id=ev.get("item_id"), content_index=ev.get("content_index")
+                )
+            )
         elif t == "conversation.item.input_audio_transcription.completed":
             key = (ev.get("item_id", ""), ev.get("content_index", 0))
             previous = self._transcripts.pop(key, "")
-            transcript = ev.get("transcript", "")
+            transcript = ev["transcript"]
             if transcript.startswith(previous) and transcript[len(previous) :]:
-                out.append(TranscriptDelta(role="user", delta=transcript[len(previous) :]))
+                out.append(
+                    TranscriptDelta(
+                        role="user",
+                        delta=transcript[len(previous) :],
+                        item_id=ev.get("item_id"),
+                        content_index=ev.get("content_index"),
+                    )
+                )
+            out.append(
+                TranscriptFinal(
+                    role="user", text=transcript, item_id=ev.get("item_id"), content_index=ev.get("content_index")
+                )
+            )
+            # Input ASR has its own token/duration billing, not response Usage.
+            # Preserve the provider event for consumers needing that breakdown.
+            out.append(ProviderEvent(provider="openai", kind=t, data=ev))
         elif t == "conversation.item.input_audio_transcription.failed":
             self._transcripts.pop((ev.get("item_id", ""), ev.get("content_index", 0)), None)
-            out.append(Error(exception=StreamError("OpenAI realtime input transcription failed")))
+            out.append(
+                TranscriptFinal(
+                    role="user",
+                    text="",
+                    status="failed",
+                    item_id=ev.get("item_id"),
+                    content_index=ev.get("content_index"),
+                )
+            )
+            # Optional ASR failure does not invalidate the native audio dialogue.
+            out.append(ProviderEvent(provider="openai", kind=t, data=ev))
         elif t == "input_audio_buffer.committed":
             self._audio_appended = False
             out.append(ProviderEvent(provider="openai", kind=t, data=ev))
         elif t in ("response.text.delta", "response.output_text.delta"):
-            out.append(TextDelta(index=0, delta=ev["delta"]))
+            out.append(TextDelta(index=0, delta=ev["delta"], response_id=ev.get("response_id")))
         elif t == "input_audio_buffer.speech_started":
             out.append(SpeechStarted())
         elif t == "input_audio_buffer.speech_stopped":
@@ -240,14 +398,24 @@ class OpenAIRealtimeSession(RealtimeSession):
                 call_id = item["call_id"]
                 idx = self._next_tool_index
                 self._next_tool_index += 1
-                self._tool_index[call_id] = idx
-                out.append(ToolUseStart(index=idx, tool_use_id=call_id, name=item["name"]))
+                self._tool_index[(ev.get("response_id"), call_id)] = idx
+                out.append(
+                    ToolUseStart(index=idx, tool_use_id=call_id, name=item["name"], response_id=ev.get("response_id"))
+                )
+            else:
+                out.append(ProviderEvent(provider="openai", kind=t, data=ev))
         elif t == "response.function_call_arguments.delta":
             call_id = ev["call_id"]
-            idx = self._tool_index.get(call_id, 0)
-            out.append(ToolInputDelta(index=idx, tool_use_id=call_id, partial_json=ev["delta"]))
+            idx = self._tool_index.get((ev.get("response_id"), call_id), 0)
+            out.append(
+                ToolInputDelta(
+                    index=idx, tool_use_id=call_id, partial_json=ev["delta"], response_id=ev.get("response_id")
+                )
+            )
         elif t == "response.done":
             resp = ev.get("response") or {}
+            if resp.get("id") == self.active_response_id:
+                self.response_active = False
             items = resp.get("output") or []
             status = resp.get("status", "completed")
             stop_reason = RESPONSE_STOP_REASONS.get(status, StopReason.error)
@@ -267,9 +435,12 @@ class OpenAIRealtimeSession(RealtimeSession):
                     output_tokens=usage_data.get("output_tokens", 0),
                     cache_read_tokens=(usage_data.get("input_token_details") or {}).get("cached_tokens", 0),
                 )
-            out.append(TurnComplete(stop_reason=stop_reason, usage=usage))
-            self._tool_index.clear()
-            self._next_tool_index = 0
+            out.append(TurnComplete(stop_reason=stop_reason, usage=usage, response_id=resp.get("id")))
+            for key in tuple(self._tool_index):
+                if key[0] == resp.get("id"):
+                    self._tool_index.pop(key)
+            if not self._tool_index:
+                self._next_tool_index = 0
         elif t == "error":
             err = ev.get("error") or {}
             msg = err.get("message") or str(err)
@@ -305,6 +476,8 @@ class OpenAIRealtimeTransport(RealtimeTransport):
     api_key: str = field(default_factory=lambda: os.environ.get("OPENAI_API_KEY", ""), repr=False)
     base_url: str = field(default_factory=lambda: os.environ.get("OPENAI_REALTIME_URL", OPENAI_REALTIME_URL))
     model: str = DEFAULT_REALTIME_MODEL
+    ready_timeout: float = field(default=10.0, kw_only=True)
+    """Maximum seconds to wait for session.updated, including early events."""
     http_session: aiohttp.ClientSession | None = field(default=None, repr=False, compare=False)
 
     server_vad: bool = True
@@ -349,6 +522,8 @@ class OpenAIRealtimeTransport(RealtimeTransport):
     ) -> RealtimeSession:
         input_format = audio_format(input_audio_format)
         output_format = audio_format(output_audio_format)
+        if not math.isfinite(self.ready_timeout) or self.ready_timeout <= 0:
+            raise ValueError("ready_timeout must be positive and finite")
         if not self.api_key.strip():
             raise ValueError("OPENAI_API_KEY is required for realtime API audio")
         own_session = self.http_session is None or self.http_session.closed
@@ -393,13 +568,15 @@ class OpenAIRealtimeTransport(RealtimeTransport):
                     }
                 )
             )
-            return OpenAIRealtimeSession(
+            session = OpenAIRealtimeSession(
                 ws=ws,
                 input_audio_media_type=input_audio_format,
                 output_audio_media_type=output_audio_format,
                 http_session=client,
                 own_http_session=own_session,
             )
+            await session.wait_ready(self.ready_timeout)
+            return session
         except (Exception, asyncio.CancelledError):
             try:
                 if ws is not None:

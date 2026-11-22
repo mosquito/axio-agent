@@ -149,6 +149,41 @@ class RealtimeSession(Protocol):
 
 
 @runtime_checkable
+class RealtimePlaybackControl(Protocol):
+    """Optional session capability for reconciling interrupted local playback.
+
+    Session implementations without server-side playback truncation need not
+    implement this protocol. Cancelling generation and clearing the local
+    speaker queue are separate operations.
+    """
+
+    async def truncate(self, item_id: str, audio_end_ms: int, *, content_index: int = 0) -> None:
+        """Keep only the audio actually played for the identified content part.
+
+        ``audio_end_ms`` is a nonnegative duration relative to this part, not
+        time since the response started. The provider may reject a duration
+        beyond its generated audio. Removes the unplayed server transcript.
+        """
+
+
+@dataclass(frozen=True, slots=True)
+class RealtimeToolResponse:
+    """One function result to deliver, retaining its provider call identity."""
+
+    tool_use_id: ToolCallID
+    name: ToolName
+    content: str | list[ContentBlock]
+
+
+@runtime_checkable
+class RealtimeToolBatch(Protocol):
+    """Optional capability for resuming generation once per group of results."""
+
+    async def send_tool_results(self, results: list[RealtimeToolResponse]) -> None:
+        """Deliver the complete group, then resume generation once, if needed."""
+
+
+@runtime_checkable
 class RealtimeTransport(Protocol):
     """Provider that supports duplex realtime sessions (e.g. OpenAI Realtime,
     Gemini Live).  Distinct from :class:`CompletionTransport` because the
@@ -178,6 +213,13 @@ class STTTransport(Protocol):
 @runtime_checkable
 class EmbeddingTransport(Protocol):
     async def embed(self, texts: list[str]) -> list[list[float]]: ...
+
+
+@runtime_checkable
+class SearchTransport(Protocol):
+    """Search the web for a query and return grounded text with sources."""
+
+    async def search(self, query: str, *, model: str | None = None) -> str: ...
 
 
 class DummyTransport:
@@ -273,6 +315,12 @@ class DummySTTTransport(DummyTransport, STTTransport):
 
 class DummyEmbeddingTransport(DummyTransport, EmbeddingTransport):
     def embed(self, texts: list[str]) -> Any:
+        self._do_fail()
+        raise AssertionError("unreachable")
+
+
+class DummySearchTransport(DummyTransport, SearchTransport):
+    async def search(self, query: str, *, model: str | None = None) -> str:
         self._do_fail()
         raise AssertionError("unreachable")
 

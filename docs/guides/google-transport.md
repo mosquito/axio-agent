@@ -299,12 +299,13 @@ Video generation runs an async polling loop until the job completes.
 
 ## Tools registered as entry points
 
-When installed, `axio-transport-google` registers two tools under `axio.tools`:
+When installed, `axio-transport-google` registers three tools under `axio.tools`:
 
 | Entry point | Tool | Description |
 |---|---|---|
 | `generate_image` | `generate_image` | Generate images via Gemini Nano Banana |
 | `generate_video` | `generate_video` | Generate videos via Veo |
+| `google_search` | `google_search` | Search the web via Google Search grounding |
 
 Pass these handlers to `Tool` explicitly, or use them through `axio-repl`.
 

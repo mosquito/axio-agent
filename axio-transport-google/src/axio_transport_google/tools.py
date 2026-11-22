@@ -1,13 +1,14 @@
-"""Image and video generation tools for Google GenAI transport."""
+"""Image, video, and search tools for Google GenAI transport."""
 
 from __future__ import annotations
 
 import logging
-from typing import Protocol, runtime_checkable
+import os
+from typing import Any, Protocol, runtime_checkable
 
 from axio.blocks import ImageBlock, TextBlock, VideoBlock
 from axio.field import StrictStr
-from axio.transport import ImageGenTransport, VideoGenTransport
+from axio.transport import ImageGenTransport, SearchTransport, VideoGenTransport
 
 logger = logging.getLogger(__name__)
 
@@ -17,9 +18,29 @@ class _GenTransport(ImageGenTransport, VideoGenTransport, Protocol):
     """Combined Protocol — provides both image and video generation."""
 
 
-# Set by the host app (e.g. axio-tui) to the active Google transport.
-# ``None`` disables the tools with a configuration error message.
-transport: _GenTransport | None = None
+# Set by the host app (e.g. axio-tui, axio-repl) to the active Google/Antigravity transport.
+transport: Any | None = None
+
+
+async def _resolve_search_transport() -> SearchTransport | None:
+    if transport is not None and isinstance(transport, SearchTransport):
+        return transport
+
+    try:
+        from .antigravity import AntigravityFileCredentials, AntigravityTransport
+
+        if await AntigravityFileCredentials().list_records():
+            return AntigravityTransport()
+    except Exception as exc:
+        logger.debug("Antigravity credential check failed: %s", exc)
+
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    if api_key:
+        from . import GoogleTransport
+
+        return GoogleTransport(api_key=api_key)
+
+    return None
 
 
 async def generate_image(
@@ -74,3 +95,18 @@ async def generate_video(
     for vid_bytes in videos:
         result.append(VideoBlock(media_type="video/mp4", data=vid_bytes))
     return result
+
+
+async def google_search(
+    query: StrictStr,
+) -> str:
+    """Search the web using Google Search via Gemini grounding.
+    Returns grounded factual search results with sources and URLs."""
+    active_transport = await _resolve_search_transport()
+    if active_transport is None:
+        return "Error: Google search transport not configured (log in with axio-antigravity or set GEMINI_API_KEY)."
+    try:
+        return await active_transport.search(query)
+    except Exception as exc:
+        logger.error("Google search failed: %s", exc, exc_info=True)
+        return f"Google search error: {exc}"

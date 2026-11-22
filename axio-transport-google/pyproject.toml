@@ -42,6 +42,7 @@ google-vertex = "axio_transport_google.tui:VertexSettingsScreen"
 [project.entry-points."axio.tools"]
 generate_image = "axio_transport_google.tools:generate_image"
 generate_video = "axio_transport_google.tools:generate_video"
+google_search = "axio_transport_google.tools:google_search"
 
 [project.urls]
 Documentation = "https://docs.axio-agent.com"

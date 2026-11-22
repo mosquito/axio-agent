@@ -857,11 +857,155 @@ once per utterance. Set `transcription_model="gpt-4o-mini-transcribe"` to opt in
 user transcripts. GA output text/audio/transcript events are translated, legacy
 output aliases remain readable, and unhandled lifecycle events are forwarded as
 `ProviderEvent`. Failed/cancelled/incomplete responses do not masquerade as success.
-`interrupt()` cancels generation, but does not track speaker playback or truncate
-unheard conversation audio: applications must manage playback/history alignment.
+`connect()` waits for `session.updated` (at most `ready_timeout`, default 10 seconds)
+before returning, so input cannot race session configuration. Early events remain
+available through `events()`. Rejection, timeout and cancellation release owned
+resources; a borrowed `http_session` remains open.
 Always close the session (normally via `async with RealtimeAgent(...)`).
 
-Public contract references verified during implementation (2026-10-18):
+### Tool groups and session lifecycle
+
+`RealtimeAgent` executes calls from one response concurrently through the regular
+`Tool` validation, guards and concurrency limits. `ToolResult` events appear as
+handlers finish and retain the call ID, input, error flag and optional response ID.
+They report execution; successful delivery is a separate concern. OpenAI receives
+all outputs together followed by **one** `response.create`, including when one
+handler fails. Invalid or non-object argument JSON returns an error without
+running the handler. JSON-serializable structured results are encoded as JSON.
+
+For manual integrations, `OpenAIRealtimeSession.send_tool_results()` accepts a
+list of `RealtimeToolResponse(tool_use_id, name, content)` values. It validates the
+complete batch, sends all function outputs, and creates one continuation. An empty
+batch does nothing. `send_tool_result()` remains the single-result convenience API;
+avoid calling it concurrently for one response. Other providers can implement the
+optional `RealtimeToolBatch` capability without changing `RealtimeSession`.
+
+`TurnStarted` identifies a new response. `SpeechStarted` invalidates old tool work
+before reaching the consumer; call `agent.interrupt()` to explicitly cancel
+generation as well. Repeated interruption is idempotent until the next response or
+speech turn. Late audio, captions and tool fragments from recently interrupted
+response IDs are suppressed, while final transcripts and completion status still
+reach the archive. A transport without response IDs cannot distinguish late output
+from a new response; its own interruption mechanism remains responsible for that.
+
+`close()` cancels tools and closes the socket concurrently, bounded by
+`close_timeout` (default 5 seconds). Cancelling the caller leaves cleanup running;
+later calls await the same cleanup. Stream EOF also has a bounded tool drain.
+An uncooperative handler or transport causes `TimeoutError`; Python cannot forcibly
+stop such a coroutine, but its stale result cannot reach another session. Handlers
+must cooperate with cancellation, especially before physical side effects. Delivery
+failures emit `Error` (raised by default; use `raise_on_error=False` to inspect them).
+An end-conversation tool should signal its application coordinator rather than wait
+for its own group to close; the application chooses whether to deliver its result
+and finish queued playback before closing the session.
+
+### Camera frames and interrupted playback
+
+`send([TextBlock(...), ImageBlock(...), ...])` creates one ordered user message,
+including multiple camera views and their text labels. It does not automatically
+start a response: call `commit()` when appropriate. Audio appends use a separate
+buffer and must be sent in separate calls. Unsupported blocks and mixed audio /
+text-image lists fail before any part is sent. Image bytes must be nonempty;
+decoding and model-specific image limits remain the provider's responsibility.
+
+`AudioOutputDelta` carries optional `item_id`, `response_id` and `content_index`.
+Track actual speaker progress per item/content part. On barge-in, clear your local
+speaker queue, cancel generation with `interrupt()`, and call
+`truncate(item_id, audio_end_ms, content_index=...)` with the duration actually
+played. Truncation removes the unplayed audio/transcript from server context.
+Neither receiving a delta nor `AudioOutputEnd` proves the speaker played it.
+`RealtimeAgent.truncate()` delegates to the optional `RealtimePlaybackControl`
+session capability; unsupported transports raise `NotImplementedError`.
+
+This offline example uses the real session with only its WebSocket boundary replaced:
+
+<!--
+name: test_realtime_camera_and_playback
+-->
+```python
+import asyncio
+import base64
+import json
+from axio import RealtimePlaybackControl, RealtimeToolResponse
+from axio.blocks import ImageBlock, TextBlock
+from axio_transport_openai import OpenAIRealtimeSession
+
+
+class RecordingSocket:
+    def __init__(self):
+        self.sent = []
+        self.closed = False
+
+    async def send_str(self, payload):
+        self.sent.append(json.loads(payload))
+
+    async def close(self):
+        self.closed = True
+
+
+async def example():
+    socket = RecordingSocket()
+    session = OpenAIRealtimeSession(ws=socket)
+    image = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
+    )
+    await session.send(
+        [
+            TextBlock(text="Current camera view, body yaw +10 degrees"),
+            ImageBlock(media_type="image/png", data=image),
+        ]
+    )
+    await session.commit()
+    assert len(socket.sent[0]["item"]["content"]) == 2
+    assert socket.sent[1] == {"type": "response.create"}
+    assert isinstance(session, RealtimePlaybackControl)
+    # The application measured 320 ms played for this content part.
+    await session.interrupt()
+    await session.truncate("assistant-audio-item", 320, content_index=0)
+    assert socket.sent[-1] == {
+        "type": "conversation.item.truncate",
+        "item_id": "assistant-audio-item",
+        "content_index": 0,
+        "audio_end_ms": 320,
+    }
+    await session.send_tool_results(
+        [
+            RealtimeToolResponse("look-call", "look", "Camera view delivered"),
+            RealtimeToolResponse("turn-call", "turn", "Motion completed"),
+        ]
+    )
+    assert [event["type"] for event in socket.sent[-3:]] == [
+        "conversation.item.create",
+        "conversation.item.create",
+        "response.create",
+    ]
+    await session.close()
+    assert socket.closed
+
+
+asyncio.run(example())
+```
+
+### Collecting final transcripts
+
+`TranscriptDelta` serves live captions. `TranscriptFinal` replaces the accumulated
+text for its item/content part, including corrected or non-prefix transcripts.
+It includes `role`, `text`, transcription `status` and optional provider IDs.
+Input transcription is opt-in, separately billed and asynchronously delivered:
+its final event may arrive after `TurnComplete`. Leaving the transcription language
+unspecified supports automatic language detection.
+
+Assistant transcript completion also occurs for interrupted responses. Correlate
+`TranscriptFinal.response_id` with `TurnComplete.response_id` and `stop_reason`
+before recording response status. `status="completed"` on the transcript means
+the transcript part ended; it does not mean the response succeeded or was heard.
+Failed input ASR emits `TranscriptFinal(status="failed", text="")` followed by
+`Error`. Store generated text and measured playback progress separately, with
+stable item IDs so late finals can update the correct conversation record.
+These additional events/identifiers are currently emitted by OpenAI; other
+transports may omit them and continue using `None` for unknown IDs.
+
+Public contract references verified during implementation (2026-10-19):
 [Realtime conversations](https://developers.openai.com/api/docs/guides/realtime-conversations),
 [file transcription](https://developers.openai.com/api/docs/guides/speech-to-text),
 [text to speech](https://developers.openai.com/api/docs/guides/text-to-speech).
