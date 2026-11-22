@@ -345,3 +345,35 @@ async def test_fetch_models_resolves_base_model_to_high_variant(tmp_path: Path) 
         # with_model also resolves base model ID
         cloned = transport.with_model(ModelSpec("gemini-4-argon"))
         assert cloned.model.id == "gemini-4-argon-high"
+
+
+def test_antigravity_google_search_payload() -> None:
+    transport = AntigravityTransport(google_search=True)
+    transport.project, transport.model = "p", ModelSpec(MODEL)
+    payload = transport.build_payload([], [], "")
+    tools = payload["request"].get("tools", [])
+    assert tools == [{"googleSearch": {}}]
+
+
+async def test_antigravity_search(tmp_path: Path) -> None:
+    search_chunk = {
+        "candidates": [
+            {
+                "content": {"parts": [{"text": "Antigravity search result."}]},
+                "groundingMetadata": {
+                    "groundingChunks": [
+                        {"web": {"uri": "https://antigravity.google", "title": "Google Antigravity"}},
+                    ],
+                },
+            }
+        ]
+    }
+
+    async def handler(request: web.Request) -> web.Response:
+        return stream_response(search_chunk)
+
+    async with transport_at(tmp_path, handler) as transport:
+        transport.project, transport.model = "p", ModelSpec(MODEL)
+        result = await transport.search("test search")
+        assert "Antigravity search result." in result
+        assert "- [Google Antigravity](https://antigravity.google)" in result

@@ -1,13 +1,15 @@
-"""Image and video generation tools for Google GenAI transport."""
+"""Image, video, and search tools for Google GenAI transport."""
 
 from __future__ import annotations
 
 import logging
-from typing import Protocol, runtime_checkable
+import os
+from typing import Any, Protocol, runtime_checkable
 
+import aiohttp
 from axio.blocks import ImageBlock, TextBlock, VideoBlock
 from axio.field import StrictStr
-from axio.transport import ImageGenTransport, VideoGenTransport
+from axio.transport import ImageGenTransport, SearchTransport, VideoGenTransport
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +21,55 @@ class _GenTransport(ImageGenTransport, VideoGenTransport, Protocol):
 
 # Set by the host app (e.g. axio-tui) to the active Google transport.
 # ``None`` disables the tools with a configuration error message.
-transport: _GenTransport | None = None
+transport: Any | None = None
+
+_search_session: aiohttp.ClientSession | None = None
+_search_transport: SearchTransport | None = None
+
+
+async def _resolve_search_transport() -> SearchTransport | None:
+    global _search_session, _search_transport
+    if transport is not None and (isinstance(transport, SearchTransport) or hasattr(transport, "search")):
+        return transport  # type: ignore[no-any-return]
+
+    # Check for logged-in Antigravity account
+    try:
+        from .antigravity import (
+            AntigravityFileCredentials,
+            AntigravityOAuth,
+            AntigravitySession,
+            AntigravityTransport,
+            resolve_account,
+        )
+
+        store = AntigravityFileCredentials()
+        records = await store.list_records()
+        if records:
+            if _search_transport is None or not isinstance(_search_transport, AntigravityTransport):
+                if _search_session is None or _search_session.closed:
+                    _search_session = aiohttp.ClientSession()
+                account_id = await resolve_account(store)
+                oauth = AntigravityOAuth(_search_session)
+                account_session = AntigravitySession(store, oauth, account_id)
+                t = AntigravityTransport(session=_search_session, account=account_session)
+                await t.fetch_models()
+                _search_transport = t
+            return _search_transport
+    except Exception as exc:
+        logger.debug("Failed to initialize Antigravity for search: %s", exc)
+
+    # Check for GEMINI_API_KEY in environment
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    if api_key:
+        from . import GoogleTransport
+
+        if _search_transport is None or not isinstance(_search_transport, GoogleTransport):
+            if _search_session is None or _search_session.closed:
+                _search_session = aiohttp.ClientSession()
+
+            _search_transport = GoogleTransport(api_key=api_key, session=_search_session)
+        return _search_transport
+    return None
 
 
 async def generate_image(
@@ -74,3 +124,30 @@ async def generate_video(
     for vid_bytes in videos:
         result.append(VideoBlock(media_type="video/mp4", data=vid_bytes))
     return result
+
+
+async def close_tools() -> None:
+    """Close any ad-hoc HTTP session opened by tools."""
+    global _search_session, _search_transport
+    if _search_session is not None and not _search_session.closed:
+        await _search_session.close()
+    _search_session = None
+    _search_transport = None
+
+
+async def google_search(
+    query: StrictStr,
+) -> str:
+    """Search the web using Google Search via Gemini grounding.
+    Returns grounded factual search results with sources and URLs."""
+    active_transport = await _resolve_search_transport()
+    if active_transport is None:
+        return (
+            "Error: Google Search transport not configured (no active Google/Antigravity transport, "
+            "logged-in Antigravity account, or GEMINI_API_KEY)."
+        )
+    try:
+        return await active_transport.search(query)
+    except Exception as exc:
+        logger.error("Google search failed: %s", exc, exc_info=True)
+        return f"Google search error: {exc}"

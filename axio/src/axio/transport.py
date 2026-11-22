@@ -215,6 +215,13 @@ class EmbeddingTransport(Protocol):
     async def embed(self, texts: list[str]) -> list[list[float]]: ...
 
 
+@runtime_checkable
+class SearchTransport(Protocol):
+    """Search the web for a query and return grounded text with sources."""
+
+    async def search(self, query: str, *, model: str | None = None) -> str: ...
+
+
 class DummyTransport:
     """Placeholder transport that fails loudly if actually used.
 
@@ -308,6 +315,12 @@ class DummySTTTransport(DummyTransport, STTTransport):
 
 class DummyEmbeddingTransport(DummyTransport, EmbeddingTransport):
     def embed(self, texts: list[str]) -> Any:
+        self._do_fail()
+        raise AssertionError("unreachable")
+
+
+class DummySearchTransport(DummyTransport, SearchTransport):
+    async def search(self, query: str, *, model: str | None = None) -> str:
         self._do_fail()
         raise AssertionError("unreachable")
 

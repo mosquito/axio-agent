@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import copy
 import json
 import logging
 import os
@@ -51,7 +52,14 @@ from axio.models import Capability, ModelRegistry, ModelSpec
 from axio.retry import is_retryable, retry_delay
 from axio.schema import strip_title
 from axio.tool import Tool
-from axio.transport import CompletionTransport, ImageGenTransport, VideoGenTransport
+from axio.transport import (
+    CompletionTransport,
+    ImageGenTransport,
+    VideoGenTransport,
+)
+from axio.transport import (
+    SearchTransport as SearchTransport,
+)
 from axio.types import StopReason, Usage, stop_reason_from
 from axio_sse import Payload, Wire, payloads
 
@@ -136,20 +144,20 @@ GENAI_MODELS: ModelRegistry = ModelRegistry(
     {
         # --- Gemini chat/reasoning models ---
         ModelSpec(
-            id="gemini-4-argon",
-            context_window=1_048_576,
-            max_output_tokens=65_536,
-            capabilities=_RT,
-            input_cost=2.0,
-            output_cost=12.0,
-        ),
-        ModelSpec(
             id="gemini-3.8-flash",
             context_window=1_048_576,
             max_output_tokens=65_536,
             capabilities=_RT,
             input_cost=0.75,
             output_cost=3.75,
+        ),
+        ModelSpec(
+            id="gemini-4-argon",
+            context_window=1_048_576,
+            max_output_tokens=65_536,
+            capabilities=_RT,
+            input_cost=2.0,
+            output_cost=12.0,
         ),
         ModelSpec(
             id="gemini-3.7-flash",
@@ -627,9 +635,13 @@ def _media_event(part: ContentPart, at: int) -> StreamEvent:
 
 
 @dataclass(slots=True)
-class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport):
+class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport, SearchTransport):
     display_name: ClassVar[str] = "Google GenAI"
     env_vars: ClassVar[tuple[str, ...]] = ("GEMINI_API_KEY",)
+    default_models: ClassVar[dict[str, str]] = {
+        "chat": "gemini-3.8-flash",
+        "vision": "gemini-3.8-flash",
+    }
 
     name: str = "Google GenAI"
     api_key: str = ""
@@ -648,6 +660,7 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport)
     seed: int | None = field(default=None, repr=False)
     safety_settings: list[SafetySettingDict] | None = field(default=None, repr=False)
     debug: bool = False
+    google_search: bool = False
     nudge_on_media_tool_result: bool = True
     max_output_tokens: int | None = field(default=None, repr=False)
     thinking_budget: int | None = field(default=None, repr=False)
@@ -673,6 +686,8 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport)
             self.vertexai = self.vertexai.lower() in ("true", "1")
         if self.vertexai is None:
             self.vertexai = os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "").lower() in ("true", "1")
+        if isinstance(self.google_search, str):
+            self.google_search = self.google_search.lower() in ("true", "1")
         if isinstance(self.temperature, str):
             self.temperature = float(self.temperature) if self.temperature else None
         if isinstance(self.top_p, str):
@@ -758,7 +773,6 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport)
     def _build_generation_config_json(self) -> GenerationConfig:
         config: GenerationConfig = {
             "maxOutputTokens": self.max_output_tokens or self.model.max_output_tokens,
-            "audioTimestamp": True,
         }
         if self.temperature is not None:
             config["temperature"] = self.temperature
@@ -817,8 +831,13 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport)
         body: GenerateContentRequest = {"contents": _build_contents_json(messages, self._thought_signatures)}
         if system:
             body["systemInstruction"] = {"parts": [{"text": system}]}
+        tool_list: list[ToolDict] = []
         if tools and Capability.tool_use in self.model.capabilities:
-            body["tools"] = _build_tools_json(tools)
+            tool_list.extend(_build_tools_json(tools))
+        if self.google_search:
+            tool_list.append({"googleSearch": {}})
+        if tool_list:
+            body["tools"] = tool_list
         body["generationConfig"] = self._build_generation_config_json()
         if self.safety_settings:
             body["safetySettings"] = self.safety_settings
@@ -1050,6 +1069,80 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport)
             index=at, tool_use_id=call_id, partial_json=json.dumps(dict(call.args)) if call.args else "{}"
         )
 
+    # ── Search / Grounding ──
+
+    @staticmethod
+    def _format_search_response(data: dict[str, Any]) -> str:
+        candidates = data.get("candidates", [])
+        if not candidates:
+            return "No search results found."
+
+        candidate = candidates[0]
+        parts = candidate.get("content", {}).get("parts", [])
+        text = "".join(part.get("text", "") for part in parts if isinstance(part, dict) and "text" in part).strip()
+
+        grounding = candidate.get("groundingMetadata") or {}
+        chunks = grounding.get("groundingChunks", [])
+        sources: list[str] = []
+        seen_urls: set[str] = set()
+
+        for chunk in chunks:
+            if not isinstance(chunk, dict):
+                continue
+            web = chunk.get("web") or {}
+            if not isinstance(web, dict):
+                continue
+            uri = str(web.get("uri", "")).strip()
+            title = str(web.get("title", "")).strip()
+            if uri and uri not in seen_urls:
+                seen_urls.add(uri)
+                label = title if title else uri
+                sources.append(f"- [{label}]({uri})")
+
+        if not text and not sources:
+            return "No search results found."
+
+        if sources:
+            sources_block = "\n".join(sources)
+            if text:
+                return f"{text}\n\nSources:\n{sources_block}"
+            return f"Sources:\n{sources_block}"
+
+        return text
+
+    async def search(self, query: str, *, model: str | None = None) -> str:
+        """Search the web using Google Search grounding via Gemini."""
+        if self.session is None:
+            async with aiohttp.ClientSession() as session:
+                transport = copy.copy(self)
+                transport.session = session
+                return await transport.search(query, model=model)
+
+        model_id = model or (self.model.id if Capability.text in self.model.capabilities else "gemini-3.8-flash")
+        model_path = f"publishers/google/models/{model_id}" if self.vertexai else f"models/{model_id}"
+        url = self._build_url(f"{model_path}:generateContent")
+        headers = await self._get_headers()
+
+        body: dict[str, Any] = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": query}],
+                }
+            ],
+            "tools": [{"googleSearch": {}}],
+        }
+        if self.safety_settings:
+            body["safetySettings"] = self.safety_settings
+
+        async with self.session.post(url, json=body, headers=headers) as resp:
+            if resp.status != 200:
+                error_text = await resp.text()
+                raise StreamError(f"Gemini search {resp.status}: {error_text[:1000]}")
+            data = await resp.json()
+
+        return self._format_search_response(data)
+
     # ── Image / Veo generation ──
 
     async def generate_images(self, prompt: str, *, model: str | None = None, n: int = 1) -> list[bytes]:
@@ -1278,6 +1371,8 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport)
                 d[k] = v
         if self.safety_settings:
             d["safety_settings"] = self.safety_settings
+        if self.google_search:
+            d["google_search"] = True
         return d
 
     @classmethod
@@ -1314,6 +1409,7 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport)
             thinking_level=data.get("thinking_level"),
             service_tier=data.get("service_tier"),
             media_resolution=data.get("media_resolution"),
+            google_search=bool(data.get("google_search", False)),
         )
 
 
