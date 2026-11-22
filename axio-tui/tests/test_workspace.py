@@ -11,57 +11,19 @@ import pytest
 from aiohttp_tiny_mcp import Registry
 from aiohttp_tiny_mcp.testing import serving
 from axio.blocks import ToolUseBlock
-from axio.models import Capability, ModelRegistry, ModelSpec
 from axio.permission_policy import Approval
 from axio.transport import TransportCatalog, TransportEntry
-from axio_tools_local.paths import LocalPaths as Workspace
 from axio_tools_mcp.config import MCPServerConfig
 from axio_tools_mcp.plugin import MCPPlugin
 from axio_tools_mcp.provider import MCPToolProvider
 from axio_tools_mcp.skills import SKILLS_CATALOG
-from pydantic import BaseModel
+from conftest import FakeTransport, Nothing
 from textual.widgets import Input, Markdown, OptionList, Static, Tree
 
 from axio_tui.app import AgentApp, ModelRole
 from axio_tui.args import Args
 from axio_tui.mcp import MCPScreen
-from axio_tui.options import StartupOptions
 from axio_tui.skills import SkillsScreen
-
-
-class Nothing(BaseModel):
-    pass
-
-
-class FakeTransport:
-    name = "Fixture"
-    api_key = ""
-    model = ModelSpec(id="fixture", capabilities=frozenset({Capability.text, Capability.tool_use}))
-    models = ModelRegistry([model])
-
-    def __init__(self, **kwargs: object) -> None:
-        self.session = kwargs.get("session")
-
-    async def fetch_models(self) -> None:
-        pass
-
-
-@pytest.fixture
-def isolated_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AgentApp:
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-    monkeypatch.setattr("axio_tui.app.DB_PATH", tmp_path / "app.db")
-    monkeypatch.setattr("axio_tui.app.discover_tools_plugins", lambda: {})
-    monkeypatch.setattr("axio_tui.app.discover_guards", lambda: {})
-    monkeypatch.setattr("axio_tui.transport_registry.discover_transport_settings", lambda: {})
-    monkeypatch.setattr(
-        "axio_tui.transport_registry.discover_transports",
-        lambda: TransportCatalog({"fake": TransportEntry.from_target("fake", FakeTransport)}),
-    )
-    return AgentApp(
-        paths=Workspace.discover(tmp_path),
-        options=StartupOptions(skill_directories=(tmp_path / "skills",)),
-    )
 
 
 async def test_tui_loads_skills_scoped_instructions_and_reloads(isolated_app: AgentApp, tmp_path: Path) -> None:

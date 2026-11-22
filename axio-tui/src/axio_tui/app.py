@@ -60,9 +60,11 @@ from textual.events import Key
 from textual.highlight import HighlightTheme
 from textual.highlight import highlight as hl_highlight
 from textual.screen import ModalScreen
+from textual.timer import Timer
 from textual.widget import Widget
 from textual.widgets import Footer, Header, Input, Markdown, OptionList, RichLog, Static
 from textual.widgets._markdown import MarkdownFence
+from textual.widgets.markdown import MarkdownStream
 
 from axio_tui.plugin import (
     ToolsPlugin,
@@ -167,7 +169,49 @@ class _ToolCallInfo:
     live_args: dict[str, str] = field(default_factory=dict)  # live streaming args
 
 
-class _ThinkingWidget(Static):
+class _ThrottledStatic(Static):
+    """A Static that repaints at a fixed rate instead of once per change.
+
+    The reasoning pane and the tool line are written from the event stream, which delivers
+    deltas faster than a terminal shows them. A repaint per delta parsed the markup again and
+    refreshed the widget on every token, which starved the message loop and delayed input.
+    """
+
+    #: Repaints per second. Fast enough to read as live, slow enough to leave the loop free.
+    REPAINT_HZ = 20
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        #: What was last composed. Kept because Static gives no way to read it back.
+        self.shown = ""
+        self._shown_dirty = False
+        self._repaint_timer: Timer | None = None
+
+    def on_mount(self) -> None:
+        self._repaint_timer = self.set_interval(1 / self.REPAINT_HZ, self._repaint)
+        if not self._shown_dirty:
+            self._repaint_timer.pause()
+
+    def draw(self, content: str) -> None:
+        """Keep `content` as what this widget shows. The next tick puts it on screen."""
+        if content == self.shown:
+            return
+        self.shown = content
+        self._shown_dirty = True
+        if self._repaint_timer is not None:
+            self._repaint_timer.resume()
+
+    def _repaint(self) -> None:
+        """Draw what changed, and stop the timer while nothing does."""
+        if not self._shown_dirty:
+            if self._repaint_timer is not None:
+                self._repaint_timer.pause()
+            return
+        self._shown_dirty = False
+        self.update(self.shown)
+
+
+class _ThinkingWidget(_ThrottledStatic):
     """The model's reasoning while it lasts, and one line about it afterwards.
 
     Kept out of the transcript. Left in, a model that reasons at length buries the answer it was
@@ -187,8 +231,6 @@ class _ThinkingWidget(Static):
 
     def __init__(self) -> None:
         super().__init__("", classes="meta")
-        #: What was last drawn. Kept because Static gives no way to read it back.
-        self.shown = ""
         #: Only the lines this widget shows. The whole reasoning was kept and split again on every
         #: delta, so a model that reasons at length paid for its own output once per chunk.
         self._tail: list[str] = [""]
@@ -228,14 +270,13 @@ class _ThinkingWidget(Static):
         if self._done:
             cost = f" · {self._tokens:,} tokens" if self._tokens else ""
             note = ", not sent by the provider" if self.withheld else ""
-            self.shown = f"[dim]✻ thinking{cost}{note}[/]"
+            self.draw(f"[dim]✻ thinking{cost}{note}[/]")
         else:
             body = "\n".join(f"[dim]{escape(line)}[/]" for line in self._tail)
-            self.shown = f"[dim italic]✻ thinking…[/]\n{body}"
-        self.update(self.shown)
+            self.draw(f"[dim italic]✻ thinking…[/]\n{body}")
 
 
-class _ToolStatusWidget(Static):
+class _ToolStatusWidget(_ThrottledStatic):
     """Single-line live-updating tool status tracker with clickable completed tools."""
 
     DEFAULT_CSS = """
@@ -297,7 +338,7 @@ class _ToolStatusWidget(Static):
                 parts.append(f"[@click=show_detail('{tid}')][green]{info.name} ✓[/][/]")
             else:
                 parts.append(f"[@click=show_detail('{tid}')][red]{info.name} ✗[/][/]")
-        self.update("[dim]tools:[/] " + "  ".join(parts))
+        self.draw("[dim]tools:[/] " + "  ".join(parts))
 
     def action_show_detail(self, tool_use_id: str) -> None:
         info = self._tools.get(tool_use_id)
@@ -524,11 +565,14 @@ class AgentApp(App[None]):
             self.paths.project_root, self._permission_prompt, advisor=self._permission_advice
         )
         self._current_md: Markdown | None = None
-        self._response_text = ""
+        #: Appends to the answer being written. Kept because `Markdown.update` reparses and
+        #: remounts the whole document, which costs more the longer the answer gets.
+        self._md_stream: MarkdownStream | None = None
         self._declined = False
         self._thinking: _ThinkingWidget | None = None
-        self._text_dirty = False
         self._last_input_tokens = 0
+        #: Context token totals, read on a timer. The event stream must not wait for the store.
+        self._total_tokens = (0, 0)
         self._chat_model: ModelSpec | None = None
         self._model_name = ""
         self._all_tools: list[Tool[Any]] = []
@@ -628,7 +672,7 @@ class AgentApp(App[None]):
         inp = self.query_one("#input", Input)
         inp.placeholder = "Initializing..."
         inp.focus()
-        self.set_interval(0.1, self._flush_text)
+        self.set_interval(2, self._refresh_token_totals)
         self._init_task = self.run_worker(self._init_worker(), group="initialization")
 
     async def _init_worker(self) -> None:
@@ -931,8 +975,30 @@ class AgentApp(App[None]):
     def _hide_agent_status(self) -> None:
         self.query_one("#tui-status", Static).remove_class("visible")
 
+    async def _refresh_token_totals(self) -> None:
+        """Read the context token totals and redraw the status line.
+
+        Runs on a timer, because reading them waits for the context store.
+        """
+        if self._chat_context_ is None:
+            return
+        try:
+            totals = await self._chat_context.get_context_tokens()
+        except Exception:
+            logger.debug("Context token totals unavailable", exc_info=True)
+            return
+        if totals == self._total_tokens:
+            return
+        self._total_tokens = totals
+        await self._update_status()
+
     async def _update_status(self) -> None:
-        total_in, total_out = await self._chat_context.get_context_tokens()
+        """Redraw the status line from what is already known.
+
+        Called from the event stream, so it waits for nothing. The token totals come from the
+        cache `_refresh_token_totals` keeps.
+        """
+        total_in, total_out = self._total_tokens
         parts: list[str] = []
         if self._agent_emoji:
             parts.append(self._agent_emoji)
@@ -944,15 +1010,31 @@ class AgentApp(App[None]):
         parts.append(f"Tokens: {total_in:,} in / {total_out:,} out")
         self.query_one("#status", Static).update("  |  ".join(parts))
 
-    async def _flush_text(self) -> None:
-        if not self._text_dirty or self._current_md is None:
+    async def _write_text(self, fragment: str) -> None:
+        """Append `fragment` to the answer being written, and open one if there is none."""
+        stream = await self._ensure_md_stream()
+        if stream is None:
             return
-        self._text_dirty = False
-        scroll = self.query_one("#log", VerticalScroll)
-        if not scroll.is_attached:
-            return
-        await self._current_md.update(self._response_text)
-        scroll.scroll_end(animate=False)
+        await stream.write(fragment)
+
+    async def _ensure_md_stream(self) -> MarkdownStream | None:
+        """The stream that appends to the answer, started with the widget that holds it."""
+        widget = await self._ensure_md()
+        if self._md_stream is None and widget.is_attached:
+            self._md_stream = Markdown.get_stream(widget)
+        return self._md_stream
+
+    async def _close_answer(self) -> None:
+        """Finish the answer being written, so what is mounted next goes below all of it.
+
+        Stopping the stream drains the fragments it still holds. Nothing else drains them, so
+        every widget mounted into the log closes the answer first.
+        """
+        if self._md_stream is not None:
+            await self._md_stream.stop()
+            self._md_stream = None
+        self._current_md = None
+        self._declined = False
 
     async def _ensure_thinking(self) -> _ThinkingWidget:
         """The widget this turn's reasoning goes to, mounted the first time there is any.
@@ -960,9 +1042,7 @@ class AgentApp(App[None]):
         Reasoning arrives before the answer, so the answer being written is closed first.
         """
         if self._thinking is None:
-            await self._flush_text()
-            self._current_md = None
-            self._response_text = ""
+            await self._close_answer()
             await self._mount_thinking()
         assert self._thinking is not None
         return self._thinking
@@ -1007,14 +1087,14 @@ class AgentApp(App[None]):
                 return self._current_md
             self._current_md = _Markdown("")
             await scroll.mount(self._current_md)
+            # Anchored, the log follows the answer as it grows and lets go as soon as the user
+            # scrolls. Scrolling to the end on every change took the view back from the user.
+            scroll.anchor()
         return self._current_md
 
     async def _write_meta(self, content: str) -> None:
-        """Flush pending text, then mount a styled Static line."""
-        await self._flush_text()
-        self._current_md = None
-        self._response_text = ""
-        self._declined = False
+        """Finish the answer, then mount a styled Static line."""
+        await self._close_answer()
         scroll = self.query_one("#log", VerticalScroll)
         if not scroll.is_attached:
             return
@@ -1022,11 +1102,8 @@ class AgentApp(App[None]):
         scroll.scroll_end(animate=False)
 
     async def _write_user(self, content: str) -> None:
-        """Flush pending text, then mount a user message with distinct styling."""
-        await self._flush_text()
-        self._current_md = None
-        self._response_text = ""
-        self._declined = False
+        """Finish the answer, then mount a user message with distinct styling."""
+        await self._close_answer()
         scroll = self.query_one("#log", VerticalScroll)
         if not scroll.is_attached:
             return
@@ -1035,10 +1112,7 @@ class AgentApp(App[None]):
 
     async def _ensure_tool_status(self) -> _ToolStatusWidget:
         if self._tool_status is None:
-            await self._flush_text()
-            self._current_md = None
-            self._response_text = ""
-            self._declined = False
+            await self._close_answer()
             self._tool_status = _ToolStatusWidget()
             scroll = self.query_one("#log", VerticalScroll)
             if scroll.is_attached:
@@ -1899,26 +1973,20 @@ class AgentApp(App[None]):
                                 self._agent_emoji = "💬"
                                 if self._thinking is not None:
                                     self._thinking.collapse()
-                                await self._ensure_md()
-                                self._response_text += delta
-                                self._text_dirty = True
+                                await self._write_text(delta)
                             case Refusal(text=text, category=category, blocked_input=blocked):
                                 # Rendered, and not as ordinary text: a declined turn otherwise looked like the model
                                 # answering with nothing. The banner goes once, because a refusal arrives in fragments.
                                 self._tool_status = None
                                 self._agent_emoji = "🚫"
-                                await self._ensure_md()
                                 if not self._declined:
                                     self._declined = True
                                     what = "Prompt blocked" if blocked else "Declined"
                                     tail = f" ({category})" if category else ""
-                                    self._response_text += f"\n\n**{what}{tail}.** "
-                                self._response_text += text
-                                self._text_dirty = True
+                                    await self._write_text(f"\n\n**{what}{tail}.** ")
+                                await self._write_text(text)
                             case Citation(cited_text=cited, title=title, url=url):
-                                await self._ensure_md()
-                                self._response_text += _citation_markdown(title, cited, url)
-                                self._text_dirty = True
+                                await self._write_text(_citation_markdown(title, cited, url))
                             case ToolUseStart(tool_use_id=tid, name=name) if name != "status_line":
                                 self._agent_emoji = "🔧"
                                 await self._update_status()
@@ -1956,10 +2024,7 @@ class AgentApp(App[None]):
                                     # Nothing else says so, and the answer reads as a whole one.
                                     await self._write_meta(f"[red]Incomplete: {reason}[/]")
                                 else:
-                                    await self._flush_text()
-                                    self._current_md = None
-                                    self._response_text = ""
-                                    self._declined = False
+                                    await self._close_answer()
                                 self._tool_status = None
                             case Error(exception=exc):
                                 describe = getattr(self._agent.transport, "format_error", str)
@@ -1988,10 +2053,6 @@ class AgentApp(App[None]):
             await self._close_thinking()
             await self._update_status()
             if cancelled:
-                await self._flush_text()
-                self._current_md = None
-                self._response_text = ""
-                self._declined = False
                 await self._write_meta("[yellow]--- Cancelled ---[/]")
             self.query_one("#input", Input).focus()
 
@@ -2066,10 +2127,8 @@ class AgentApp(App[None]):
             event.stop()
 
     async def action_clear_log(self) -> None:
+        await self._close_answer()
         await self.query_one("#log", VerticalScroll).remove_children()
-        self._current_md = None
-        self._response_text = ""
-        self._declined = False
         self._tool_status = None
         # Removed with every other child, so what is left here is a detached widget. Dropped
         # rather than folded, because the pane it pointed at is gone with the rest of the log.
