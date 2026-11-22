@@ -43,6 +43,7 @@ from axio_transport_google import (
     _tool_name_from_id,
     _Turn,
     _usage,
+    format_grounded_response,
     valid_thinking_levels,
 )
 from axio_transport_google._generated_types import Part
@@ -317,31 +318,25 @@ def test_google_search_with_function_tools() -> None:
     assert body["tools"][1] == {"googleSearch": {}}
 
 
-def test_format_search_response_with_grounding() -> None:
-    data = {
-        "candidates": [
-            {
-                "content": {"parts": [{"text": "Python 3.14 is the latest release."}]},
-                "groundingMetadata": {
-                    "webSearchQueries": ["latest python version"],
-                    "groundingChunks": [
-                        {"web": {"uri": "https://www.python.org", "title": "Python.org"}},
-                        {"web": {"uri": "https://en.wikipedia.org/wiki/Python", "title": "Wikipedia"}},
-                    ],
-                },
-            }
-        ]
+def test_format_grounded_response() -> None:
+    grounding = {
+        "webSearchQueries": ["latest python version"],
+        "groundingChunks": [
+            {"web": {"uri": "https://www.python.org", "title": "Python.org"}},
+            {"web": {"uri": "https://en.wikipedia.org/wiki/Python", "title": "Wikipedia"}},
+        ],
     }
-    formatted = GoogleTransport._format_search_response(data)
+    formatted = format_grounded_response("Python 3.14 is the latest release.", grounding)
     assert "Python 3.14 is the latest release." in formatted
     assert "Sources:" in formatted
     assert "- [Python.org](https://www.python.org)" in formatted
     assert "- [Wikipedia](https://en.wikipedia.org/wiki/Python)" in formatted
 
 
-def test_format_search_response_empty() -> None:
-    assert GoogleTransport._format_search_response({}) == "No search results found."
-    assert GoogleTransport._format_search_response({"candidates": []}) == "No search results found."
+def test_format_grounded_response_empty() -> None:
+    assert format_grounded_response("", None) == "No search results found."
+    assert format_grounded_response("", {}) == "No search results found."
+    assert format_grounded_response("Only text", None) == "Only text"
 
 
 # ---------------------------------------------------------------------------

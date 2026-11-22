@@ -529,7 +529,7 @@ A session yields the realtime events described in {doc}`events` -
 and clearing local playback, use the duration actually played for that content part
 to reconcile server context. `RealtimeAgent.truncate()` checks this capability and
 raises `NotImplementedError` if unavailable. Existing sessions do not need to
-implement it. See the [OpenAI package example](../packages/axio-transport-openai.md)
+implement it. See the {doc}`OpenAI package example <../packages/axio-transport-openai>`
 for multimodal input, readiness and transcript collection.
 
 `RealtimeToolBatch` optionally adds `send_tool_results(list[RealtimeToolResponse])`

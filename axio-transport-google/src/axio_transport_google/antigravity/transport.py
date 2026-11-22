@@ -29,6 +29,7 @@ from axio_transport_google import (
     _build_tools_json,
     _Turn,
     _usage,
+    format_grounded_response,
     valid_thinking_levels,
 )
 
@@ -336,6 +337,11 @@ class AntigravityTransport:
 
     async def search(self, query: str, *, model: str | None = None) -> str:
         """Perform a Google Search query via Gemini grounding and return the grounded answer with sources."""
+        if self.session is None:
+            async with aiohttp.ClientSession() as session:
+                transport = replace(self, session=session)
+                return await transport.search(query, model=model)
+
         if not self.project or not self.model.id:
             await self.fetch_models()
         model_id = model or self.model.id
@@ -373,13 +379,4 @@ class AntigravityTransport:
                         text_parts.append(part["text"])
                 if cand.get("groundingMetadata"):
                     grounding = cand["groundingMetadata"]
-        return GoogleTransport._format_search_response(
-            {
-                "candidates": [
-                    {
-                        "content": {"parts": [{"text": "".join(text_parts)}]},
-                        "groundingMetadata": grounding,
-                    }
-                ]
-            }
-        )
+        return format_grounded_response("".join(text_parts), grounding)

@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import copy
 import json
 import logging
 import os
 from collections import deque
 from collections.abc import AsyncIterator, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, ClassVar, Final, Protocol, cast
 
 import aiohttp
@@ -91,9 +90,6 @@ class _RefreshableCredentials(Protocol):
     token: str | None
 
     def refresh(self, request: object) -> None: ...
-
-
-# ── Thinking level helpers ──────────────────────────────────────────
 
 
 def valid_thinking_levels(model_id: str) -> tuple[str, ...] | None:
@@ -316,9 +312,6 @@ _DEVELOPER_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 #   https://aiplatform.googleapis.com/$discovery/rest?version=v1beta1
 
 
-# ── The payload shapes streamGenerateContent sends ───────────────────────────────────────────
-
-
 @dataclass(frozen=True, slots=True)
 class InlineData(Wire):
     mimeType: str = ""
@@ -411,9 +404,6 @@ def _usage(um: UsageMetadata, *, final: bool = False) -> Usage:
         # The provider publishes the sum it expects, so this catches the day it changes the rule.
         logger.warning("usageMetadata total is %d, the parts add to %d", um.totalTokenCount, usage.total_tokens)
     return usage
-
-
-# ── JSON payload builders (no SDK dependency) ───────────────────────
 
 
 def _build_tools_json(tools: list[Tool[Any]]) -> list[ToolDict]:
@@ -631,7 +621,32 @@ def _media_event(part: ContentPart, at: int) -> StreamEvent:
     return ProviderEvent(provider="google", kind="inlineData", data=dict(part.raw), index=at)
 
 
-# ── Transport ───────────────────────────────────────────────────────
+def format_grounded_response(text: str, grounding: dict[str, Any] | None) -> str:
+    """Format grounded response text with markdown sources from groundingMetadata."""
+    chunks = (grounding or {}).get("groundingChunks", [])
+    sources: list[str] = []
+    seen: set[str] = set()
+
+    for chunk in chunks:
+        if isinstance(chunk, dict):
+            web = chunk.get("web")
+            if isinstance(web, dict):
+                uri = str(web.get("uri", "")).strip()
+                title = str(web.get("title", "")).strip()
+                if uri and uri not in seen:
+                    seen.add(uri)
+                    label = title if title else uri
+                    sources.append(f"- [{label}]({uri})")
+
+    clean_text = text.strip()
+    if not clean_text and not sources:
+        return "No search results found."
+
+    if sources:
+        sources_md = "\n".join(sources)
+        return f"{clean_text}\n\nSources:\n{sources_md}" if clean_text else f"Sources:\n{sources_md}"
+
+    return clean_text
 
 
 @dataclass(slots=True)
@@ -703,8 +718,6 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport,
         elif not self.thinking_level:
             self.thinking_level = None
 
-    # ── Auth & URL helpers ──
-
     def _get_api_key(self) -> str:
         return self.api_key or os.environ.get("GEMINI_API_KEY", "")
 
@@ -768,8 +781,6 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport,
         """Valid thinkingLevel values for the current model, or None if budget-based (2.5)."""
         return valid_thinking_levels(self.model.id)
 
-    # ── Generation config ──
-
     def _build_generation_config_json(self) -> GenerationConfig:
         config: GenerationConfig = {
             "maxOutputTokens": self.max_output_tokens or self.model.max_output_tokens,
@@ -804,8 +815,6 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport,
         if Capability.image_generation in self.model.capabilities:
             config["responseModalities"] = ["TEXT", "IMAGE"]
         return config
-
-    # ── Streaming ──
 
     def stream(self, messages: list[Message], tools: list[Tool[Any]], system: str) -> AsyncIterator[StreamEvent]:
         if self.model.id.startswith("anthropic/"):
@@ -1069,53 +1078,11 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport,
             index=at, tool_use_id=call_id, partial_json=json.dumps(dict(call.args)) if call.args else "{}"
         )
 
-    # ── Search / Grounding ──
-
-    @staticmethod
-    def _format_search_response(data: dict[str, Any]) -> str:
-        candidates = data.get("candidates", [])
-        if not candidates:
-            return "No search results found."
-
-        candidate = candidates[0]
-        parts = candidate.get("content", {}).get("parts", [])
-        text = "".join(part.get("text", "") for part in parts if isinstance(part, dict) and "text" in part).strip()
-
-        grounding = candidate.get("groundingMetadata") or {}
-        chunks = grounding.get("groundingChunks", [])
-        sources: list[str] = []
-        seen_urls: set[str] = set()
-
-        for chunk in chunks:
-            if not isinstance(chunk, dict):
-                continue
-            web = chunk.get("web") or {}
-            if not isinstance(web, dict):
-                continue
-            uri = str(web.get("uri", "")).strip()
-            title = str(web.get("title", "")).strip()
-            if uri and uri not in seen_urls:
-                seen_urls.add(uri)
-                label = title if title else uri
-                sources.append(f"- [{label}]({uri})")
-
-        if not text and not sources:
-            return "No search results found."
-
-        if sources:
-            sources_block = "\n".join(sources)
-            if text:
-                return f"{text}\n\nSources:\n{sources_block}"
-            return f"Sources:\n{sources_block}"
-
-        return text
-
     async def search(self, query: str, *, model: str | None = None) -> str:
         """Search the web using Google Search grounding via Gemini."""
         if self.session is None:
             async with aiohttp.ClientSession() as session:
-                transport = copy.copy(self)
-                transport.session = session
+                transport = replace(self, session=session)
                 return await transport.search(query, model=model)
 
         model_id = model or (self.model.id if Capability.text in self.model.capabilities else "gemini-3.8-flash")
@@ -1141,9 +1108,14 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport,
                 raise StreamError(f"Gemini search {resp.status}: {error_text[:1000]}")
             data = await resp.json()
 
-        return self._format_search_response(data)
+        candidates = data.get("candidates", [])
+        if not candidates:
+            return "No search results found."
 
-    # ── Image / Veo generation ──
+        cand = candidates[0]
+        parts = cand.get("content", {}).get("parts", [])
+        text = "".join(part.get("text", "") for part in parts if isinstance(part, dict) and "text" in part)
+        return format_grounded_response(text, cand.get("groundingMetadata"))
 
     async def generate_images(self, prompt: str, *, model: str | None = None, n: int = 1) -> list[bytes]:
         """Generate images via Gemini Nano Banana (generateContent with IMAGE response modality)."""
@@ -1261,8 +1233,6 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport,
                         logger.warning("Veo video download failed: %d", resp.status)
         return results
 
-    # ── Model listing ──
-
     async def fetch_models(self) -> None:
         """Fetch available Gemini models.
 
@@ -1330,8 +1300,6 @@ class GoogleTransport(CompletionTransport, ImageGenTransport, VideoGenTransport,
         except Exception:
             logger.warning("fetch_models failed, using defaults", exc_info=True)
             self.models = GENAI_MODELS
-
-    # ── Serialization ──
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {

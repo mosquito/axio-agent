@@ -13,18 +13,14 @@ from axio_transport_google.tools import generate_image, generate_video, google_s
 
 
 @pytest.fixture(autouse=True)
-async def _reset_tools_transport(monkeypatch: pytest.MonkeyPatch) -> None:
+def _reset_tools_transport(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ensure tools.transport, credentials, and env are clean for each test."""
     monkeypatch.setattr(tools, "transport", None)
-    monkeypatch.setattr(tools, "_search_transport", None)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     # Isolate tests from any real antigravity credentials on the machine
     from axio_transport_google.antigravity import AntigravityFileCredentials
 
     monkeypatch.setattr(AntigravityFileCredentials, "list_records", AsyncMock(return_value=[]))
-    if tools._search_session is not None and not tools._search_session.closed:
-        await tools._search_session.close()
-    monkeypatch.setattr(tools, "_search_session", None)
 
 
 async def test_tools_unconfigured_error() -> None:

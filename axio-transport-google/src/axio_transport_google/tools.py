@@ -6,7 +6,6 @@ import logging
 import os
 from typing import Any, Protocol, runtime_checkable
 
-import aiohttp
 from axio.blocks import ImageBlock, TextBlock, VideoBlock
 from axio.field import StrictStr
 from axio.transport import ImageGenTransport, SearchTransport, VideoGenTransport
@@ -19,56 +18,28 @@ class _GenTransport(ImageGenTransport, VideoGenTransport, Protocol):
     """Combined Protocol — provides both image and video generation."""
 
 
-# Set by the host app (e.g. axio-tui) to the active Google transport.
-# ``None`` disables the tools with a configuration error message.
+# Set by the host app (e.g. axio-tui, axio-repl) to the active Google/Antigravity transport.
 transport: Any | None = None
-
-_search_session: aiohttp.ClientSession | None = None
-_search_transport: SearchTransport | None = None
 
 
 async def _resolve_search_transport() -> SearchTransport | None:
-    global _search_session, _search_transport
-    if transport is not None and (isinstance(transport, SearchTransport) or hasattr(transport, "search")):
-        return transport  # type: ignore[no-any-return]
+    if transport is not None and isinstance(transport, SearchTransport):
+        return transport
 
-    # Check for logged-in Antigravity account
     try:
-        from .antigravity import (
-            AntigravityFileCredentials,
-            AntigravityOAuth,
-            AntigravitySession,
-            AntigravityTransport,
-            resolve_account,
-        )
+        from .antigravity import AntigravityFileCredentials, AntigravityTransport
 
-        store = AntigravityFileCredentials()
-        records = await store.list_records()
-        if records:
-            if _search_transport is None or not isinstance(_search_transport, AntigravityTransport):
-                if _search_session is None or _search_session.closed:
-                    _search_session = aiohttp.ClientSession()
-                account_id = await resolve_account(store)
-                oauth = AntigravityOAuth(_search_session)
-                account_session = AntigravitySession(store, oauth, account_id)
-                t = AntigravityTransport(session=_search_session, account=account_session)
-                await t.fetch_models()
-                _search_transport = t
-            return _search_transport
+        if await AntigravityFileCredentials().list_records():
+            return AntigravityTransport()
     except Exception as exc:
-        logger.debug("Failed to initialize Antigravity for search: %s", exc)
+        logger.debug("Antigravity credential check failed: %s", exc)
 
-    # Check for GEMINI_API_KEY in environment
     api_key = os.environ.get("GEMINI_API_KEY", "")
     if api_key:
         from . import GoogleTransport
 
-        if _search_transport is None or not isinstance(_search_transport, GoogleTransport):
-            if _search_session is None or _search_session.closed:
-                _search_session = aiohttp.ClientSession()
+        return GoogleTransport(api_key=api_key)
 
-            _search_transport = GoogleTransport(api_key=api_key, session=_search_session)
-        return _search_transport
     return None
 
 
@@ -126,15 +97,6 @@ async def generate_video(
     return result
 
 
-async def close_tools() -> None:
-    """Close any ad-hoc HTTP session opened by tools."""
-    global _search_session, _search_transport
-    if _search_session is not None and not _search_session.closed:
-        await _search_session.close()
-    _search_session = None
-    _search_transport = None
-
-
 async def google_search(
     query: StrictStr,
 ) -> str:
@@ -142,10 +104,7 @@ async def google_search(
     Returns grounded factual search results with sources and URLs."""
     active_transport = await _resolve_search_transport()
     if active_transport is None:
-        return (
-            "Error: Google Search transport not configured (no active Google/Antigravity transport, "
-            "logged-in Antigravity account, or GEMINI_API_KEY)."
-        )
+        return "Error: Google search transport not configured (log in with axio-antigravity or set GEMINI_API_KEY)."
     try:
         return await active_transport.search(query)
     except Exception as exc:

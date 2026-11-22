@@ -268,7 +268,7 @@ returning from `connect()`. It accepts ordered text/image messages, exposes fina
 transcripts with item/response IDs, and supports explicit truncation of unplayed
 audio through `RealtimeAgent.truncate()`. The application still owns speaker
 queue clearing and measurement of played duration. See the
-[OpenAI package guide](../packages/axio-transport-openai.md#camera-frames-and-interrupted-playback)
+[OpenAI package guide](https://github.com/mosquito/axio-agent/tree/master/axio-transport-openai#camera-frames-and-interrupted-playback)
 for the complete playback and archive contract.
 
 For file-based voice turns, the exported `OpenAISTTTransport` and
