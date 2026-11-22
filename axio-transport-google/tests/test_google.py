@@ -43,6 +43,7 @@ from axio_transport_google import (
     _tool_name_from_id,
     _Turn,
     _usage,
+    valid_thinking_levels,
 )
 from axio_transport_google._generated_types import Part
 
@@ -512,6 +513,27 @@ def test_flash_lite_image_uses_its_published_thinking_levels() -> None:
     transport = GoogleTransport(model=GENAI_MODELS["gemini-3.1-flash-lite-image"])
 
     assert transport.get_thinking_options() == ("MINIMAL", "HIGH")
+
+
+def test_gemini_4_argon_in_registry_and_uses_published_thinking_levels() -> None:
+    argon = GENAI_MODELS["gemini-4-argon"]
+    assert argon.context_window == 1_048_576
+    assert argon.max_output_tokens == 65_536
+    assert Capability.reasoning in argon.capabilities
+    assert Capability.tool_use in argon.capabilities
+
+    transport = GoogleTransport(model=argon, thinking_level="HIGH")
+    assert transport.get_thinking_options() == ("LOW", "MEDIUM", "HIGH")
+    config = transport._build_generation_config_json()
+    assert config["thinkingConfig"] == {"includeThoughts": True, "thinkingLevel": "HIGH"}
+
+
+def test_valid_thinking_levels_gemini_4() -> None:
+    assert valid_thinking_levels("gemini-4-argon") == ("LOW", "MEDIUM", "HIGH")
+    assert valid_thinking_levels("gemini-4-argon-high") == ("LOW", "MEDIUM", "HIGH")
+    assert valid_thinking_levels("gemini-4-argon-medium") == ("LOW", "MEDIUM", "HIGH")
+    assert valid_thinking_levels("gemini-4-argon-low") == ("LOW", "MEDIUM", "HIGH")
+    assert valid_thinking_levels("gemini-4-hydrogen-sonar") == ("LOW", "MEDIUM", "HIGH")
 
 
 class TestUsageAccounting:

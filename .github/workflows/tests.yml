@@ -106,7 +106,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install PortAudio runtime
         if: contains(fromJSON('["axio-audio", "examples/realtime_chat"]'), matrix.package.name)
-        run: sudo apt-get update && sudo apt-get install -y libportaudio2
+        run: |
+          sudo apt-get update && sudo apt-get install -y libportaudio2 pulseaudio
+          pulseaudio --start --exit-idle-time=-1 || true
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python }}
